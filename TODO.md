@@ -17,7 +17,8 @@
 - [ ] Taps under 100 ms of processing (about 300-450 ms now). Layout recalculates
       the whole screen on each tap (about 140 ms); memory cleanup adds about 160 ms on
       some taps.
-- [ ] Don't lose touches during a render or panel refresh.
+- [ ] Don't lose touches during a panel refresh (renders sample between bands;
+      a refresh blocks 0.2-0.7 s, and only one gesture is held at a time).
 - [ ] Check grey fills on the real panel, especially after several fast refreshes:
       keep them, use a lighter shade, or go back to outlines.
 - [ ] Offer a pressed look from a button's own pressed style (not an invert).

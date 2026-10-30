@@ -77,6 +77,7 @@ fun onePaperMonoRun(var app: OneApp, theme: Theme, icons: OneIconSource): void {
     paperMonoFrontlight(control, 26)
     if (!paperMonoGesturesOpen(control)) println("papermono: no touch")
     var state = oneEpaperState(onePaperMonoOptions())
+    state.onBand = { paperMonoGestureSample() }
     var started = onePaperMonoMilliseconds()
     onePaperMonoShow(session, oneEpaperRender(app, theme, state, icons))
     println("papermono: first frame in ${onePaperMonoMilliseconds() - started} ms")

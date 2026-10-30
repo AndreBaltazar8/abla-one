@@ -69,7 +69,9 @@ class OneEpaperState(
     // Each scroll area's panel offset as last drawn (oneEpaperPanelOffset), and
     // the scroll areas each paint sits in ("|key|key|"), to shift rather than redraw.
     val offsets: Map<string, int>,
-    var owners: array<string>
+    var owners: array<string>,
+    // Called between bands of a render: a device reads its touch panel here.
+    var onBand: () -> void = { }
 )
 
 fun oneEpaperBandSurface(options: OneEpaperOptions): OneSurface {
@@ -258,6 +260,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
         while (y0 < area.y + area.h) {
             val remaining = area.y + area.h - y0
             val rows = if (remaining > oneEpaperBandRows) oneEpaperBandRows else remaining
+            state.onBand()
             oneSurfaceMoveTo(state.surface, area.x, y0, area.x + area.w, rows, background)
             oneRasterInto(state.surface, scaled, icons)
             drawn = drawn + area.w * rows
