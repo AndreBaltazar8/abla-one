@@ -85,6 +85,25 @@ fun main: int {
     }
     expect(area < 800 * 480 / 10, "only a small area (${area} px)")
 
+    // Only the bands that changed were drawn, and the planes equal a fresh render.
+    expect(state.bandsDrawn > 0 && state.bandsDrawn <= 6, "a tap draws few bands (${state.bandsDrawn})")
+    var freshApp = Gallery()
+    freshApp.count = app.count
+    var fresh = oneEpaperState(onePaperMonoOptions())
+    oneEpaperRender(freshApp, t, fresh, noIcons())
+    expectEqual(fresh.bandsDrawn, 20, "a first frame draws every band")
+    var planesMatch = true
+    var planeAt = 0
+    while (planeAt < 96000) {
+        if (fresh.planes[planeAt] != state.planes[planeAt]) planesMatch = false
+        planeAt = planeAt + 1
+    }
+    expect(planesMatch, "skipping bands leaves the same planes as a fresh render")
+
+    // Borders and rules are at least two panel pixels.
+    expectEqual(oneEpaperScaleSides("1 0 1 0", 133, 2), "2 0 2 0", "thin borders widen")
+    expectEqual(oneEpaperScaleSides("3", 133, 2), "3", "thick ones scale")
+
     // Wire format: header and the rectangle bytes.
     val wire = oneEpaperWire(counted, 800, 480)
     expect(wire.slice(0, 4) == "ONE1", "magic")

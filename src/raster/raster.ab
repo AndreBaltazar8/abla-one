@@ -14,29 +14,40 @@ import "inter_glyphs.ab"
 // `pixels` holds rows originY… of a width×height frame: all of them, or one
 // band (oneSurfaceBand), which bounds memory on a small device.
 // `scratch` is fills' coverage buffer, kept so drawing does not allocate.
-class OneSurface(val width: int, val height: int, val pixels: array<int>, val clips: array<int>, var originY: int = 0, val scratch: array<int> = []) {
-    fun clipX0(): int = if (clips.size == 0) 0 else clips[clips.size - 4]
-    fun clipY0(): int = if (clips.size == 0) 0 else clips[clips.size - 3]
-    fun clipX1(): int = if (clips.size == 0) width else clips[clips.size - 2]
-    fun clipY1(): int = if (clips.size == 0) height else clips[clips.size - 1]
+class OneSurface(val width: int, val height: int, val pixels: array<int>, val clips: array<int>, var originY: int = 0, val scratch: array<int> = [], var clipLeft: int = 0, var clipTop: int = 0, var clipRight: int = 0, var clipBottom: int = 0) {
+    // The innermost clip, kept in fields: blend reads it for every pixel.
+    fun clipX0(): int = clipLeft
+    fun clipY0(): int = clipTop
+    fun clipX1(): int = clipRight
+    fun clipY1(): int = clipBottom
+    fun syncClip(): void {
+        val n = clips.size
+        clipLeft = if (n == 0) 0 else clips[n - 4]
+        clipTop = if (n == 0) 0 else clips[n - 3]
+        clipRight = if (n == 0) width else clips[n - 2]
+        clipBottom = if (n == 0) height else clips[n - 1]
+        return
+    }
     fun pushClip(x: int, y: int, w: int, h: int): void {
-        val x0 = if (x > clipX0()) x else clipX0()
-        val y0 = if (y > clipY0()) y else clipY0()
-        val x1 = if (x + w < clipX1()) x + w else clipX1()
-        val y1 = if (y + h < clipY1()) y + h else clipY1()
+        val x0 = if (x > clipLeft) x else clipLeft
+        val y0 = if (y > clipTop) y else clipTop
+        val x1 = if (x + w < clipRight) x + w else clipRight
+        val y1 = if (y + h < clipBottom) y + h else clipBottom
         clips.append(x0)
         clips.append(y0)
         clips.append(x1)
         clips.append(y1)
+        syncClip()
         return
     }
     fun popClip(): void {
         if (clips.size >= 4) clips.truncate(clips.size - 4)
+        syncClip()
         return
     }
     // Blends `color` (0xRRGGBB) at coverage 0..255 over the pixel.
     fun blend(x: int, y: int, color: int, alpha: int): void {
-        if (alpha <= 0 || x < clipX0() || y < clipY0() || x >= clipX1() || y >= clipY1()) return
+        if (alpha <= 0 || x < clipLeft || y < clipTop || x >= clipRight || y >= clipBottom) return
         val i = (y - originY) * width + x
         if (alpha >= 255) {
             pixels[i] = color
@@ -52,11 +63,12 @@ class OneSurface(val width: int, val height: int, val pixels: array<int>, val cl
     }
 }
 
-fun oneSurface(width: int, height: int, background: int): OneSurface = OneSurface(width, height, filledArray(width * height, background), [])
+fun oneSurface(width: int, height: int, background: int): OneSurface =
+    OneSurface(width, height, filledArray(width * height, background), [], 0, [], 0, 0, width, height)
 
 // Rows y0 until y0 + rows of a width×height frame: drawing is clipped to them.
 fun oneSurfaceBand(width: int, height: int, y0: int, rows: int, background: int): OneSurface =
-    OneSurface(width, height, filledArray(width * rows, background), [0, y0, width, y0 + rows], y0)
+    OneSurface(width, height, filledArray(width * rows, background), [0, y0, width, y0 + rows], y0, [], 0, y0, width, y0 + rows)
 
 // Moves a band surface to the band starting at y0 (as many rows as it has),
 // cleared to `background`: one surface serves every band of a frame.
@@ -72,6 +84,7 @@ fun oneSurfaceMoveBand(var surface: OneSurface, y0: int, background: int): void 
     surface.clips.append(surface.width)
     surface.clips.append(y0 + surface.pixels.size / surface.width)
     surface.originY = y0
+    surface.syncClip()
     return
 }
 
@@ -416,30 +429,33 @@ fun oneCos(a: f64): f64 = oneSin(a + 1.5707963)
 
 // --- glyphs ----------------------------------------------------------------------------
 
-val oneGlyphWords: array<array<int>> = []
+// Each weight's outlines, decoded when first drawn: little-endian 16-bit
+// words, kept as bytes (a small device's heap has no room for an int each).
+val oneGlyphBytes: array<string> = []
 val oneGlyphCodes: Map<int, int> = Map()
 
-fun oneGlyphTable(weight: int): array<int> {
-    if (oneGlyphWords.size == 0) {
+fun oneGlyphTable(weight: int): string {
+    if (oneGlyphBytes.size == 0) {
         var i = 0
         while (i < oneInterCodes.size) {
             oneGlyphCodes.set(oneInterCodes[i], i)
             i = i + 1
         }
-        for (data in [oneGlyphs400, oneGlyphs500, oneGlyphs600, oneGlyphs700]) {
-            val bytes = base64Decode(data)
-            val words: array<int> = []
-            var j = 0
-            while (j + 1 < bytes.size) {
-                var v = bytes[j] + bytes[j + 1] * 256
-                if (v >= 32768) v = v - 65536
-                words.append(v)
-                j = j + 2
-            }
-            oneGlyphWords.append(words)
+        var w = 0
+        while (w < 4) {
+            oneGlyphBytes.append("")
+            w = w + 1
         }
     }
-    oneGlyphWords[weight]
+    if (oneGlyphBytes[weight] == "") {
+        oneGlyphBytes[weight] = base64Decode(if (weight == 0) oneGlyphs400 else if (weight == 1) oneGlyphs500 else if (weight == 2) oneGlyphs600 else oneGlyphs700)
+    }
+    oneGlyphBytes[weight]
+}
+
+fun oneGlyphWord(bytes: string, index: int): int {
+    val v = bytes[index * 2] + bytes[index * 2 + 1] * 256
+    if (v >= 32768) v - 65536 else v
 }
 
 fun oneGlyphOffset(weight: int, index: int): int =
@@ -454,12 +470,12 @@ fun oneGlyphPath(var path: OnePath, code: int, weight: int, size: f64, x: f64, b
     val scale = size / f64FromInt(oneGlyphUnitsPerEm)
     if (found == null) return size * 0.6
     var p = oneGlyphOffset(weight, found)
-    val advance = f64FromInt(words[p]) * scale
-    val contours = words[p + 1]
+    val advance = f64FromInt(oneGlyphWord(words, p)) * scale
+    val contours = oneGlyphWord(words, p + 1)
     p = p + 2
     var c = 0
     while (c < contours) {
-        val count = words[p]
+        val count = oneGlyphWord(words, p)
         p = p + 1
         // TrueType quadratic contours: implied on-curve midpoints between
         // consecutive off-curve points.
@@ -468,9 +484,9 @@ fun oneGlyphPath(var path: OnePath, code: int, weight: int, size: f64, x: f64, b
         val on: array<bool> = []
         var k = 0
         while (k < count) {
-            px.append(x + f64FromInt(words[p]) * scale)
-            py.append(baseline - f64FromInt(words[p + 1]) * scale)
-            on.append(words[p + 2] == 1)
+            px.append(x + f64FromInt(oneGlyphWord(words, p)) * scale)
+            py.append(baseline - f64FromInt(oneGlyphWord(words, p + 1)) * scale)
+            on.append(oneGlyphWord(words, p + 2) == 1)
             p = p + 3
             k = k + 1
         }
@@ -767,15 +783,19 @@ fun oneRasterBand(frame: OneFrame, background: string, icons: OneIconSource, y0:
     surface
 }
 
+// Whether a paint can draw in rows top until bottom (text and icons may reach
+// a little past their box); clips always count.
+fun onePaintReaches(p: OnePaint, top: int, bottom: int): bool {
+    if (p.op == "clip" || p.op == "unclip") return true
+    val reach = if (p.op == "text") p.h else 0
+    p.y - reach < bottom && p.y + p.h + reach > top
+}
+
 fun oneRasterInto(var surface: OneSurface, frame: OneFrame, icons: OneIconSource): void {
     val bandTop = surface.originY
     val bandBottom = surface.originY + surface.pixels.size / surface.width
     for (p in frame.paints) {
-        // (Text and icons may reach a little past their box.)
-        val reach = if (p.op == "text") p.h else 0
-        val outside = p.op != "clip" && p.op != "unclip" &&
-            (p.y - reach >= bandBottom || p.y + p.h + reach <= bandTop)
-        if (outside) {
+        if (!onePaintReaches(p, bandTop, bandBottom)) {
         } else if (p.op == "rect") {
             var path = onePath()
             oneRoundRectPath(f64FromInt(p.x), f64FromInt(p.y), f64FromInt(p.w), f64FromInt(p.h), f64FromInt(p.radius), path)

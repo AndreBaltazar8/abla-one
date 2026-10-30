@@ -26,7 +26,9 @@ class OneEpaperOptions(
     // A full quality refresh after this many partial ones (clears ghosting).
     val fullEvery: int,
     // Above this share of the panel (percent), refresh fully.
-    val fullArea: int
+    val fullArea: int,
+    // The thinnest border or rule, in panel pixels: one is too faint on e-paper.
+    val minStroke: int = 2
 )
 
 fun onePaperMonoOptions(): OneEpaperOptions = OneEpaperOptions(480, 800, 133, "#ffffff", 12, 45)
@@ -53,11 +55,17 @@ class OneEpaperState(
     var frame: OneFrame,
     var full: bool,
     // Scroll offsets by scroll area (layout path), in logical pixels.
-    val scroll: Map<string, int>
+    val scroll: Map<string, int>,
+    // Each band's signature (oneEpaperBandSignature) as last drawn, and how
+    // many bands the last render drew: unchanged bands are not drawn again.
+    val bands: array<int>,
+    var bandsDrawn: int,
+    // The band surface (and its fill scratch), kept between renders.
+    var surface: OneSurface
 )
 
 fun oneEpaperState(options: OneEpaperOptions): OneEpaperState =
-    OneEpaperState(options, filledArray(options.width * options.height / 4, 0), 0, 0, OneFrame([], [], [], 0, 0), true, Map())
+    OneEpaperState(options, filledArray(options.width * options.height / 4, 0), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), filledArray(options.height / oneEpaperBandRows, 0), 0, oneSurfaceBand(options.width, options.height, 0, oneEpaperBandRows, oneColorValue(options.background)))
 
 // Portrait rows rasterized at a time: a multiple of 8 (a canvas byte) that
 // divides 800. A whole frame at once would take a 480×800 surface, more
@@ -87,17 +95,24 @@ val oneEpaperDither: array<int> = [-30, 18, -22, 26, -14, 2, -6, 10, -18, 30, -2
 fun oneEpaperGray(rgb: int): int = (((rgb >> 16) & 255) * 299 + ((rgb >> 8) & 255) * 587 + (rgb & 255) * 114) / 1000
 
 // The paint list scaled from logical to panel pixels.
-fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int): OneFrame {
+fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int, minStroke: int = 2): OneFrame {
     val paints: array<OnePaint> = []
     for (p in frame.paints) {
         val x = p.x * scale / 100
         val y = p.y * scale / 100
-        paints.append(OnePaint(p.op, x, y, (p.x + p.w) * scale / 100 - x, (p.y + p.h) * scale / 100 - y, p.radius * scale / 100, p.color, p.text, p.size * scale / 100, p.weight, oneEpaperScaleSides(p.sides, scale)))
+        var w = (p.x + p.w) * scale / 100 - x
+        var h = (p.y + p.h) * scale / 100 - y
+        // A thin rule keeps the thinnest width the panel shows well.
+        if (p.op == "rect" && w > 0 && h > 0) {
+            if (w < minStroke) w = minStroke
+            if (h < minStroke) h = minStroke
+        }
+        paints.append(OnePaint(p.op, x, y, w, h, p.radius * scale / 100, p.color, p.text, p.size * scale / 100, p.weight, oneEpaperScaleSides(p.sides, scale, minStroke)))
     }
     OneFrame(paints, frame.hits, frame.visible, width, height)
 }
 
-fun oneEpaperScaleSides(sides: string, scale: int): string {
+fun oneEpaperScaleSides(sides: string, scale: int, minStroke: int): string {
     if (sides == "") return ""
     var out = ""
     var start = 0
@@ -105,7 +120,7 @@ fun oneEpaperScaleSides(sides: string, scale: int): string {
     while (i <= sides.size) {
         if (i == sides.size || sides[i] == 32) {
             val n = oneParseInt(sides.slice(start, i), 0)
-            val scaled = if (n > 0 && n * scale / 100 == 0) 1 else n * scale / 100
+            val scaled = if (n > 0 && n * scale / 100 < minStroke) minStroke else n * scale / 100
             out = if (out == "") "$scaled" else "$out $scaled"
             start = i + 1
         }
@@ -123,7 +138,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     var ui = oneUiSized("epaper", theme, lw)
     val frame = onePaintFrame(oneLayout(app.render(ui), theme, "epaper", lw, lh, state.scroll), lw, lh)
     state.frame = frame
-    val scaled = oneEpaperScaleFrame(frame, o.scale, o.width, o.height)
+    val scaled = oneEpaperScaleFrame(frame, o.scale, o.width, o.height, o.minStroke)
     // Rasterize band by band, quantise each portrait column of a band into
     // canvas bytes (eight portrait rows are one physical byte), and mark the
     // 8×8 tiles whose bytes changed.
@@ -138,12 +153,20 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     // One band surface (and its fill scratch) serves every band: rendering
     // allocates little, which a small heap's free lists cannot afford.
     val background = oneColorValue(o.background)
-    var surface = oneSurfaceBand(o.width, o.height, 0, oneEpaperBandRows, background)
+    var drawn = 0
     var y0 = 0
     while (y0 < o.height) {
         val rows = oneEpaperBandRows
-        oneSurfaceMoveBand(surface, y0, background)
-        oneRasterInto(surface, scaled, icons)
+        val band = y0 / rows
+        val signature = oneEpaperBandSignature(scaled, y0, rows)
+        if (!state.full && state.bands[band] == signature) {
+            y0 = y0 + rows
+            continue
+        }
+        state.bands[band] = signature
+        drawn = drawn + 1
+        oneSurfaceMoveBand(state.surface, y0, background)
+        oneRasterInto(state.surface, scaled, icons)
         var x = 0
         while (x < o.width) {
             val py = oneEpaperPhysicalY(x, 0, o.width)
@@ -154,7 +177,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
                 var k = 0
                 while (k < 8) {
                     val y = column * 8 + k
-                    val level = oneEpaperLevel(oneEpaperGray(surface.pixels[(y - y0) * o.width + x]), y, py)
+                    val level = oneEpaperLevel(oneEpaperGray(state.surface.pixels[(y - y0) * o.width + x]), y, py)
                     if (level % 2 == 1) lsb = lsb + oneEpaperBit(k)
                     if (level >= 2) msb = msb + oneEpaperBit(k)
                     k = k + 1
@@ -175,6 +198,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
         }
         y0 = y0 + rows
     }
+    state.bandsDrawn = drawn
     var rects = oneEpaperRects(dirty, tilesX, tilesY, ph)
     var mode = oneEpaperFastest
     if (rects.size > 0) {
@@ -191,6 +215,29 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
         state.revision = state.revision + 1
     }
     OneEpaperUpdate(state.revision, mode, rects, state.planes)
+}
+
+// A hash of what can draw in a band: bands with the same signature look the same.
+fun oneEpaperBandSignature(frame: OneFrame, y0: int, rows: int): int {
+    var h = 17
+    for (p in frame.paints) {
+        if (onePaintReaches(p, y0, y0 + rows)) {
+            h = h * 31 + p.x
+            h = h * 31 + p.y
+            h = h * 31 + p.w
+            h = h * 31 + p.h
+            h = h * 31 + p.radius
+            h = h * 31 + p.size
+            h = oneEpaperHashText(oneEpaperHashText(oneEpaperHashText(oneEpaperHashText(oneEpaperHashText(h, p.op), p.color), p.text), p.weight), p.sides)
+        }
+    }
+    h
+}
+
+fun oneEpaperHashText(hash: int, text: string): int {
+    var h = hash * 31 + text.size
+    for (b in text) h = h * 31 + b
+    h
 }
 
 // Dirty tiles as rectangles: runs per tile row, joined downwards while the

@@ -67,6 +67,8 @@ trusted fun onePaperMonoClear(): void {
 fun onePaperMonoRun(var app: OneApp, theme: Theme, icons: OneIconSource): void {
     // Collect after every 512 KiB of new objects: the heap is a few MB.
     runtimeMemorySetCollectionGrowth(524288)
+    // Below the 6 MiB region, and it keeps reclaiming free memory in step.
+    runtimeMemorySetLimit(5242880)
     val control = paperMonoOpen()
     if ((control|0) == 0) return
     onePaperMonoClear()
