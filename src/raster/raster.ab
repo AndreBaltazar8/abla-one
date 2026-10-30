@@ -13,7 +13,8 @@ import "inter_glyphs.ab"
 
 // `pixels` holds rows originY… of a width×height frame: all of them, or one
 // band (oneSurfaceBand), which bounds memory on a small device.
-class OneSurface(val width: int, val height: int, val pixels: array<int>, val clips: array<int>, val originY: int = 0) {
+// `scratch` is fills' coverage buffer, kept so drawing does not allocate.
+class OneSurface(val width: int, val height: int, val pixels: array<int>, val clips: array<int>, var originY: int = 0, val scratch: array<int> = []) {
     fun clipX0(): int = if (clips.size == 0) 0 else clips[clips.size - 4]
     fun clipY0(): int = if (clips.size == 0) 0 else clips[clips.size - 3]
     fun clipX1(): int = if (clips.size == 0) width else clips[clips.size - 2]
@@ -43,10 +44,10 @@ class OneSurface(val width: int, val height: int, val pixels: array<int>, val cl
         }
         val old = pixels[i]
         val inv = 255 - alpha
-        val r = (((color / 65536) % 256) * alpha + ((old / 65536) % 256) * inv) / 255
-        val g = (((color / 256) % 256) * alpha + ((old / 256) % 256) * inv) / 255
-        val b = ((color % 256) * alpha + (old % 256) * inv) / 255
-        pixels[i] = r * 65536 + g * 256 + b
+        val r = (((color >> 16) & 255) * alpha + ((old >> 16) & 255) * inv) / 255
+        val g = (((color >> 8) & 255) * alpha + ((old >> 8) & 255) * inv) / 255
+        val b = ((color & 255) * alpha + (old & 255) * inv) / 255
+        pixels[i] = (r << 16) | (g << 8) | b
         return
     }
 }
@@ -56,6 +57,23 @@ fun oneSurface(width: int, height: int, background: int): OneSurface = OneSurfac
 // Rows y0 until y0 + rows of a width×height frame: drawing is clipped to them.
 fun oneSurfaceBand(width: int, height: int, y0: int, rows: int, background: int): OneSurface =
     OneSurface(width, height, filledArray(width * rows, background), [0, y0, width, y0 + rows], y0)
+
+// Moves a band surface to the band starting at y0 (as many rows as it has),
+// cleared to `background`: one surface serves every band of a frame.
+fun oneSurfaceMoveBand(var surface: OneSurface, y0: int, background: int): void {
+    var i = 0
+    while (i < surface.pixels.size) {
+        surface.pixels[i] = background
+        i = i + 1
+    }
+    surface.clips.clear()
+    surface.clips.append(0)
+    surface.clips.append(y0)
+    surface.clips.append(surface.width)
+    surface.clips.append(y0 + surface.pixels.size / surface.width)
+    surface.originY = y0
+    return
+}
 
 fun oneHex(c: int): int = if (c >= 48 && c <= 57) c - 48 else if (c >= 97 && c <= 102) c - 87 else if (c >= 65 && c <= 70) c - 55 else 0
 
@@ -171,26 +189,43 @@ fun oneFill(var surface: OneSurface, var path: OnePath, color: int, alpha: int):
     val bw = bx1 - bx
     val bh = by1 - by
     if (bw <= 0 || bh <= 0) return
-    val acc: array<f64> = filledArray((bw + 2) * bh, 0.0)
+    // A square-cornered rectangle on whole pixels covers its pixels fully.
+    if (path.ends.size == 1 && path.xs.size == 4 && oneWholePixelRect(path)) {
+        oneFillRect(surface, f64ToInt(minX), f64ToInt(minY), f64ToInt(maxX) - f64ToInt(minX), f64ToInt(maxY) - f64ToInt(minY), color, alpha)
+        return
+    }
+    // Coverage in fixed point (font-rs's signed-area accumulation): positions
+    // in 1/256 px, coverage in 1/65536. Microcontrollers often have no
+    // double-precision FPU, where this is the difference between seconds and
+    // a fraction of one for a screen.
+    val needed = (bw + 2) * bh
+    var cleared = 0
+    while (cleared < needed && cleared < surface.scratch.size) {
+        surface.scratch[cleared] = 0
+        cleared = cleared + 1
+    }
+    while (surface.scratch.size < needed) surface.scratch.append(0)
     var start = 0
     for (end in path.ends) {
         var i = start
         while (i < end) {
             val j = if (i + 1 < end) i + 1 else start
-            oneAccumulateLine(acc, bw + 2, bh, path.xs[i] - f64FromInt(bx), path.ys[i] - f64FromInt(by), path.xs[j] - f64FromInt(bx), path.ys[j] - f64FromInt(by))
+            oneAccumulateLine(surface.scratch, bw + 2, bh, oneFixed(path.xs[i]) - bx * 256, oneFixed(path.ys[i]) - by * 256,
+                oneFixed(path.xs[j]) - bx * 256, oneFixed(path.ys[j]) - by * 256)
             i = i + 1
         }
         start = end
     }
     var y = 0
     while (y < bh) {
-        var sum = 0.0
+        var sum = 0
         var x = 0
+        val row = y * (bw + 2)
         while (x < bw) {
-            sum = sum + acc[y * (bw + 2) + x]
-            var cover = if (sum < 0.0) -sum else sum
-            if (cover > 1.0) cover = 1.0
-            if (cover > 0.002) surface.blend(bx + x, by + y, color, f64ToInt(cover * f64FromInt(alpha) + 0.5))
+            sum = sum + surface.scratch[row + x]
+            var cover = if (sum < 0) 0 - sum else sum
+            if (cover > 65536) cover = 65536
+            if (cover > 131) surface.blend(bx + x, by + y, color, (cover * alpha + 32768) >> 16)
             x = x + 1
         }
         y = y + 1
@@ -198,76 +233,95 @@ fun oneFill(var surface: OneSurface, var path: OnePath, color: int, alpha: int):
     return
 }
 
+// A position in 1/256 px.
+fun oneFixed(v: f64): int = oneFloor(v * 256.0 + 0.5)
+
+// floor(a / b) for b > 0.
+fun oneFloorDiv(a: int, b: int): int = if (a >= 0) a / b else 0 - ((b - 1 - a) / b)
+
+fun oneWholePixelRect(path: OnePath): bool {
+    var i = 0
+    while (i < 4) {
+        if (f64FromInt(f64ToInt(path.xs[i])) != path.xs[i] || f64FromInt(f64ToInt(path.ys[i])) != path.ys[i]) return false
+        i = i + 1
+    }
+    // Two distinct xs and two distinct ys, each edge axis-aligned.
+    var k = 0
+    while (k < 4) {
+        val n = (k + 1) % 4
+        if (path.xs[k] != path.xs[n] && path.ys[k] != path.ys[n]) return false
+        k = k + 1
+    }
+    true
+}
+
 fun oneFloor(v: f64): int {
     val i = f64ToInt(v)
     if (f64FromInt(i) > v) i - 1 else i
 }
 
-// Adds a line's signed area to the accumulation buffer (font-rs draw_line).
-fun oneAccumulateLine(var acc: array<f64>, stride: int, rows: int, x0: f64, y0: f64, x1: f64, y1: f64): void {
+// Adds a line's signed area to the accumulation buffer (font-rs draw_line),
+// in fixed point: positions in 1/256 px, areas in 1/65536 of a pixel.
+fun oneAccumulateLine(var acc: array<int>, stride: int, rows: int, x0: int, y0: int, x1: int, y1: int): void {
     if (y0 == y1) return
-    val dir = if (y0 < y1) 1.0 else -1.0
+    val dir = if (y0 < y1) 1 else -1
     val ax = if (y0 < y1) x0 else x1
     val ay = if (y0 < y1) y0 else y1
     val bxv = if (y0 < y1) x1 else x0
     val byv = if (y0 < y1) y1 else y0
-    val dxdy = (bxv - ax) / (byv - ay)
-    var x = ax
-    var yStart = oneFloor(ay)
-    if (yStart < 0) {
-        x = x - ay * dxdy
-        yStart = 0
-    }
-    var yEnd = oneFloor(byv) + 1
+    val spanX = bxv - ax
+    val spanY = byv - ay
+    var yStart = oneFloorDiv(ay, 256)
+    if (yStart < 0) yStart = 0
+    var yEnd = oneFloorDiv(byv, 256) + 1
     if (yEnd > rows) yEnd = rows
-    if (ay < 0.0) x = ax - ay * dxdy
     var y = yStart
     while (y < yEnd) {
         val linestart = y * stride
-        val top = if (f64FromInt(y) > ay) f64FromInt(y) else ay
-        val bottom = if (f64FromInt(y + 1) < byv) f64FromInt(y + 1) else byv
+        val top = if (y * 256 > ay) y * 256 else ay
+        val bottom = if ((y + 1) * 256 < byv) (y + 1) * 256 else byv
         val dy = bottom - top
-        if (dy > 0.0) {
-            val xnext = x + dxdy * dy
+        if (dy > 0) {
+            val x = ax + (top - ay) * spanX / spanY
+            val xnext = ax + (bottom - ay) * spanX / spanY
             val d = dy * dir
             val xa = if (x < xnext) x else xnext
             val xb = if (x < xnext) xnext else x
-            val x0floor = oneFloor(xa)
-            val x0i = x0floor
-            val x1ceil = oneFloor(xb) + 1
+            val x0i = oneFloorDiv(xa, 256)
+            val x1ceil = oneFloorDiv(xb, 256) + 1
             if (x1ceil <= x0i + 1) {
-                val xmf = 0.5 * (x + xnext) - f64FromInt(x0floor)
-                oneAccAdd(acc, linestart + x0i, d - d * xmf)
+                val xmf = (x + xnext) / 2 - x0i * 256
+                oneAccAdd(acc, linestart + x0i, d * (256 - xmf))
                 oneAccAdd(acc, linestart + x0i + 1, d * xmf)
             } else {
-                val s = 1.0 / (xb - xa)
-                val x0f = xa - f64FromInt(x0floor)
-                val a0 = 0.5 * s * (1.0 - x0f) * (1.0 - x0f)
-                val x1f = xb - f64FromInt(x1ceil) + 1.0
-                val am = 0.5 * s * x1f * x1f
+                val width = xb - xa
+                val x0f = xa - x0i * 256
+                val a0 = (256 - x0f) * (256 - x0f) / (2 * width)
+                val x1f = xb - (x1ceil - 1) * 256
+                val am = x1f * x1f / (2 * width)
                 oneAccAdd(acc, linestart + x0i, d * a0)
-                if (x1ceil == x0i + 2) oneAccAdd(acc, linestart + x0i + 1, d * (1.0 - a0 - am))
+                if (x1ceil == x0i + 2) oneAccAdd(acc, linestart + x0i + 1, d * (256 - a0 - am))
                 else {
-                    val a1 = s * (1.5 - x0f)
+                    val step = 65536 / width
+                    val a1 = (384 - x0f) * 256 / width
                     oneAccAdd(acc, linestart + x0i + 1, d * (a1 - a0))
                     var xi = x0i + 2
                     while (xi < x1ceil - 1) {
-                        oneAccAdd(acc, linestart + xi, d * s)
+                        oneAccAdd(acc, linestart + xi, d * step)
                         xi = xi + 1
                     }
-                    val a2 = a1 + f64FromInt(x1ceil - x0i - 3) * s
-                    oneAccAdd(acc, linestart + x1ceil - 1, d * (1.0 - a2 - am))
+                    val a2 = a1 + (x1ceil - x0i - 3) * step
+                    oneAccAdd(acc, linestart + x1ceil - 1, d * (256 - a2 - am))
                 }
                 oneAccAdd(acc, linestart + x1ceil, d * am)
             }
-            x = xnext
         }
         y = y + 1
     }
     return
 }
 
-fun oneAccAdd(var acc: array<f64>, index: int, value: f64): void {
+fun oneAccAdd(var acc: array<int>, index: int, value: int): void {
     if (index >= 0 && index < acc.size) acc[index] = acc[index] + value
     return
 }
@@ -800,10 +854,13 @@ fun oneDrawSvgColors(var surface: OneSurface, svg: string, x: int, y: int, w: in
 }
 
 fun oneFillRect(var surface: OneSurface, x: int, y: int, w: int, h: int, color: int, alpha: int): void {
-    var j = y
-    while (j < y + h) {
-        var i = x
-        while (i < x + w) {
+    val left = if (x > surface.clipX0()) x else surface.clipX0()
+    val right = if (x + w < surface.clipX1()) x + w else surface.clipX1()
+    val bottom = if (y + h < surface.clipY1()) y + h else surface.clipY1()
+    var j = if (y > surface.clipY0()) y else surface.clipY0()
+    while (j < bottom) {
+        var i = left
+        while (i < right) {
             surface.blend(i, j, color, alpha)
             i = i + 1
         }

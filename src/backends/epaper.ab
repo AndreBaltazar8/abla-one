@@ -74,22 +74,17 @@ fun oneEpaperPhysicalY(x: int, y: int, width: int): int = width - 1 - x
 // abla-embedded's ssd1677CanvasGray: a 4×4 Bayer dither to four levels,
 // in physical coordinates, so neighbouring updates line up.
 fun oneEpaperLevel(gray: int, px: int, py: int): int {
-    val index = (px % 4) + (py % 4) * 4
-    val word = if (index < 8) 2793726656 else 2511852019
-    var nibble = word
-    var shift = 0
-    while (shift < index % 8) {
-        nibble = nibble / 16
-        shift = shift + 1
-    }
-    val dither = (nibble % 16) * 4 - 30
-    val sum = gray + dither
+    val sum = gray + oneEpaperDither[(px & 3) + (py & 3) * 4]
     if (sum < 0) return 0
-    val level = sum / 64
+    val level = sum >> 6
     if (level > 3) 3 else level
 }
 
-fun oneEpaperGray(rgb: int): int = (((rgb / 65536) % 256) * 299 + ((rgb / 256) % 256) * 587 + (rgb % 256) * 114) / 1000
+// The words 0xA684E2C0 and 0x95B7D1F3, a nibble per position (low nibble
+// first), each as nibble * 4 - 30.
+val oneEpaperDither: array<int> = [-30, 18, -22, 26, -14, 2, -6, 10, -18, 30, -26, 22, -2, 14, -10, 6]
+
+fun oneEpaperGray(rgb: int): int = (((rgb >> 16) & 255) * 299 + ((rgb >> 8) & 255) * 587 + (rgb & 255) * 114) / 1000
 
 // The paint list scaled from logical to panel pixels.
 fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int): OneFrame {
@@ -140,10 +135,15 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     val tilesY = (ph + 7) / 8
     val dirty = filledArray(tilesX * tilesY, 0)
     var changed = 0
+    // One band surface (and its fill scratch) serves every band: rendering
+    // allocates little, which a small heap's free lists cannot afford.
+    val background = oneColorValue(o.background)
+    var surface = oneSurfaceBand(o.width, o.height, 0, oneEpaperBandRows, background)
     var y0 = 0
     while (y0 < o.height) {
-        val rows = if (y0 + oneEpaperBandRows > o.height) o.height - y0 else oneEpaperBandRows
-        val surface = oneRasterBand(scaled, o.background, icons, y0, rows)
+        val rows = oneEpaperBandRows
+        oneSurfaceMoveBand(surface, y0, background)
+        oneRasterInto(surface, scaled, icons)
         var x = 0
         while (x < o.width) {
             val py = oneEpaperPhysicalY(x, 0, o.width)
