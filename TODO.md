@@ -14,9 +14,9 @@
 
 - [ ] Scroll faster still: 0.6-0.9 s of processing per swipe (mostly layout and the
       newly revealed strip), then 0.43 s on the panel.
-- [ ] Taps under 100 ms of processing (about 300-450 ms now). Layout recalculates
-      the whole screen on each tap (about 140 ms); memory cleanup adds about 160 ms on
-      some taps.
+- [ ] Taps under 100 ms of processing: about 110-130 ms when the screen changes, 45 ms
+      when it doesn't (measured with injected taps; before: 300-450 ms). What is left
+      is mostly drawing the changed area.
 - [ ] Check grey fills on the real panel, especially after several fast refreshes:
       keep them, use a lighter shade, or go back to outlines.
 - [ ] Offer a pressed look from a button's own pressed style (not an invert).

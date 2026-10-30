@@ -108,7 +108,9 @@ fun onePaperMonoRun(var app: OneApp, theme: Theme, icons: OneIconSource): void {
         // Cleaning up memory takes 100-200 ms: do it while nothing is waiting,
         // so a tap does not pay for it.
         if (gesture == paperMonoGestureNone) {
-            if (runtimeMemoryLiveBytes() > collected + 262144) {
+            val live = runtimeMemoryLiveBytes()
+            if (live < collected) collected = live
+            if (live > collected + 262144) {
                 runtimeMemoryCollect()
                 collected = runtimeMemoryLiveBytes()
             }

@@ -903,6 +903,8 @@ fun oneRasterInto(var surface: OneSurface, frame: OneFrame, icons: OneIconSource
     val bottom = surface.clipBottom
     for (p in frame.paints) {
         if (!onePaintReaches(p, left, top, right, bottom)) {
+        } else if (p.op == "rect" && surface.crisp) {
+            oneFillRoundCrisp(surface, p.x, p.y, p.w, p.h, p.radius, 0, oneColorValue(p.color), oneColorAlpha(p.color))
         } else if (p.op == "rect") {
             var path = onePath()
             oneRoundRectPath(f64FromInt(p.x), f64FromInt(p.y), f64FromInt(p.w), f64FromInt(p.h), f64FromInt(p.radius), path)
@@ -911,7 +913,9 @@ fun oneRasterInto(var surface: OneSurface, frame: OneFrame, icons: OneIconSource
             val sides = oneNumbers(p.sides)
             val color = oneColorValue(p.color)
             val alpha = oneColorAlpha(if (p.color == "") "#dddddd" else p.color)
-            if (sides.size == 4 && sides[0] == sides[1] && sides[1] == sides[2] && sides[2] == sides[3] && sides[0] > 0.0) {
+            if (surface.crisp && sides.size == 4 && sides[0] == sides[1] && sides[1] == sides[2] && sides[2] == sides[3] && sides[0] > 0.0) {
+                oneFillRoundCrisp(surface, p.x, p.y, p.w, p.h, p.radius, f64ToInt(sides[0]), color, alpha)
+            } else if (sides.size == 4 && sides[0] == sides[1] && sides[1] == sides[2] && sides[2] == sides[3] && sides[0] > 0.0) {
                 // Outer shape minus inner shape (wound the other way).
                 var path = onePath()
                 oneRoundRectPath(f64FromInt(p.x), f64FromInt(p.y), f64FromInt(p.w), f64FromInt(p.h), f64FromInt(p.radius), path)
@@ -976,6 +980,38 @@ fun oneDrawSvgColors(var surface: OneSurface, svg: string, x: int, y: int, w: in
             oneStroke(surface, path, (if (widths.size > 0) widths[0] else 1.0) * s, oneColorValue(stroke), 255)
         }
         if (fill != "" && fill != "none") oneFill(surface, path, oneColorValue(fill), 255)
+    }
+    return
+}
+
+// How far row `row` of a rounded corner of `radius` starts in: pixels whose centre is
+// outside the circle. No floating point: a microcontroller does this in software.
+fun oneCornerInset(row: int, radius: int): int {
+    if (row >= radius || radius <= 0) return 0
+    val d = 2 * radius - 2 * row - 1
+    val room = 4 * radius * radius - d * d
+    var half = 2 * radius
+    while (half * half > room) half = half - 1
+    radius - (half + 1) / 2
+}
+
+// A filled rounded rectangle without soft edges or, with `stroke`, its outline only.
+fun oneFillRoundCrisp(var surface: OneSurface, x: int, y: int, w: int, h: int, radiusIn: int, stroke: int, color: int, alpha: int): void {
+    val radius = if (radiusIn * 2 > w) (if (w * 2 > h * 2 && h < w) h / 2 else w / 2) else if (radiusIn * 2 > h) h / 2 else radiusIn
+    val first = if (surface.clipTop > y) surface.clipTop else y
+    val last = if (surface.clipBottom < y + h) surface.clipBottom else y + h
+    val innerRadius = if (radius > stroke) radius - stroke else 0
+    var row = first
+    while (row < last) {
+        val fromEdge = if (row - y < y + h - 1 - row) row - y else y + h - 1 - row
+        val outer = oneCornerInset(fromEdge, radius)
+        if (stroke == 0 || fromEdge < stroke) oneFillRect(surface, x + outer, row, w - 2 * outer, 1, color, alpha)
+        else {
+            val inner = stroke + oneCornerInset(fromEdge - stroke, innerRadius)
+            oneFillRect(surface, x + outer, row, inner - outer, 1, color, alpha)
+            oneFillRect(surface, x + w - inner, row, inner - outer, 1, color, alpha)
+        }
+        row = row + 1
     }
     return
 }

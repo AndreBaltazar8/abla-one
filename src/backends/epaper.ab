@@ -77,7 +77,9 @@ class OneEpaperState(
     var layoutCache: OneLayoutCache = oneLayoutCache(),
     val boxes: array<OneBox> = [],
     var boxRevision: int = -1,
-    var scrolled: bool = false
+    var scrolled: bool = false,
+    // Which 8x8 tiles a render changed, kept: the array is a tenth of a render's garbage.
+    val dirty: array<int> = []
 )
 
 fun oneEpaperBandSurface(options: OneEpaperOptions): OneSurface {
@@ -236,7 +238,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     val plane = stride * ph
     val tilesX = pw / 8
     val tilesY = (ph + 7) / 8
-    val dirty = filledArray(tilesX * tilesY, 0)
+    while (state.dirty.size < tilesX * tilesY) state.dirty.append(0)
     var changed = 0
     val background = oneColorValue(o.background)
     val hashes: array<int> = []
@@ -261,7 +263,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
         at = at + 1
     }
     if (shift != null) {
-        changed = changed + oneEpaperShiftPlanes(state, shift, dirty, tilesX)
+        changed = changed + oneEpaperShiftPlanes(state, shift, tilesX)
         for (strip in oneEpaperShiftStrips(shift)) strips.append(strip)
     }
     for (hit in frame.hits) {
@@ -287,15 +289,22 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
                     var lsb = 0
                     var msb = 0
                     var k = 0
+                    var at = (column * 8 - y0) * o.width + x
+                    var bit = 128
                     while (k < 8) {
-                        val y = column * 8 + k
-                        // (Most of a screen is one colour: skip its arithmetic.)
-                        val pixel = state.surface.pixels[(y - y0) * o.width + x]
-                        val level = if (pixel == 16777215) 3
-                            else if (o.crisp) oneEpaperShade(oneEpaperGray(pixel))
-                            else oneEpaperLevel(oneEpaperGray(pixel), y, py)
-                        if (level % 2 == 1) lsb = lsb + oneEpaperBit(k)
-                        if (level >= 2) msb = msb + oneEpaperBit(k)
+                        val pixel = state.surface.pixels[at]
+                        // (Most of a screen is black or white: skip their arithmetic.)
+                        if (pixel == 16777215) {
+                            lsb = lsb | bit
+                            msb = msb | bit
+                        } else if (pixel != 0 || !o.crisp) {
+                            val y = column * 8 + k
+                            val level = if (o.crisp) oneEpaperShade(oneEpaperGray(pixel)) else oneEpaperLevel(oneEpaperGray(pixel), y, py)
+                            if ((level & 1) == 1) lsb = lsb | bit
+                            if (level >= 2) msb = msb | bit
+                        }
+                        at = at + o.width
+                        bit = bit >> 1
                         k = k + 1
                     }
                     val offset = py * stride + column
@@ -303,8 +312,8 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
                         state.planes[offset] = lsb
                         state.planes[offset + plane] = msb
                         val tile = (py / 8) * tilesX + column
-                        if (dirty[tile] == 0) {
-                            dirty[tile] = 1
+                        if (state.dirty[tile] == 0) {
+                            state.dirty[tile] = 1
                             changed = changed + 1
                         }
                     }
@@ -319,7 +328,15 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     state.hashes = hashes
     state.owners = owners
     state.pixelsDrawn = drawn
-    var rects = oneEpaperRects(dirty, tilesX, tilesY, ph)
+    var rects: array<OneEpaperRect> = []
+    if (changed > 0) {
+        rects = oneEpaperRects(state.dirty, tilesX, tilesY, ph)
+        var tile = 0
+        while (tile < state.dirty.size) {
+            state.dirty[tile] = 0
+            tile = tile + 1
+        }
+    }
     var mode = oneEpaperFastest
     if (rects.size > 0) {
         val area = changed * 100 / (tilesX * tilesY)
@@ -369,7 +386,7 @@ fun oneEpaperFindShift(state: OneEpaperState, scaled: OneFrame): OneEpaperShift?
 }
 
 // Moves the area's canvas bytes and marks their tiles; how many tiles it marked.
-fun oneEpaperShiftPlanes(var state: OneEpaperState, shift: OneEpaperShift, var dirty: array<int>, tilesX: int): int {
+fun oneEpaperShiftPlanes(var state: OneEpaperState, shift: OneEpaperShift, tilesX: int): int {
     val first = shift.alignedTop / 8
     val last = shift.alignedBottom / 8
     val by = shift.distance / 8
@@ -391,8 +408,8 @@ fun oneEpaperShiftPlanes(var state: OneEpaperState, shift: OneEpaperShift, var d
         var column = first
         while (column < last) {
             val tile = (py / 8) * tilesX + column
-            if (dirty[tile] == 0) {
-                dirty[tile] = 1
+            if (state.dirty[tile] == 0) {
+                state.dirty[tile] = 1
                 marked = marked + 1
             }
             column = column + 1
