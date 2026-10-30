@@ -25,12 +25,15 @@
 
 ## Design
 
-- [ ] Server/client boundary: one codebase; mark what stays on the server, and what
-      the clients (web, mobile, embedded) get. See SPEC.
-- [ ] Embedded modes as a compile flag: full (app on the device) and thin (the
-      server sends the tree; the device does layout, scrolling and drawing).
-- [ ] Per-target start screens: NovaKind's mobile and embedded builds open on login,
-      the web on the landing page.
+The design is in SPEC section 16 (proposed); these build it.
+
+- [ ] Decide SPEC 16's open questions, starting with where `@server` lives.
+- [ ] Build the server/client boundary: `@server` functions, typed requests, client
+      builds that leave server code out.
+- [ ] Build thin embedded mode (the server sends the tree; the device does layout,
+      scrolling and drawing), behind a compile flag with full mode, and retire the
+      pixel link (`epaper_host.ab`).
+- [ ] Per-target start screens, starting with NovaKind (login on mobile and embedded).
 
 ## Toolchain
 

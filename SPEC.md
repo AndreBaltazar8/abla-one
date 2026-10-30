@@ -615,6 +615,79 @@ abla-one/
     this milestone) and running apps on the device itself (the bounded
     arena tree).
 
+## 16. One codebase, many deployments (proposed)
+
+Not built yet: this is the design to build against, tracked in TODO.md. One
+codebase produces one deployed backend, which also serves the web, plus client
+builds for mobile and embedded. The clients carry the presentation; what is marked
+as server stays out of them.
+
+### What stays on the server
+
+Everything is client code unless marked. A function marked `@server` runs on the
+backend, wherever it is called from:
+
+    @server fun orders(session: Session, status: string): array<Order> { ... }
+
+    // in a screen, on any client:
+    val found by remote { orders(ui.session, "open") }
+
+- **Server build:** the function is compiled as written and gets a route.
+- **Client builds:** the body and everything only it reaches are left out, and the
+  call becomes a typed request through the services layer (§9). Secrets, database
+  code and server libraries are never in a client binary.
+- **Checks at compile time:** parameters and results must be plain data the wire
+  can carry. Client code touching a server-only module directly is an error naming
+  the `@server` function to go through, so nothing leaks by accident.
+- **Authentication:** every route authenticates the session itself. Being marked
+  `@server` hides nothing: a client can call any route with any arguments.
+
+### Deployments
+
+A project lists its targets in one place, and each build takes what it needs:
+
+    | Target              | Runs the UI on | Reaches the server by       |
+    | server (+ web)      | server, browser| itself; SSR, live or Wasm   |
+    | android, ios        | the device     | `@server` requests          |
+    | embedded, full      | the device     | `@server` requests          |
+    | embedded, thin      | the server     | a session over the network  |
+
+### Embedded modes
+
+A compile flag picks the mode, and the same app source builds either way.
+
+- **Full:** the whole app runs on the device (the PaperMono target today).
+- **Thin:** the app's state and logic run on the server, which sends the **node
+  tree**, as a web page gets its content. The device does layout, scrolling, hit
+  testing and drawing itself, so scrolling never waits on the network, and sends only
+  events back. It needs the device's renderer but less memory for app state.
+
+Thin mode replaces the current host-run link (§10, `epaper_host.ab`), which sends
+finished pixels and makes scrolling and hit testing a server round trip. That link
+goes away once thin mode works.
+
+### Start screens per target
+
+The app's root takes the target's start screen, so each `main` names its own:
+
+    web:      NovaKindApp(start = Landing)
+    mobile:   NovaKindApp(start = SignIn)
+    embedded: NovaKindApp(start = SignIn)
+
+Screens a target can never reach (a landing page on a device) drop out of that build
+because nothing refers to them, which keeps embedded binaries small. Components can
+still vary by target through theming (§8) and `ui.target`.
+
+### Open questions
+
+- Does `@server` belong in the language (ablac splitting builds) or in a build step
+  of Abla One? Recommended: ablac, because leaving code out reliably needs the
+  compiler's reachability, but it is the bigger change.
+- Versioning: an old device or phone calling a newer server. Routes likely need a
+  version or additive-only rules, since embedded builds update rarely.
+- Offline: what `remote` shows on a device with no network.
+- How thin mode sends tree updates to a small device: whole trees or diffs.
+
 ## 15. Decisions
 
 1. **Naming:** `abla-one`, `$one`, `$theme` and the `one*` prefix are
