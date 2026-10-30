@@ -137,6 +137,15 @@ fun main: int {
         expectEqual(same, 0, "swipe $delta looks like a fresh render")
     }
 
+    // Far apart rectangles refresh apart; close ones together; never more than four.
+    expectEqual(oneEpaperGroupRects([OneEpaperRect(0, 0, 8, 8), OneEpaperRect(400, 0, 8, 8)]).size, 2, "far apart stays apart")
+    expectEqual(oneEpaperGroupRects([OneEpaperRect(0, 0, 8, 8), OneEpaperRect(8, 8, 8, 8)]).size, 1, "touching merge")
+    expectEqual(oneEpaperGroupRects([OneEpaperRect(0, 0, 8, 8), OneEpaperRect(100, 0, 8, 8), OneEpaperRect(200, 0, 8, 8), OneEpaperRect(300, 0, 8, 8), OneEpaperRect(400, 0, 8, 8), OneEpaperRect(500, 0, 8, 8)]).size, 4, "at most four")
+    val greyPlanes = filledArray(96000, 255)
+    expect(!oneEpaperShowsGrey(greyPlanes, OneEpaperRect(0, 0, 16, 8)), "white is not grey")
+    greyPlanes[100] = 0
+    expect(oneEpaperShowsGrey(greyPlanes, OneEpaperRect(0, 0, 16, 8)), "planes that differ are grey")
+
     // Wire format: header and the rectangle bytes.
     val wire = oneEpaperWire(counted, 800, 480)
     expect(wire.slice(0, 4) == "ONE1", "magic")

@@ -28,6 +28,10 @@ trusted fun onePaperMonoPause(milliseconds: int): void {
 trusted fun onePaperMonoMilliseconds(): int = int(esp_timer_get_time()) / 1000
 
 // Copies an update's rectangles (both planes) into the canvas and refreshes.
+// The session keeps one dirty rectangle, and a refresh drives all of it, so
+// areas far apart refresh separately: greys between them must not go through a
+// fast waveform. An area that shows greys takes the fast mode rather than the
+// fastest, which has no grey stage.
 trusted fun onePaperMonoShow(session: Ssd1677Session, update: OneEpaperUpdate): void {
     if (update.rects.size == 0) return
     val canvas = session.canvas()
@@ -46,9 +50,12 @@ trusted fun onePaperMonoShow(session: Ssd1677Session, update: OneEpaperUpdate): 
             }
             plane = plane + 1
         }
-        session.markDirtyOwned(r.x, r.y, r.w, r.h, true)
     }
-    if (!paperMonoRefresh(session, update.mode)) paperMonoRefresh(session, paperMonoQuality)
+    for (group in oneEpaperGroupRects(update.rects)) {
+        session.markDirtyOwned(group.x, group.y, group.w, group.h, true)
+        val mode = if (update.mode == oneEpaperFastest && oneEpaperShowsGrey(update.planes, group)) oneEpaperFast else update.mode
+        if (!paperMonoRefresh(session, mode)) paperMonoRefresh(session, paperMonoQuality)
+    }
     return
 }
 

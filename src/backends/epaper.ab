@@ -598,6 +598,70 @@ fun oneEpaperScroll(var state: OneEpaperState, x: int, y: int, dy: int): bool {
     false
 }
 
+// A device refreshes one rectangle at a time: rectangles grouped so that a group's
+// bounds take in nothing far from them. Portrait rows run along physical x, so
+// widely separated controls are far apart there; at most four groups (each costs
+// a refresh), the closest merging first.
+fun oneEpaperGroupRects(rects: array<OneEpaperRect>): array<OneEpaperRect> {
+    val groups: array<OneEpaperRect> = []
+    for (r in rects) groups.append(r)
+    var merged = true
+    while (merged) {
+        merged = false
+        var bestA = -1
+        var bestB = -1
+        var bestGap = 1000000
+        var a = 0
+        while (a < groups.size) {
+            var b = a + 1
+            while (b < groups.size) {
+                val gap = oneEpaperRectGap(groups[a], groups[b])
+                if (gap < bestGap) {
+                    bestGap = gap
+                    bestA = a
+                    bestB = b
+                }
+                b = b + 1
+            }
+            a = a + 1
+        }
+        if (bestA >= 0 && (bestGap <= 16 || groups.size > 4)) {
+            val p = groups[bestA]
+            val q = groups[bestB]
+            val x0 = if (p.x < q.x) p.x else q.x
+            val y0 = if (p.y < q.y) p.y else q.y
+            val x1 = if (p.x + p.w > q.x + q.w) p.x + p.w else q.x + q.w
+            val y1 = if (p.y + p.h > q.y + q.h) p.y + p.h else q.y + q.h
+            groups[bestA] = OneEpaperRect(x0, y0, x1 - x0, y1 - y0)
+            groups[bestB] = groups[groups.size - 1]
+            groups.truncate(groups.size - 1)
+            merged = true
+        }
+    }
+    groups
+}
+
+fun oneEpaperRectGap(p: OneEpaperRect, q: OneEpaperRect): int {
+    val gapX = if (q.x >= p.x + p.w) q.x - p.x - p.w else if (p.x >= q.x + q.w) p.x - q.x - q.w else 0
+    val gapY = if (q.y >= p.y + p.h) q.y - p.y - p.h else if (p.y >= q.y + q.h) p.y - q.y - q.h else 0
+    if (gapX > gapY) gapX else gapY
+}
+
+// Whether a canvas rectangle shows a grey (the planes differ only there).
+fun oneEpaperShowsGrey(planes: array<int>, r: OneEpaperRect): bool {
+    var row = r.y
+    while (row < r.y + r.h) {
+        var column = r.x / 8
+        while (column < (r.x + r.w) / 8) {
+            val at = row * 100 + column
+            if (planes[at] != planes[at + 48000]) return true
+            column = column + 1
+        }
+        row = row + 1
+    }
+    false
+}
+
 // The update on the wire, for a device to apply: "ONE1", revision (u32),
 // mode (u8), rectangle count (u8), then per rectangle x, y, w, h (u16) and
 // its LSB rows followed by its MSB rows (w/8 bytes per row). Little endian.
