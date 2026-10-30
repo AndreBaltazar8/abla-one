@@ -42,7 +42,8 @@ fun main: int {
     // Rendering the gallery, band by band, matches rendering it whole.
     var sample = Gallery()
     var sampleUi = oneUiSized("epaper", oneDefaultTheme(), 360)
-    val scaled = oneEpaperScaleFrame(onePaintFrame(oneLayout(sample.render(sampleUi), oneDefaultTheme(), "epaper", 360, 601, Map()), 360, 601), 133, 480, 800)
+    val scaledOwners: array<string> = []
+    val scaled = oneEpaperScaleFrame(onePaintFrame(oneLayout(sample.render(sampleUi), oneDefaultTheme(), "epaper", 360, 601, Map()), 360, 601), 133, 480, 800, 2, true, scaledOwners)
     val whole = oneRasterFrame(scaled, "#ffffff", noIcons())
     val banded = oneRasterBand(scaled, "#ffffff", noIcons(), 200, 40)
     var same = true
@@ -115,6 +116,26 @@ fun main: int {
     // Borders and rules are at least two panel pixels.
     expectEqual(oneEpaperScaleSides("1 0 1 0", 133, 2), "2 0 2 0", "thin borders widen")
     expectEqual(oneEpaperScaleSides("3", 133, 2), "3", "thick ones scale")
+
+    // A swipe shifts what is on the panel: few pixels are drawn, and the planes
+    // equal a fresh render of the same scroll, both ways.
+    for (delta in [160, -96, 200, -264]) {
+        expect(oneEpaperScroll(state, 240, 400, delta), "swipe $delta scrolls")
+        oneEpaperRender(app, t, state, noIcons())
+        expect(state.pixelsDrawn < 480 * 800 * 3 / 4, "swipe $delta draws part of the screen (${state.pixelsDrawn})")
+        var again = Gallery()
+        again.count = app.count
+        var freshScroll = oneEpaperState(onePaperMonoOptions())
+        for (hit in state.frame.hits) if (hit.kind == "scroll") freshScroll.scroll.set(hit.key, oneParseInt(hit.value, 0))
+        oneEpaperRender(again, t, freshScroll, noIcons())
+        var same = 0
+        var at = 0
+        while (at < 96000) {
+            if (freshScroll.planes[at] != state.planes[at]) same = same + 1
+            at = at + 1
+        }
+        expectEqual(same, 0, "swipe $delta looks like a fresh render")
+    }
 
     // Wire format: header and the rectangle bytes.
     val wire = oneEpaperWire(counted, 800, 480)

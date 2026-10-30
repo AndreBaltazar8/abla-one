@@ -12,8 +12,8 @@
 
 ## PaperMono (on the device)
 
-- [ ] Scroll faster: about 2.2 s of processing per swipe, because nearly the whole
-      screen is redrawn. Reuse what is already on the panel where possible.
+- [ ] Scroll faster still: 0.6-0.9 s of processing per swipe (mostly layout and the
+      newly revealed strip), then 0.43 s on the panel.
 - [ ] Taps under 100 ms of processing (about 300-450 ms now). Layout recalculates
       the whole screen on each tap (about 140 ms); memory cleanup adds about 160 ms on
       some taps.

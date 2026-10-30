@@ -65,7 +65,11 @@ class OneEpaperState(
     var hashes: array<int>,
     var pixelsDrawn: int,
     // The band surface (and its fill scratch), kept between renders.
-    var surface: OneSurface
+    var surface: OneSurface,
+    // Each scroll area's panel offset as last drawn (oneEpaperPanelOffset), and
+    // the scroll areas each paint sits in ("|key|key|"), to shift rather than redraw.
+    val offsets: Map<string, int>,
+    var owners: array<string>
 )
 
 fun oneEpaperBandSurface(options: OneEpaperOptions): OneSurface {
@@ -75,7 +79,7 @@ fun oneEpaperBandSurface(options: OneEpaperOptions): OneSurface {
 }
 
 fun oneEpaperState(options: OneEpaperOptions): OneEpaperState =
-    OneEpaperState(options, filledArray(options.width * options.height / 4, 0), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), [], [], 0, oneEpaperBandSurface(options))
+    OneEpaperState(options, filledArray(options.width * options.height / 4, 0), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), [], [], 0, oneEpaperBandSurface(options), Map(), [])
 
 // Portrait rows rasterized at a time: a multiple of 8 (a canvas byte) that
 // divides 800. A whole frame at once would take a 480×800 surface, more
@@ -120,14 +124,36 @@ fun oneEpaperCrispPaint(p: OnePaint): OnePaint {
     OnePaint(p.op, p.x, p.y, p.w, p.h, p.radius, solid, p.text, p.size, weight, p.sides)
 }
 
-// The paint list scaled from logical to panel pixels.
-fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int, minStroke: int = 2, crisp: bool = false): OneFrame {
+// A scroll offset on the panel: whole canvas bytes, so scrolling can move bytes
+// (eight portrait rows are one byte).
+fun oneEpaperPanelOffset(scroll: int, scale: int): int = scroll * scale / 100 / 8 * 8
+
+// The paint list scaled from logical to panel pixels. What scrolls is scaled as
+// if unscrolled and then moved by whole panel offsets, so a paint lands on the
+// same pixels relative to its scroll area wherever that is scrolled. `owners`
+// gets each paint's scroll areas.
+fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int, minStroke: int, crisp: bool, var owners: array<string>): OneFrame {
     val paints: array<OnePaint> = []
+    val logical: array<int> = []
+    val panel: array<int> = []
+    val keys: array<string> = []
+    var addLogical = 0
+    var subtractPanel = 0
+    var owner = ""
     for (p in frame.paints) {
+        if (p.op == "unclip" && logical.size > 0) {
+            addLogical = addLogical - logical[logical.size - 1]
+            subtractPanel = subtractPanel - panel[panel.size - 1]
+            logical.truncate(logical.size - 1)
+            panel.truncate(panel.size - 1)
+            keys.truncate(keys.size - 1)
+            owner = ""
+            for (k in keys) if (k != "") owner = "$owner|$k|"
+        }
         val x = p.x * scale / 100
-        val y = p.y * scale / 100
+        val y = (p.y + addLogical) * scale / 100 - subtractPanel
         var w = (p.x + p.w) * scale / 100 - x
-        var h = (p.y + p.h) * scale / 100 - y
+        var h = (p.y + p.h + addLogical) * scale / 100 - subtractPanel - y
         // A thin rule keeps the thinnest width the panel shows well.
         if (p.op == "rect" && w > 0 && h > 0) {
             if (w < minStroke) w = minStroke
@@ -135,6 +161,23 @@ fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int, mi
         }
         val paint = OnePaint(p.op, x, y, w, h, p.radius * scale / 100, p.color, p.text, p.size * scale / 100, p.weight, oneEpaperScaleSides(p.sides, scale, minStroke))
         paints.append(if (crisp) oneEpaperCrispPaint(paint) else paint)
+        owners.append(owner)
+        if (p.op == "clip") {
+            var scroll = 0
+            var key = ""
+            for (hit in frame.hits) {
+                if (hit.kind == "scroll" && hit.x == p.x && hit.y == p.y && hit.w == p.w && hit.h == p.h) {
+                    scroll = oneParseInt(hit.value, 0)
+                    key = hit.key
+                }
+            }
+            logical.append(scroll)
+            panel.append(oneEpaperPanelOffset(scroll, scale))
+            keys.append(key)
+            addLogical = addLogical + scroll
+            subtractPanel = subtractPanel + oneEpaperPanelOffset(scroll, scale)
+            if (key != "") owner = "$owner|$key|"
+        }
     }
     OneFrame(paints, frame.hits, frame.visible, width, height)
 }
@@ -165,7 +208,8 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     var ui = oneUiSized("epaper", theme, lw)
     val frame = onePaintFrame(oneLayout(app.render(ui), theme, "epaper", lw, lh, state.scroll), lw, lh)
     state.frame = frame
-    val scaled = oneEpaperScaleFrame(frame, o.scale, o.width, o.height, o.minStroke, o.crisp)
+    val owners: array<string> = []
+    val scaled = oneEpaperScaleFrame(frame, o.scale, o.width, o.height, o.minStroke, o.crisp, owners)
     // Redraw what the paint list says changed, quantise it into canvas bytes
     // (eight portrait rows are one physical byte), and mark the 8×8 tiles
     // whose bytes changed. A band of rows at a time, on one kept surface.
@@ -180,8 +224,34 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     val background = oneColorValue(o.background)
     val hashes: array<int> = []
     for (p in scaled.paints) hashes.append(oneEpaperPaintHash(p))
+    // One scroll area that moved: shift what it shows instead of redrawing it,
+    // then only what the shift cannot bring is drawn (and the shifted bytes count as changed).
+    val oldPaints: array<OnePaint> = []
+    val oldHashes: array<int> = []
+    val strips: array<OneEpaperRect> = []
+    val shift = if (state.full) null else oneEpaperFindShift(state, scaled)
+    var at = 0
+    while (at < state.paints.size) {
+        val p = state.paints[at]
+        if (shift != null && at < state.owners.size && state.owners[at].contains("|${shift.key}|")) {
+            val moved = OnePaint(p.op, p.x, p.y - shift.distance, p.w, p.h, p.radius, p.color, p.text, p.size, p.weight, p.sides)
+            oldPaints.append(moved)
+            oldHashes.append(oneEpaperPaintHash(moved))
+        } else {
+            oldPaints.append(p)
+            oldHashes.append(state.hashes[at])
+        }
+        at = at + 1
+    }
+    if (shift != null) {
+        changed = changed + oneEpaperShiftPlanes(state, shift, dirty, tilesX)
+        for (strip in oneEpaperShiftStrips(shift)) strips.append(strip)
+    }
+    for (hit in frame.hits) {
+        if (hit.kind == "scroll") state.offsets.set(hit.key, oneEpaperPanelOffset(oneParseInt(hit.value, 0), o.scale))
+    }
     val areas = if (state.full) [OneEpaperRect(0, 0, o.width, o.height)]
-        else oneEpaperChanged(state.paints, state.hashes, scaled.paints, hashes, o.width, o.height)
+        else oneEpaperChanged(oldPaints, oldHashes, scaled.paints, hashes, o.width, o.height, strips)
     var drawn = 0
     for (area in areas) {
         var y0 = area.y
@@ -229,6 +299,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     }
     state.paints = scaled.paints
     state.hashes = hashes
+    state.owners = owners
     state.pixelsDrawn = drawn
     var rects = oneEpaperRects(dirty, tilesX, tilesY, ph)
     var mode = oneEpaperFastest
@@ -248,6 +319,87 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     }
     OneEpaperUpdate(state.revision, mode, rects, state.planes)
 }
+
+// A scroll area to shift: its canvas-byte rows top until bottom (portrait), its
+// columns left until right, and how far its content moves up.
+class OneEpaperShift(val key: string, val left: int, val right: int, val top: int, val bottom: int, val alignedTop: int, val alignedBottom: int, val distance: int)
+
+// The shift between what was drawn and this frame: when exactly one scroll area
+// moved, and by less than it shows.
+fun oneEpaperFindShift(state: OneEpaperState, scaled: OneFrame): OneEpaperShift? {
+    val o = state.options
+    var found: OneEpaperShift? = null
+    var moved = 0
+    for (hit in scaled.hits) {
+        if (hit.kind == "scroll") {
+            val before = state.offsets.get(hit.key)
+            val now = oneEpaperPanelOffset(oneParseInt(hit.value, 0), o.scale)
+            if (before != null && before != now) {
+                moved = moved + 1
+                val top = hit.y * o.scale / 100
+                val bottom = oneEpaperClamp((hit.y + hit.h) * o.scale / 100, o.height)
+                val alignedTop = (top + 7) / 8 * 8
+                val alignedBottom = bottom / 8 * 8
+                val distance = now - before
+                val span = if (distance < 0) 0 - distance else distance
+                if (span < alignedBottom - alignedTop)
+                    found = OneEpaperShift(hit.key, hit.x * o.scale / 100, oneEpaperClamp((hit.x + hit.w) * o.scale / 100, o.width), top, bottom, alignedTop, alignedBottom, distance)
+            }
+        }
+    }
+    if (moved == 1) found else null
+}
+
+// Moves the area's canvas bytes and marks their tiles; how many tiles it marked.
+fun oneEpaperShiftPlanes(var state: OneEpaperState, shift: OneEpaperShift, var dirty: array<int>, tilesX: int): int {
+    val first = shift.alignedTop / 8
+    val last = shift.alignedBottom / 8
+    val by = shift.distance / 8
+    var marked = 0
+    var x = shift.left
+    while (x < shift.right) {
+        val py = oneEpaperPhysicalY(x, 0, state.options.width)
+        var plane = 0
+        while (plane < 2) {
+            val base = plane * 48000 + py * 100
+            var column = if (by > 0) first else last - 1
+            while (column >= first && column < last) {
+                val source = column + by
+                if (source >= first && source < last) state.planes[base + column] = state.planes[base + source]
+                column = if (by > 0) column + 1 else column - 1
+            }
+            plane = plane + 1
+        }
+        var column = first
+        while (column < last) {
+            val tile = (py / 8) * tilesX + column
+            if (dirty[tile] == 0) {
+                dirty[tile] = 1
+                marked = marked + 1
+            }
+            column = column + 1
+        }
+        x = x + 1
+    }
+    marked
+}
+
+// What a shift leaves to draw: the rows it uncovered, and the area's rows outside
+// whole bytes. Rows byte-aligned, as every redrawn area is.
+fun oneEpaperShiftStrips(shift: OneEpaperShift): array<OneEpaperRect> {
+    val w = shift.right - shift.left
+    val top = shift.top / 8 * 8
+    val bottom = (shift.bottom + 7) / 8 * 8
+    val uncovered = if (shift.distance > 0) OneEpaperRect(shift.left, shift.alignedBottom - shift.distance, w, bottom - (shift.alignedBottom - shift.distance))
+        else OneEpaperRect(shift.left, top, w, shift.alignedTop - shift.distance - top)
+    val other = if (shift.distance > 0) OneEpaperRect(shift.left, top, w, shift.alignedTop - top)
+        else OneEpaperRect(shift.left, shift.alignedBottom, w, bottom - shift.alignedBottom)
+    val out: array<OneEpaperRect> = [uncovered]
+    if (other.h > 0) out.append(other)
+    out
+}
+
+fun oneEpaperClamp(value: int, most: int): int = if (value > most) most else value
 
 fun oneEpaperPaintHash(p: OnePaint): int {
     var h = 17
@@ -269,11 +421,12 @@ fun oneEpaperHashText(hash: int, text: string): int {
 // The screen areas to redraw between two paint lists: around each paint only
 // one of them has, with rows aligned to canvas bytes, overlaps merged. Clips
 // that changed, or the same paints in another order, redraw everything.
-fun oneEpaperChanged(old: array<OnePaint>, oldHashes: array<int>, new: array<OnePaint>, newHashes: array<int>, width: int, height: int): array<OneEpaperRect> {
+fun oneEpaperChanged(old: array<OnePaint>, oldHashes: array<int>, new: array<OnePaint>, newHashes: array<int>, width: int, height: int, strips: array<OneEpaperRect>): array<OneEpaperRect> {
     val whole = [OneEpaperRect(0, 0, width, height)]
     val counts: Map<int, int> = Map()
     for (h in oldHashes) counts.set(h, (counts.get(h) ?? 0) + 1)
     val areas: array<OneEpaperRect> = []
+    for (strip in strips) areas.append(strip)
     var i = 0
     while (i < new.size) {
         val left = counts.get(newHashes[i]) ?? 0
@@ -294,7 +447,7 @@ fun oneEpaperChanged(old: array<OnePaint>, oldHashes: array<int>, new: array<One
         }
         i = i + 1
     }
-    if (areas.size == 0 && old.size == new.size) {
+    if (areas.size == strips.size && old.size == new.size) {
         i = 0
         while (i < new.size) {
             if (oldHashes[i] != newHashes[i]) return whole
