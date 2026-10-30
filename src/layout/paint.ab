@@ -69,7 +69,7 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
         val align = r.get("textAlign")
         var line = 0
         for (text in box.lines) {
-            val tw = oneTextWidth(text, size, r.get("weight"))
+            val tw = box.lineWidths[line]
             val inner = box.w - pl - pr
             val tx = x + pl + (if (align == "center") (inner - tw) / 2 else if (align == "end" || align == "right") inner - tw else 0)
             frame.paints.append(OnePaint("text", tx, y + pt + line * lh, tw, lh, 0, if (r.get("color") != "") r.get("color") else "#111111", text, size, r.get("weight"), ""))

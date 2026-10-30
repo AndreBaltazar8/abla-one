@@ -88,6 +88,7 @@ fun onePaperMonoRun(var app: OneApp, theme: Theme, icons: OneIconSource): void {
     var started = onePaperMonoMilliseconds()
     onePaperMonoShow(session, oneEpaperRender(app, theme, state, icons))
     println("papermono: first frame in ${onePaperMonoMilliseconds() - started} ms")
+    var collected = runtimeMemoryLiveBytes()
     while (true) {
         paperMonoGestureSample()
         val gesture = paperMonoGestureTake()
@@ -97,10 +98,21 @@ fun onePaperMonoRun(var app: OneApp, theme: Theme, icons: OneIconSource): void {
             val y = paperMonoGestureAtY()
             val acted = if (gesture == paperMonoGestureTap) oneEpaperTouch(app, theme, state, x, y)
                 else oneEpaperScroll(state, x, y, paperMonoGestureTravel())
-            val update = oneEpaperRender(app, theme, state, icons)
-            println("papermono: ${if (gesture == paperMonoGestureTap) "tap" else "swipe"} at $x,$y acted=$acted, ${update.rects.size} rectangles, mode ${update.mode}, ${onePaperMonoMilliseconds() - started} ms")
-            onePaperMonoShow(session, update)
+            // Nothing under the finger, or nothing left to scroll: nothing to draw.
+            if (acted) {
+                val update = oneEpaperRender(app, theme, state, icons)
+                println("papermono: ${if (gesture == paperMonoGestureTap) "tap" else "swipe"} at $x,$y, ${update.rects.size} rectangles, mode ${update.mode}, ${onePaperMonoMilliseconds() - started} ms")
+                onePaperMonoShow(session, update)
+            }
         }
-        onePaperMonoPause(20)
+        // Cleaning up memory takes 100-200 ms: do it while nothing is waiting,
+        // so a tap does not pay for it.
+        if (gesture == paperMonoGestureNone) {
+            if (runtimeMemoryLiveBytes() > collected + 262144) {
+                runtimeMemoryCollect()
+                collected = runtimeMemoryLiveBytes()
+            }
+            onePaperMonoPause(2)
+        }
     }
 }

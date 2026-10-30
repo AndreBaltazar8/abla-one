@@ -1,0 +1,53 @@
+import "abla/test"
+import "../../src/one.ab"
+import "../../src/layout/layout.ab"
+import "../../src/layout/paint.ab"
+
+// A cached layout, and a finished layout moved by new scroll offsets, must give
+// exactly what a fresh layout gives.
+
+fun screen(label: string, event: int): Node =
+    column(style().padding(8).gap(4), [
+        text("A long title that wraps across a couple of lines here", style().fontSize(18)),
+        row(style().gap(8), [
+            pressable(event, style().padding(6).background("#eeeeee"), [text(label, style())]),
+            text("beside", style().grow(1))
+        ]),
+        scroll(style().height(120).gap(4), [
+            text("one", style().height(80)),
+            pressable(event + 1, style().height(80), [text(label, style())]),
+            text("three", style().height(80))
+        ])
+    ])
+
+fun dump(frame: OneFrame): string {
+    var out = ""
+    for (p in frame.paints) out = "$out${p.op} ${p.x} ${p.y} ${p.w} ${p.h} ${p.color} ${p.text}\n"
+    for (h in frame.hits) out = "$out${h.kind} ${h.x} ${h.y} ${h.w} ${h.h} ${h.event} ${h.key} ${h.value}\n"
+    out
+}
+
+fun fresh(node: Node, t: Theme, scroll: Map<string, int>): string = dump(onePaintFrame(oneLayout(node, t, "epaper", 300, 400, scroll), 300, 400))
+
+fun main: int {
+    val t = theme()
+    var cache = oneLayoutCache()
+    val scroll: Map<string, int> = Map()
+    // First, repeated, and changed trees (text, event ids), each against a fresh layout.
+    for (node in [screen("Add", 1), screen("Add", 1), screen("Added", 1), screen("Add", 5), screen("Add", 1)]) {
+        expectEqual(dump(onePaintFrame(oneLayoutCached(node, t, "epaper", 300, 400, scroll, cache), 300, 400)), fresh(node, t, scroll), "cached layout")
+    }
+    expect(cache.boxes.size > 0, "keeps boxes")
+    // The same text at another width is wrapped again.
+    var narrow = oneLayoutCached(screen("Add", 1), t, "epaper", 120, 400, scroll, cache)
+    expectEqual(dump(onePaintFrame(narrow, 120, 400)), dump(onePaintFrame(oneLayout(screen("Add", 1), t, "epaper", 120, 400, scroll), 120, 400)), "another width")
+    // Moved by scroll offsets, also past the end.
+    var box = oneLayoutCached(screen("Add", 1), t, "epaper", 300, 400, scroll, cache)
+    val key = onePaintFrame(box, 300, 400).hits[1].key
+    for (offset in [40, 0, 90, 100000]) {
+        scroll.set(key, offset)
+        oneLayoutRescroll(box, scroll, "r")
+        expectEqual(dump(onePaintFrame(box, 300, 400)), fresh(screen("Add", 1), t, scroll), "rescrolled")
+    }
+    0
+}

@@ -147,10 +147,80 @@ class OneBox(
     val children: array<OneBox>,
     val lines: array<string>,
     var contentH: int,
-    var scrollY: int
+    var scrollY: int,
+    val lineWidths: array<int> = []  // of `lines`, when text
 )
 
-class OneLayoutContext(val theme: Theme, val target: string, val scroll: Map<string, int>)
+class OneLayoutContext(val theme: Theme, val target: string, val scroll: Map<string, int>, val cache: OneLayoutCache)
+
+// What a layout can reuse from the last one, for a backend that lays out one
+// theme, target and width over and over: a slow device spends most of a tap
+// resolving the same styles and wrapping the same text. Entries are checked
+// against their inputs, as a hash alone could show the wrong text or style.
+class OneResolvedEntry(val kind: string, val style: Style, val resolved: Resolved)
+class OneWrapEntry(val text: string, val size: int, val weight: string, val width: int, val maxLines: int, val lines: array<string>, val widths: array<int>)
+class OneLayoutCache(val resolved: Map<int, OneResolvedEntry>, val wraps: Map<int, OneWrapEntry>, val boxes: Map<int, OneBox>)
+
+val oneLayoutCacheMost = 1024
+
+fun oneLayoutCache(): OneLayoutCache = OneLayoutCache(Map(), Map(), Map())
+
+fun oneHashText(hash: int, text: string): int {
+    var h = (hash ^ text.size) * 1099511628211
+    for (b in text) h = (h ^ b) * 1099511628211
+    h
+}
+
+// A copy of a tree with its hashes, made once before laying it out, so unchanged
+// subtrees (most of them, after a tap) keep their boxes.
+fun oneHashTree(node: Node): Node {
+    var style = oneHashText(node.style.entries.size, node.kind)
+    for (entry in node.style.entries) style = oneHashText(oneHashText(oneHashText(oneHashText(style, entry.property), entry.value), entry.target), entry.state)
+    var hash = oneHashText(style, node.key)
+    for (item in node.attrs) hash = oneHashText(oneHashText(hash, item.name), item.value)
+    var scrolls = node.kind == "scroll" || node.kind == "feed"
+    val children: array<Node> = []
+    for (child in node.children) {
+        val hashed = oneHashTree(child)
+        hash = (hash ^ hashed.hash) * 1099511628211
+        if (hashed.hasScroll) scrolls = true
+        children.append(hashed)
+    }
+    Node(node.kind, node.key, node.style, node.attrs, children, hash | 1, style, scrolls)
+}
+
+fun oneSameStyle(a: Style, b: Style): bool {
+    if (a.entries.size != b.entries.size) return false
+    var i = 0
+    while (i < a.entries.size) {
+        val p = a.entries[i]
+        val q = b.entries[i]
+        if (p.property != q.property || p.value != q.value || p.target != q.target || p.state != q.state) return false
+        i = i + 1
+    }
+    true
+}
+
+// Appends the lines of `text` and their widths to `out` and `widths`.
+fun oneWrapCached(var cache: OneLayoutCache, text: string, size: int, weight: string, width: int, maxLines: int, var out: array<string>, var widths: array<int>): void {
+    val key = oneHashText(oneHashText(size * 1009 + width * 31 + maxLines, weight), text)
+    val found = cache.wraps.get(key)
+    if (found != null && found.size == size && found.width == width && found.maxLines == maxLines && found.weight == weight && found.text == text) {
+        for (line in found.lines) out.append(line)
+        for (w in found.widths) widths.append(w)
+        return
+    }
+    val lines = oneWrap(text, size, weight, width, maxLines)
+    val measured: array<int> = []
+    for (line in lines) {
+        out.append(line)
+        measured.append(oneTextWidth(line, size, weight))
+    }
+    for (w in measured) widths.append(w)
+    if (cache.wraps.size >= oneLayoutCacheMost) cache.wraps.clear()
+    cache.wraps.set(key, OneWrapEntry(text, size, weight, width, maxLines, lines, measured))
+    return
+}
 
 fun onePad(r: Resolved, side: string): int {
     val own = r.get("padding$side")
@@ -174,17 +244,68 @@ fun oneLineHeight(r: Resolved): int {
 fun oneIsColumnKind(kind: string): bool = kind == "column" || kind == "pressable" || kind == "scroll" || kind == "feed" || kind == "link"
 
 // Lays out `root` to fill width × height.
-fun oneLayout(root: Node, theme: Theme, target: string, width: int, height: int, scroll: Map<string, int>): OneBox {
+fun oneLayout(root: Node, theme: Theme, target: string, width: int, height: int, scroll: Map<string, int>): OneBox =
+    oneLayoutWith(root, theme, target, width, height, scroll, oneLayoutCache())
+
+// The same, reusing what `cache` holds (one theme, target and width per cache).
+fun oneLayoutCached(root: Node, theme: Theme, target: string, width: int, height: int, scroll: Map<string, int>, var cache: OneLayoutCache): OneBox {
+    oneLayoutWith(oneHashTree(root), theme, target, width, height, scroll, cache)
+}
+
+fun oneLayoutWith(root: Node, theme: Theme, target: string, width: int, height: int, scroll: Map<string, int>, var cache: OneLayoutCache): OneBox {
     oneViewportWidth = width
-    val ctx = OneLayoutContext(theme, target, scroll)
+    var ctx = OneLayoutContext(theme, target, scroll, cache)
     oneMeasure(ctx, root, oneResolveNode(ctx, root), width, height, width, height, "r")
 }
 
-fun oneResolveNode(ctx: OneLayoutContext, node: Node): Resolved = oneResolve(ctx.theme, node.kind, node.style, ctx.target)
+// Applies new scroll offsets to a finished layout, which is all a swipe changes.
+fun oneLayoutRescroll(var box: OneBox, scroll: Map<string, int>, path: string): void {
+    val kind = box.node.kind
+    if (kind == "scroll" || kind == "feed") {
+        val saved = scroll.get(path)
+        val most = if (box.contentH > box.h) box.contentH - box.h else 0
+        var offset = if (saved != null) saved else box.scrollY
+        if (offset > most) offset = most
+        if (offset < 0) offset = 0
+        box.scrollY = offset
+    }
+    var index = 0
+    while (index < box.children.size) {
+        oneLayoutRescroll(box.children[index], scroll, oneChildPath(path, box.children[index].node, index))
+        index = index + 1
+    }
+    return
+}
+
+fun oneResolveNode(var ctx: OneLayoutContext, node: Node): Resolved {
+    var key = node.styleHash
+    if (key == 0) {
+        key = oneHashText(node.style.entries.size, node.kind)
+        for (entry in node.style.entries) key = oneHashText(oneHashText(oneHashText(oneHashText(key, entry.property), entry.value), entry.target), entry.state)
+    }
+    val found = ctx.cache.resolved.get(key)
+    if (found != null && found.kind == node.kind && oneSameStyle(found.style, node.style)) return found.resolved
+    val resolved = oneResolve(ctx.theme, node.kind, node.style, ctx.target)
+    if (ctx.cache.resolved.size >= oneLayoutCacheMost) ctx.cache.resolved.clear()
+    ctx.cache.resolved.set(key, OneResolvedEntry(node.kind, node.style, resolved))
+    resolved
+}
 
 // Measures and lays out `node`. `fixedW`/`fixedH` (-1 when free) are sizes
 // the parent decided (stretch, fill, grow); availW/availH bound hugging.
-fun oneMeasure(ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, fixedW: int, fixedH: int, path: string): OneBox {
+fun oneMeasure(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, fixedW: int, fixedH: int, path: string): OneBox {
+    // What holds a scroll area depends on its place and offset; the rest only on this.
+    if (node.hash == 0 || node.hasScroll) return oneMeasureFresh(ctx, node, r, availW, availH, fixedW, fixedH, path)
+    val key = (((((node.hash ^ availW) * 1099511628211) ^ availH) * 1099511628211 ^ fixedW) * 1099511628211 ^ fixedH) * 1099511628211
+    val found = ctx.cache.boxes.get(key)
+    if (found != null && found.node.hash == node.hash) return OneBox(node, r, 0, 0, found.w, found.h, found.children, found.lines, found.contentH, 0, found.lineWidths)
+    val box = oneMeasureFresh(ctx, node, r, availW, availH, fixedW, fixedH, path)
+    if (ctx.cache.boxes.size >= oneLayoutCacheMost) ctx.cache.boxes.clear()
+    ctx.cache.boxes.set(key, OneBox(node, r, 0, 0, box.w, box.h, box.children, box.lines, box.contentH, 0, box.lineWidths))
+    box
+}
+
+fun oneMeasureFresh(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, fixedW: int, fixedH: int, path: string): OneBox {
     val kind = node.kind
     val pl = onePad(r, "Left")
     val pr = onePad(r, "Right")
@@ -196,6 +317,7 @@ fun oneMeasure(ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, avai
     var h = if (fixedH >= 0) fixedH else if (heightProp != "" && heightProp != "fill" && heightProp != "hug") oneParseInt(heightProp, 0) else -1
     val children: array<OneBox> = []
     val lines: array<string> = []
+    val lineWidths: array<int> = []
     var contentH = 0
 
     if (kind == "text" || kind == "rich") {
@@ -203,12 +325,9 @@ fun oneMeasure(ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, avai
         val weight = r.get("weight")
         val text = if (kind == "text") node.attr("text") else oneRichPlain(node.attr("runs"))
         val room = (if (w >= 0) w else availW) - pl - pr
-        for (line in oneWrap(text, size, weight, if (room < 1) 1 else room, r.int("maxLines", 0))) lines.append(line)
+        oneWrapCached(ctx.cache, text, size, weight, if (room < 1) 1 else room, r.int("maxLines", 0), lines, lineWidths)
         var widest = 0
-        for (line in lines) {
-            val lw = oneTextWidth(line, size, weight)
-            if (lw > widest) widest = lw
-        }
+        for (lw in lineWidths) if (lw > widest) widest = lw
         if (w < 0) w = widest + pl + pr
         if (h < 0) h = lines.size * oneLineHeight(r) + pt + pb
     } else if (kind == "icon" || kind == "image") {
@@ -266,7 +385,7 @@ fun oneMeasure(ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, avai
     }
     w = oneClamp(w, r, "Width")
     h = oneClamp(h, r, "Height")
-    OneBox(node, r, 0, 0, w, h, children, lines, contentH, 0)
+    OneBox(node, r, 0, 0, w, h, children, lines, contentH, 0, lineWidths)
 }
 
 fun oneChildPath(path: string, child: Node, index: int): string = if (child.key != "") "$path/k:${child.key}" else "$path/$index"
@@ -276,7 +395,7 @@ fun oneGrowOf(r: Resolved, axisFill: bool): int {
     if (grow > 0) grow else if (axisFill) 1 else 0
 }
 
-fun oneMeasureColumn(ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, givenW: int, givenH: int, pl: int, pr: int, pt: int, pb: int, path: string): OneBox {
+fun oneMeasureColumn(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, givenW: int, givenH: int, pl: int, pr: int, pt: int, pb: int, path: string): OneBox {
     val kind = node.kind
     val scrolls = kind == "scroll" || kind == "feed"
     var w = givenW
@@ -375,7 +494,7 @@ fun oneMeasureColumn(ctx: OneLayoutContext, node: Node, r: Resolved, availW: int
     outer
 }
 
-fun oneMeasureRow(ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, givenW: int, givenH: int, pl: int, pr: int, pt: int, pb: int, path: string): OneBox {
+fun oneMeasureRow(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, givenW: int, givenH: int, pl: int, pr: int, pt: int, pb: int, path: string): OneBox {
     var w = givenW
     var h = givenH
     val gap = r.int("gap", 0)

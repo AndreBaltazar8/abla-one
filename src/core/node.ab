@@ -6,7 +6,10 @@ import "style.ab"
 
 class Attr(val name: string, val value: string)
 
-class Node(val kind: string, val key: string, val style: Style, val attrs: array<Attr>, val children: array<Node>) {
+class Node(val kind: string, val key: string, val style: Style, val attrs: array<Attr>, val children: array<Node>,
+    // In the copy a cached layout works on (oneHashTree), 0 elsewhere: hashes of this
+    // subtree and its style, and whether the subtree has a scroll area.
+    val hash: int = 0, val styleHash: int = 0, val hasScroll: bool = false) {
     fun attr(name: string): string {
         var found = ""
         for (item in attrs) if (item.name == name) found = item.value

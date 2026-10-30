@@ -71,7 +71,13 @@ class OneEpaperState(
     val offsets: Map<string, int>,
     var owners: array<string>,
     // Called between bands of a render: a device reads its touch panel here.
-    var onBand: () -> void = { }
+    var onBand: () -> void = { },
+    // Style and text work kept between layouts, the last layout, and the state
+    // revision it is of: a swipe that changed nothing else reuses it.
+    var layoutCache: OneLayoutCache = oneLayoutCache(),
+    val boxes: array<OneBox> = [],
+    var boxRevision: int = -1,
+    var scrolled: bool = false
 )
 
 fun oneEpaperBandSurface(options: OneEpaperOptions): OneSurface {
@@ -207,8 +213,17 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     val o = state.options
     val lw = oneEpaperLogicalWidth(o)
     val lh = oneEpaperLogicalHeight(o)
-    var ui = oneUiSized("epaper", theme, lw)
-    val frame = onePaintFrame(oneLayout(app.render(ui), theme, "epaper", lw, lh, state.scroll), lw, lh)
+    if (state.boxes.size == 1 && state.scrolled && state.boxRevision == oneRevision()) oneLayoutRescroll(state.boxes[0], state.scroll, "r")
+    else {
+        var ui = oneUiSized("epaper", theme, lw)
+        val built = app.render(ui)
+        val laid = oneLayoutCached(built, theme, "epaper", lw, lh, state.scroll, state.layoutCache)
+        state.boxes.clear()
+        state.boxes.append(laid)
+    }
+    state.scrolled = false
+    state.boxRevision = oneRevision()
+    val frame = onePaintFrame(state.boxes[0], lw, lh)
     state.frame = frame
     val owners: array<string> = []
     val scaled = oneEpaperScaleFrame(frame, o.scale, o.width, o.height, o.minStroke, o.crisp, owners)
@@ -590,6 +605,7 @@ fun oneEpaperScroll(var state: OneEpaperState, x: int, y: int, dy: int): bool {
             if (next < 0) next = 0
             if (next != current) {
                 state.scroll.set(h.key, next)
+                state.scrolled = true
                 return true
             }
         }
