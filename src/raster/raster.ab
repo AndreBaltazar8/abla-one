@@ -70,19 +70,25 @@ fun oneSurface(width: int, height: int, background: int): OneSurface =
 fun oneSurfaceBand(width: int, height: int, y0: int, rows: int, background: int): OneSurface =
     OneSurface(width, height, filledArray(width * rows, background), [0, y0, width, y0 + rows], y0, [], 0, y0, width, y0 + rows)
 
-// Moves a band surface to the band starting at y0 (as many rows as it has),
-// cleared to `background`: one surface serves every band of a frame.
-fun oneSurfaceMoveBand(var surface: OneSurface, y0: int, background: int): void {
-    var i = 0
-    while (i < surface.pixels.size) {
-        surface.pixels[i] = background
-        i = i + 1
+// Points a band surface at the rectangle x0 until x1, y0 until y0 + rows of
+// the frame (rows at most the surface's), with that rectangle cleared to
+// `background` and drawing clipped to it: redrawing costs what changed.
+fun oneSurfaceMoveTo(var surface: OneSurface, x0: int, y0: int, x1: int, rows: int, background: int): void {
+    var row = 0
+    while (row < rows) {
+        var i = row * surface.width + x0
+        val end = row * surface.width + x1
+        while (i < end) {
+            surface.pixels[i] = background
+            i = i + 1
+        }
+        row = row + 1
     }
     surface.clips.clear()
-    surface.clips.append(0)
+    surface.clips.append(x0)
     surface.clips.append(y0)
-    surface.clips.append(surface.width)
-    surface.clips.append(y0 + surface.pixels.size / surface.width)
+    surface.clips.append(x1)
+    surface.clips.append(y0 + rows)
     surface.originY = y0
     surface.syncClip()
     return
@@ -195,9 +201,12 @@ fun oneFill(var surface: OneSurface, var path: OnePath, color: int, alpha: int):
     var by = f64ToInt(minY) - 1
     var bx1 = f64ToInt(maxX) + 2
     var by1 = f64ToInt(maxY) + 2
-    if (bx < surface.clipX0()) bx = surface.clipX0()
+    // Rows clip here. Columns only to the surface: coverage accumulates from a
+    // shape's left edge, and blend applies the clip's sides.
+    if (bx1 <= surface.clipX0() || bx >= surface.clipX1()) return
+    if (bx < 0) bx = 0
     if (by < surface.clipY0()) by = surface.clipY0()
-    if (bx1 > surface.clipX1()) bx1 = surface.clipX1()
+    if (bx1 > surface.width) bx1 = surface.width
     if (by1 > surface.clipY1()) by1 = surface.clipY1()
     val bw = bx1 - bx
     val bh = by1 - by
@@ -534,19 +543,105 @@ fun oneGlyphPath(var path: OnePath, code: int, weight: int, size: f64, x: f64, b
 }
 
 fun oneDrawText(var surface: OneSurface, text: string, x: int, y: int, h: int, size: int, weight: string, color: string): void {
-    var path = onePath()
     val ascent = f64FromInt(oneInterAscent * size) / 1000.0
     val descent = f64FromInt(oneInterDescent * size) / 1000.0
-    val baseline = f64FromInt(y) + (f64FromInt(h) - ascent - descent) / 2.0 + ascent
+    val baseline = oneFloor(f64FromInt(y) + (f64FromInt(h) - ascent - descent) / 2.0 + ascent + 0.5)
+    val rgb = oneColorValue(color)
+    val alpha = oneColorAlpha(color)
+    val w = oneWeightIndex(weight)
     var pen = f64FromInt(x)
     var i = 0
-    val w = oneWeightIndex(weight)
     while (i < text.size) {
-        val code = oneCodeAt(text, i)
-        pen = pen + oneGlyphPath(path, code, w, f64FromInt(size), pen, baseline)
+        val whole = oneFloor(pen)
+        val glyph = oneGlyphBitmap(oneCodeAt(text, i), w, size, oneFloor((pen - f64FromInt(whole)) * 4.0))
+        oneBlitGlyph(surface, glyph, whole, baseline, rgb, alpha)
+        pen = pen + glyph.advance
         i = i + oneCodeLength(text[i])
     }
-    oneFill(surface, path, oneColorValue(color), oneColorAlpha(color))
+    return
+}
+
+// A character's coverage (a byte per pixel, rows of w) at one size, weight and
+// quarter-pixel position, relative to its pen and baseline. Outlines are costly
+// to decode and fill, and text repeats its letters.
+class OneGlyphBitmap(val left: int, val top: int, val w: int, val h: int, val cover: string, val advance: f64)
+
+val oneGlyphCache: Map<int, OneGlyphBitmap> = Map()
+
+fun oneGlyphBitmap(code: int, weight: int, size: int, quarter: int): OneGlyphBitmap {
+    val key = (code << 20) | (size << 8) | (weight << 2) | quarter
+    val cached = oneGlyphCache.get(key)
+    if (cached != null) return cached
+    var path = onePath()
+    val advance = oneGlyphPath(path, code, weight, f64FromInt(size), f64FromInt(quarter) / 4.0, 0.0)
+    path.close()
+    var glyph = OneGlyphBitmap(0, 0, 0, 0, "", advance)
+    if (path.xs.size >= 3) {
+        var minX = path.xs[0]
+        var maxX = path.xs[0]
+        var minY = path.ys[0]
+        var maxY = path.ys[0]
+        for (v in path.xs) {
+            if (v < minX) minX = v
+            if (v > maxX) maxX = v
+        }
+        for (v in path.ys) {
+            if (v < minY) minY = v
+            if (v > maxY) maxY = v
+        }
+        val left = oneFloor(minX)
+        val top = oneFloor(minY)
+        val w = oneFloor(maxX) + 2 - left
+        val h = oneFloor(maxY) + 2 - top
+        val acc: array<int> = filledArray((w + 2) * h, 0)
+        var start = 0
+        for (end in path.ends) {
+            var i = start
+            while (i < end) {
+                val j = if (i + 1 < end) i + 1 else start
+                oneAccumulateLine(acc, w + 2, h, oneFixed(path.xs[i]) - left * 256, oneFixed(path.ys[i]) - top * 256,
+                    oneFixed(path.xs[j]) - left * 256, oneFixed(path.ys[j]) - top * 256)
+                i = i + 1
+            }
+            start = end
+        }
+        var cover = byteBuffer()
+        var y = 0
+        while (y < h) {
+            var sum = 0
+            var x = 0
+            while (x < w) {
+                sum = sum + acc[y * (w + 2) + x]
+                var c = if (sum < 0) 0 - sum else sum
+                if (c > 65536) c = 65536
+                cover.appendByteValue((c * 255 + 32768) >> 16)
+                x = x + 1
+            }
+            y = y + 1
+        }
+        glyph = OneGlyphBitmap(left, top, w, h, cover.toText(), advance)
+    }
+    oneGlyphCache.set(key, glyph)
+    glyph
+}
+
+fun oneBlitGlyph(var surface: OneSurface, glyph: OneGlyphBitmap, penX: int, baseline: int, color: int, alpha: int): void {
+    val x0 = penX + glyph.left
+    val y0 = baseline + glyph.top
+    var y = if (y0 < surface.clipTop) surface.clipTop - y0 else 0
+    val rows = if (y0 + glyph.h > surface.clipBottom) surface.clipBottom - y0 else glyph.h
+    val first = if (x0 < surface.clipLeft) surface.clipLeft - x0 else 0
+    val columns = if (x0 + glyph.w > surface.clipRight) surface.clipRight - x0 else glyph.w
+    while (y < rows) {
+        var x = first
+        val row = y * glyph.w
+        while (x < columns) {
+            val c = glyph.cover[row + x]
+            if (c != 0) surface.blend(x0 + x, y0 + y, color, if (alpha == 255) c else (c * alpha + 127) / 255)
+            x = x + 1
+        }
+        y = y + 1
+    }
     return
 }
 
@@ -783,19 +878,23 @@ fun oneRasterBand(frame: OneFrame, background: string, icons: OneIconSource, y0:
     surface
 }
 
-// Whether a paint can draw in rows top until bottom (text and icons may reach
-// a little past their box); clips always count.
-fun onePaintReaches(p: OnePaint, top: int, bottom: int): bool {
+// How far a paint may draw past its box (text: descenders, side bearings).
+fun onePaintReach(p: OnePaint): int = if (p.op == "text") p.h / 4 + 2 else 0
+
+// Whether a paint can draw in the rectangle; clips always count.
+fun onePaintReaches(p: OnePaint, left: int, top: int, right: int, bottom: int): bool {
     if (p.op == "clip" || p.op == "unclip") return true
-    val reach = if (p.op == "text") p.h else 0
-    p.y - reach < bottom && p.y + p.h + reach > top
+    val reach = onePaintReach(p)
+    p.y - reach < bottom && p.y + p.h + reach > top && p.x - reach < right && p.x + p.w + reach > left
 }
 
 fun oneRasterInto(var surface: OneSurface, frame: OneFrame, icons: OneIconSource): void {
-    val bandTop = surface.originY
-    val bandBottom = surface.originY + surface.pixels.size / surface.width
+    val left = surface.clipLeft
+    val top = surface.clipTop
+    val right = surface.clipRight
+    val bottom = surface.clipBottom
     for (p in frame.paints) {
-        if (!onePaintReaches(p, bandTop, bandBottom)) {
+        if (!onePaintReaches(p, left, top, right, bottom)) {
         } else if (p.op == "rect") {
             var path = onePath()
             oneRoundRectPath(f64FromInt(p.x), f64FromInt(p.y), f64FromInt(p.w), f64FromInt(p.h), f64FromInt(p.radius), path)

@@ -9,7 +9,7 @@ import "../raster/raster.ab"
 // rasterized (one-layout, one-raster), then quantised to the panel's four
 // grey levels with the SSD1677 driver's own Bayer dither, in its drawing
 // planes, a band of rows at a time. Changed areas become byte-aligned dirty rectangles, and the
-// backend picks the refresh mode: a full quality refresh first and
+// backend picks the refresh mode: a full refresh first and
 // periodically, fast partial refreshes in between. The device only copies
 // the rectangles into its canvas and refreshes them (abla-embedded's
 // ssd1677 session upload/refresh), so it needs no heap.
@@ -56,16 +56,17 @@ class OneEpaperState(
     var full: bool,
     // Scroll offsets by scroll area (layout path), in logical pixels.
     val scroll: Map<string, int>,
-    // Each band's signature (oneEpaperBandSignature) as last drawn, and how
-    // many bands the last render drew: unchanged bands are not drawn again.
-    val bands: array<int>,
-    var bandsDrawn: int,
+    // The paints last drawn and their hashes (what the next render diffs
+    // against), and how many pixels the last render drew.
+    var paints: array<OnePaint>,
+    var hashes: array<int>,
+    var pixelsDrawn: int,
     // The band surface (and its fill scratch), kept between renders.
     var surface: OneSurface
 )
 
 fun oneEpaperState(options: OneEpaperOptions): OneEpaperState =
-    OneEpaperState(options, filledArray(options.width * options.height / 4, 0), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), filledArray(options.height / oneEpaperBandRows, 0), 0, oneSurfaceBand(options.width, options.height, 0, oneEpaperBandRows, oneColorValue(options.background)))
+    OneEpaperState(options, filledArray(options.width * options.height / 4, 0), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), [], [], 0, oneSurfaceBand(options.width, options.height, 0, oneEpaperBandRows, oneColorValue(options.background)))
 
 // Portrait rows rasterized at a time: a multiple of 8 (a canvas byte) that
 // divides 800. A whole frame at once would take a 480×800 surface, more
@@ -139,9 +140,9 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     val frame = onePaintFrame(oneLayout(app.render(ui), theme, "epaper", lw, lh, state.scroll), lw, lh)
     state.frame = frame
     val scaled = oneEpaperScaleFrame(frame, o.scale, o.width, o.height, o.minStroke)
-    // Rasterize band by band, quantise each portrait column of a band into
-    // canvas bytes (eight portrait rows are one physical byte), and mark the
-    // 8×8 tiles whose bytes changed.
+    // Redraw what the paint list says changed, quantise it into canvas bytes
+    // (eight portrait rows are one physical byte), and mark the 8×8 tiles
+    // whose bytes changed. A band of rows at a time, on one kept surface.
     val pw = o.height
     val ph = o.width
     val stride = pw / 8
@@ -150,61 +151,62 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     val tilesY = (ph + 7) / 8
     val dirty = filledArray(tilesX * tilesY, 0)
     var changed = 0
-    // One band surface (and its fill scratch) serves every band: rendering
-    // allocates little, which a small heap's free lists cannot afford.
     val background = oneColorValue(o.background)
+    val hashes: array<int> = []
+    for (p in scaled.paints) hashes.append(oneEpaperPaintHash(p))
+    val areas = if (state.full) [OneEpaperRect(0, 0, o.width, o.height)]
+        else oneEpaperChanged(state.paints, state.hashes, scaled.paints, hashes, o.width, o.height)
     var drawn = 0
-    var y0 = 0
-    while (y0 < o.height) {
-        val rows = oneEpaperBandRows
-        val band = y0 / rows
-        val signature = oneEpaperBandSignature(scaled, y0, rows)
-        if (!state.full && state.bands[band] == signature) {
-            y0 = y0 + rows
-            continue
-        }
-        state.bands[band] = signature
-        drawn = drawn + 1
-        oneSurfaceMoveBand(state.surface, y0, background)
-        oneRasterInto(state.surface, scaled, icons)
-        var x = 0
-        while (x < o.width) {
-            val py = oneEpaperPhysicalY(x, 0, o.width)
-            var column = y0 / 8
-            while (column * 8 < y0 + rows) {
-                var lsb = 0
-                var msb = 0
-                var k = 0
-                while (k < 8) {
-                    val y = column * 8 + k
-                    val level = oneEpaperLevel(oneEpaperGray(state.surface.pixels[(y - y0) * o.width + x]), y, py)
-                    if (level % 2 == 1) lsb = lsb + oneEpaperBit(k)
-                    if (level >= 2) msb = msb + oneEpaperBit(k)
-                    k = k + 1
-                }
-                val offset = py * stride + column
-                if (state.planes[offset] != lsb || state.planes[offset + plane] != msb) {
-                    state.planes[offset] = lsb
-                    state.planes[offset + plane] = msb
-                    val tile = (py / 8) * tilesX + column
-                    if (dirty[tile] == 0) {
-                        dirty[tile] = 1
-                        changed = changed + 1
+    for (area in areas) {
+        var y0 = area.y
+        while (y0 < area.y + area.h) {
+            val remaining = area.y + area.h - y0
+            val rows = if (remaining > oneEpaperBandRows) oneEpaperBandRows else remaining
+            oneSurfaceMoveTo(state.surface, area.x, y0, area.x + area.w, rows, background)
+            oneRasterInto(state.surface, scaled, icons)
+            drawn = drawn + area.w * rows
+            var x = area.x
+            while (x < area.x + area.w) {
+                val py = oneEpaperPhysicalY(x, 0, o.width)
+                var column = y0 / 8
+                while (column * 8 < y0 + rows) {
+                    var lsb = 0
+                    var msb = 0
+                    var k = 0
+                    while (k < 8) {
+                        val y = column * 8 + k
+                        val level = oneEpaperLevel(oneEpaperGray(state.surface.pixels[(y - y0) * o.width + x]), y, py)
+                        if (level % 2 == 1) lsb = lsb + oneEpaperBit(k)
+                        if (level >= 2) msb = msb + oneEpaperBit(k)
+                        k = k + 1
                     }
+                    val offset = py * stride + column
+                    if (state.planes[offset] != lsb || state.planes[offset + plane] != msb) {
+                        state.planes[offset] = lsb
+                        state.planes[offset + plane] = msb
+                        val tile = (py / 8) * tilesX + column
+                        if (dirty[tile] == 0) {
+                            dirty[tile] = 1
+                            changed = changed + 1
+                        }
+                    }
+                    column = column + 1
                 }
-                column = column + 1
+                x = x + 1
             }
-            x = x + 1
+            y0 = y0 + rows
         }
-        y0 = y0 + rows
     }
-    state.bandsDrawn = drawn
+    state.paints = scaled.paints
+    state.hashes = hashes
+    state.pixelsDrawn = drawn
     var rects = oneEpaperRects(dirty, tilesX, tilesY, ph)
     var mode = oneEpaperFastest
     if (rects.size > 0) {
         val area = changed * 100 / (tilesX * tilesY)
         if (state.full || state.partials >= o.fullEvery || area >= o.fullArea) {
-            mode = oneEpaperQuality
+            // Text, not Quality: 0.7 s rather than 3.4 s on the panel, with far less flashing.
+            mode = oneEpaperText
             rects = [OneEpaperRect(0, 0, pw, ph)]
             state.partials = 0
             state.full = false
@@ -217,21 +219,15 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     OneEpaperUpdate(state.revision, mode, rects, state.planes)
 }
 
-// A hash of what can draw in a band: bands with the same signature look the same.
-fun oneEpaperBandSignature(frame: OneFrame, y0: int, rows: int): int {
+fun oneEpaperPaintHash(p: OnePaint): int {
     var h = 17
-    for (p in frame.paints) {
-        if (onePaintReaches(p, y0, y0 + rows)) {
-            h = h * 31 + p.x
-            h = h * 31 + p.y
-            h = h * 31 + p.w
-            h = h * 31 + p.h
-            h = h * 31 + p.radius
-            h = h * 31 + p.size
-            h = oneEpaperHashText(oneEpaperHashText(oneEpaperHashText(oneEpaperHashText(oneEpaperHashText(h, p.op), p.color), p.text), p.weight), p.sides)
-        }
-    }
-    h
+    h = h * 31 + p.x
+    h = h * 31 + p.y
+    h = h * 31 + p.w
+    h = h * 31 + p.h
+    h = h * 31 + p.radius
+    h = h * 31 + p.size
+    oneEpaperHashText(oneEpaperHashText(oneEpaperHashText(oneEpaperHashText(oneEpaperHashText(h, p.op), p.color), p.text), p.weight), p.sides)
 }
 
 fun oneEpaperHashText(hash: int, text: string): int {
@@ -240,8 +236,84 @@ fun oneEpaperHashText(hash: int, text: string): int {
     h
 }
 
+// The screen areas to redraw between two paint lists: around each paint only
+// one of them has, with rows aligned to canvas bytes, overlaps merged. Clips
+// that changed, or the same paints in another order, redraw everything.
+fun oneEpaperChanged(old: array<OnePaint>, oldHashes: array<int>, new: array<OnePaint>, newHashes: array<int>, width: int, height: int): array<OneEpaperRect> {
+    val whole = [OneEpaperRect(0, 0, width, height)]
+    val counts: Map<int, int> = Map()
+    for (h in oldHashes) counts.set(h, (counts.get(h) ?? 0) + 1)
+    val areas: array<OneEpaperRect> = []
+    var i = 0
+    while (i < new.size) {
+        val left = counts.get(newHashes[i]) ?? 0
+        if (left > 0) counts.set(newHashes[i], left - 1)
+        else {
+            if (new[i].op == "clip" || new[i].op == "unclip") return whole
+            oneEpaperAddArea(areas, new[i], width, height)
+        }
+        i = i + 1
+    }
+    i = 0
+    while (i < old.size) {
+        val left = counts.get(oldHashes[i]) ?? 0
+        if (left > 0) {
+            counts.set(oldHashes[i], left - 1)
+            if (old[i].op == "clip" || old[i].op == "unclip") return whole
+            oneEpaperAddArea(areas, old[i], width, height)
+        }
+        i = i + 1
+    }
+    if (areas.size == 0 && old.size == new.size) {
+        i = 0
+        while (i < new.size) {
+            if (oldHashes[i] != newHashes[i]) return whole
+            i = i + 1
+        }
+    }
+    // Merge until no two overlap (they share canvas bytes otherwise).
+    var merged = true
+    while (merged) {
+        merged = false
+        var a = 0
+        while (a < areas.size && !merged) {
+            var b = a + 1
+            while (b < areas.size && !merged) {
+                val p = areas[a]
+                val q = areas[b]
+                if (p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h) {
+                    val x0 = if (p.x < q.x) p.x else q.x
+                    val y0 = if (p.y < q.y) p.y else q.y
+                    val x1 = if (p.x + p.w > q.x + q.w) p.x + p.w else q.x + q.w
+                    val y1 = if (p.y + p.h > q.y + q.h) p.y + p.h else q.y + q.h
+                    areas[a] = OneEpaperRect(x0, y0, x1 - x0, y1 - y0)
+                    areas[b] = areas[areas.size - 1]
+                    areas.truncate(areas.size - 1)
+                    merged = true
+                }
+                b = b + 1
+            }
+            a = a + 1
+        }
+    }
+    areas
+}
+
+fun oneEpaperAddArea(var areas: array<OneEpaperRect>, p: OnePaint, width: int, height: int): void {
+    val reach = onePaintReach(p)
+    val x0 = if (p.x - reach < 0) 0 else p.x - reach
+    val x1 = if (p.x + p.w + reach > width) width else p.x + p.w + reach
+    val top = if (p.y - reach < 0) 0 else p.y - reach
+    val bottom = if (p.y + p.h + reach > height) height else p.y + p.h + reach
+    if (x1 <= x0 || bottom <= top) return
+    val y0 = top / 8 * 8
+    val y1 = (bottom + 7) / 8 * 8
+    areas.append(OneEpaperRect(x0, y0, x1 - x0, (if (y1 > height) height else y1) - y0))
+    return
+}
+
 // Dirty tiles as rectangles: runs per tile row, joined downwards while the
-// run lines up. Many small rectangles collapse into their bounds.
+// run lines up. Very many small rectangles collapse into their bounds.
 fun oneEpaperRects(dirty: array<int>, tilesX: int, tilesY: int, height: int): array<OneEpaperRect> {
     val open: array<OneEpaperRect> = []
     val done: array<OneEpaperRect> = []
@@ -275,7 +347,7 @@ fun oneEpaperRects(dirty: array<int>, tilesX: int, tilesY: int, height: int): ar
     for (r in open) done.append(r)
     val out: array<OneEpaperRect> = []
     for (r in done) out.append(OneEpaperRect(r.x, r.y, r.w, if (r.y + r.h > height) height - r.y else r.h))
-    if (out.size <= 12) return out
+    if (out.size <= 48) return out
     var left = 100000
     var top = 100000
     var right = 0

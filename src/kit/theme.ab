@@ -33,7 +33,7 @@ fun oneDefaultTheme(): Theme {
     t.token("epaper:subtle", "#777777")
     t.token("epaper:surface-alt", "#d0d0d0")
     t.token("epaper:surface-pressed", "#a0a0a0")
-    t.token("epaper:line", "#808080")
+    t.token("epaper:line", "#000000")
     t.token("epaper:accent", "#000000")
     t.token("epaper:danger", "#000000")
     for (n in ["1", "2", "3", "4", "5", "6"]) {

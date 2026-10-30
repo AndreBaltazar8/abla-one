@@ -54,7 +54,7 @@ fun OneEpaperHost.refresh(): void {
 // The whole panel as one update (a device that is new or fell behind).
 fun OneEpaperHost.fullWire(): string {
     val o = state.options
-    oneEpaperWire(OneEpaperUpdate(state.revision, oneEpaperQuality, [OneEpaperRect(0, 0, o.height, o.width)], state.planes), o.height, o.width)
+    oneEpaperWire(OneEpaperUpdate(state.revision, oneEpaperText, [OneEpaperRect(0, 0, o.height, o.width)], state.planes), o.height, o.width)
 }
 
 fun OneEpaperHost.wireFor(have: int): string =

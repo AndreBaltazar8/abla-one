@@ -46,7 +46,7 @@ fun main: int {
     var state = oneEpaperState(onePaperMonoOptions())
     expectEqual(oneEpaperLogicalWidth(state.options), 360, "logical width at 133%")
     val first = oneEpaperRender(app, t, state, noIcons())
-    expectEqual(first.mode, oneEpaperQuality, "the first frame is a full quality refresh")
+    expectEqual(first.mode, oneEpaperText, "the first frame is a full quality refresh")
     expectEqual(first.rects.size, 1, "covering")
     expect(first.rects[0].w == 800 && first.rects[0].h == 480, "the whole panel")
     expectEqual(first.planes.size, 96000, "PaperMono canvas: two 48000-byte planes")
@@ -86,12 +86,12 @@ fun main: int {
     expect(area < 800 * 480 / 10, "only a small area (${area} px)")
 
     // Only the bands that changed were drawn, and the planes equal a fresh render.
-    expect(state.bandsDrawn > 0 && state.bandsDrawn <= 6, "a tap draws few bands (${state.bandsDrawn})")
+    expect(state.pixelsDrawn > 0 && state.pixelsDrawn < 480 * 800 / 10, "a tap redraws little (${state.pixelsDrawn} pixels)")
     var freshApp = Gallery()
     freshApp.count = app.count
     var fresh = oneEpaperState(onePaperMonoOptions())
     oneEpaperRender(freshApp, t, fresh, noIcons())
-    expectEqual(fresh.bandsDrawn, 20, "a first frame draws every band")
+    expectEqual(fresh.pixelsDrawn, 480 * 800, "a first frame draws every pixel")
     var planesMatch = true
     var planeAt = 0
     while (planeAt < 96000) {
@@ -125,7 +125,7 @@ fun main: int {
         app.count = app.count + 1
         app.tab = 0
         val u = oneEpaperRender(app, t, state, noIcons())
-        if (u.mode == oneEpaperQuality) full = true
+        if (u.mode == oneEpaperText) full = true
         n = n + 1
     }
     expect(full, "a full quality refresh comes back after ${state.options.fullEvery} partials")

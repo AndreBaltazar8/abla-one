@@ -68,7 +68,7 @@ def main():
         canvas = bytearray(2 * PLANE)
         status, wire = get('/one/epaper/update?have=-1')
         revision, mode, rects = apply(canvas, wire)
-        check(status == 200 and mode == 1 and rects == [(0, 0, 800, 480)], 'a new device gets the whole panel with a quality refresh', (mode, rects))
+        check(status == 200 and mode == 2 and rects == [(0, 0, 800, 480)], 'a new device gets the whole panel with a quality refresh', (mode, rects))
         check(canvas == get('/one/epaper/canvas')[1], 'the simulated canvas equals the host canvas')
         status, _ = get(f'/one/epaper/update?have={revision}')
         check(status == 204, 'nothing new: 204')
@@ -89,7 +89,7 @@ def main():
         get(f'/one/epaper/touch?x=240&y={button + 20}&have={stale}', 'POST')
         status, wire = get(f'/one/epaper/touch?x=240&y={button + 20}&have={stale}', 'POST')
         revision, mode, rects = apply(canvas, wire)
-        check(mode == 1 and rects == [(0, 0, 800, 480)], 'a device that fell behind gets a full update', (mode, rects))
+        check(mode == 2 and rects == [(0, 0, 800, 480)], 'a device that fell behind gets a full update', (mode, rects))
         check(canvas == get('/one/epaper/canvas')[1], 'and matches the host again')
 
         # Tap the "Pessoas" tab at the bottom right: a larger change.
