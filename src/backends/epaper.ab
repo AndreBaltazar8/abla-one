@@ -29,8 +29,8 @@ class OneEpaperOptions(
     val fullArea: int,
     // The thinnest border or rule, in panel pixels: one is too faint on e-paper.
     val minStroke: int = 2,
-    // Only solid black and white: the panel's greys look washed out, above all
-    // under fast refreshes. Light fills become outlines (oneEpaperCrispPaint).
+    // Sharp: no antialiasing or dither, text and lines solid (oneEpaperCrispPaint),
+    // fills in the panel's own shades.
     val crisp: bool = true
 )
 
@@ -68,8 +68,14 @@ class OneEpaperState(
     var surface: OneSurface
 )
 
+fun oneEpaperBandSurface(options: OneEpaperOptions): OneSurface {
+    var surface = oneSurfaceBand(options.width, options.height, 0, oneEpaperBandRows, oneColorValue(options.background))
+    surface.crisp = options.crisp
+    surface
+}
+
 fun oneEpaperState(options: OneEpaperOptions): OneEpaperState =
-    OneEpaperState(options, filledArray(options.width * options.height / 4, 0), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), [], [], 0, oneSurfaceBand(options.width, options.height, 0, oneEpaperBandRows, oneColorValue(options.background)))
+    OneEpaperState(options, filledArray(options.width * options.height / 4, 0), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), [], [], 0, oneEpaperBandSurface(options))
 
 // Portrait rows rasterized at a time: a multiple of 8 (a canvas byte) that
 // divides 800. A whole frame at once would take a 480×800 surface, more
@@ -96,20 +102,22 @@ fun oneEpaperLevel(gray: int, px: int, py: int): int {
 // first), each as nibble * 4 - 30.
 val oneEpaperDither: array<int> = [-30, 18, -22, 26, -14, 2, -6, 10, -18, 30, -26, 22, -2, 14, -10, 6]
 
-// Black or white, no dither: thin strokes' grey edges would scatter into dots
-// and look faded. The threshold keeps them dark.
-val oneEpaperCrispThreshold = 192
-
-fun oneEpaperCrispLevel(gray: int): int = if (gray >= oneEpaperCrispThreshold) 3 else 0
+// The panel's nearest grey, no dither: 0 black … 3 white.
+fun oneEpaperShade(gray: int): int {
+    val shade = (gray + 42) / 85
+    if (shade > 3) 3 else shade
+}
 
 fun oneEpaperGray(rgb: int): int = (((rgb >> 16) & 255) * 299 + ((rgb >> 8) & 255) * 587 + (rgb & 255) * 114) / 1000
 
-// A fill too light to print as black would vanish: its outline instead.
-fun oneEpaperCrispPaint(p: OnePaint, minStroke: int): OnePaint {
-    if (p.op != "rect" || oneColorAlpha(p.color) == 0) return p
-    val gray = oneEpaperGray(oneColorValue(p.color))
-    if (gray < oneEpaperCrispThreshold || gray >= 250) return p
-    OnePaint("border", p.x, p.y, p.w, p.h, p.radius, "#000000", p.text, p.size, p.weight, "$minStroke $minStroke $minStroke $minStroke")
+// Text, icons and lines print solid black or white, whatever grey the theme
+// asks for, and small text is a little heavier: thin strokes are what a panel
+// without soft edges loses. Fills keep their shade.
+fun oneEpaperCrispPaint(p: OnePaint): OnePaint {
+    if (p.op == "rect" || p.op == "clip" || p.op == "unclip" || p.op == "image") return p
+    val solid = if (p.color == "") "" else if (oneEpaperGray(oneColorValue(p.color)) < 192) "#000000" else "#ffffff"
+    val weight = if (p.op == "text" && p.size < 24 && (p.weight == "" || p.weight == "regular" || p.weight == "normal")) "medium" else p.weight
+    OnePaint(p.op, p.x, p.y, p.w, p.h, p.radius, solid, p.text, p.size, weight, p.sides)
 }
 
 // The paint list scaled from logical to panel pixels.
@@ -126,7 +134,7 @@ fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int, mi
             if (h < minStroke) h = minStroke
         }
         val paint = OnePaint(p.op, x, y, w, h, p.radius * scale / 100, p.color, p.text, p.size * scale / 100, p.weight, oneEpaperScaleSides(p.sides, scale, minStroke))
-        paints.append(if (crisp) oneEpaperCrispPaint(paint, minStroke) else paint)
+        paints.append(if (crisp) oneEpaperCrispPaint(paint) else paint)
     }
     OneFrame(paints, frame.hits, frame.visible, width, height)
 }
@@ -196,7 +204,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
                         // (Most of a screen is one colour: skip its arithmetic.)
                         val pixel = state.surface.pixels[(y - y0) * o.width + x]
                         val level = if (pixel == 16777215) 3
-                            else if (o.crisp) oneEpaperCrispLevel(oneEpaperGray(pixel))
+                            else if (o.crisp) oneEpaperShade(oneEpaperGray(pixel))
                             else oneEpaperLevel(oneEpaperGray(pixel), y, py)
                         if (level % 2 == 1) lsb = lsb + oneEpaperBit(k)
                         if (level >= 2) msb = msb + oneEpaperBit(k)

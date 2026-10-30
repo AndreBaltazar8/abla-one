@@ -1,5 +1,6 @@
 import "../gallery.ab"
 import "../../../src/backends/papermono.ab"
+import "../../../build/papermono/icons.ab"
 #requiredInternalFunction("freestandingMemorySet32", "memset")
 
 // The gallery on an M5Stack PaperMono, running on the device:
@@ -8,5 +9,5 @@ import "../../../src/backends/papermono.ab"
 @export("app_main")
 fun appMain(): void {
     var app: OneApp = Gallery()
-    onePaperMonoRun(app, oneDefaultTheme(), OneIconSource({ name -> "" }))
+    onePaperMonoRun(app, oneDefaultTheme(), OneIconSource({ name -> oneEmbeddedIcon(name) }))
 }

@@ -14,7 +14,10 @@ import "inter_glyphs.ab"
 // `pixels` holds rows originY… of a width×height frame: all of them, or one
 // band (oneSurfaceBand), which bounds memory on a small device.
 // `scratch` is fills' coverage buffer, kept so drawing does not allocate.
-class OneSurface(val width: int, val height: int, val pixels: array<int>, val clips: array<int>, var originY: int = 0, val scratch: array<int> = [], var clipLeft: int = 0, var clipTop: int = 0, var clipRight: int = 0, var clipBottom: int = 0) {
+class OneSurface(val width: int, val height: int, val pixels: array<int>, val clips: array<int>, var originY: int = 0, val scratch: array<int> = [], var clipLeft: int = 0, var clipTop: int = 0, var clipRight: int = 0, var clipBottom: int = 0,
+    // No antialiasing: a pixel is a shape's exact colour or untouched, and
+    // glyphs sit on whole pixels (for panels that cannot show soft edges).
+    var crisp: bool = false) {
     // The innermost clip, kept in fields: blend reads it for every pixel.
     fun clipX0(): int = clipLeft
     fun clipY0(): int = clipTop
@@ -247,7 +250,9 @@ fun oneFill(var surface: OneSurface, var path: OnePath, color: int, alpha: int):
             sum = sum + surface.scratch[row + x]
             var cover = if (sum < 0) 0 - sum else sum
             if (cover > 65536) cover = 65536
-            if (cover > 131) surface.blend(bx + x, by + y, color, (cover * alpha + 32768) >> 16)
+            if (surface.crisp) {
+                if (cover >= 32768) surface.blend(bx + x, by + y, color, alpha)
+            } else if (cover > 131) surface.blend(bx + x, by + y, color, (cover * alpha + 32768) >> 16)
             x = x + 1
         }
         y = y + 1
@@ -552,8 +557,8 @@ fun oneDrawText(var surface: OneSurface, text: string, x: int, y: int, h: int, s
     var pen = f64FromInt(x)
     var i = 0
     while (i < text.size) {
-        val whole = oneFloor(pen)
-        val glyph = oneGlyphBitmap(oneCodeAt(text, i), w, size, oneFloor((pen - f64FromInt(whole)) * 4.0))
+        val whole = if (surface.crisp) oneFloor(pen + 0.5) else oneFloor(pen)
+        val glyph = oneGlyphBitmap(oneCodeAt(text, i), w, size, if (surface.crisp) 0 else oneFloor((pen - f64FromInt(whole)) * 4.0))
         oneBlitGlyph(surface, glyph, whole, baseline, rgb, alpha)
         pen = pen + glyph.advance
         i = i + oneCodeLength(text[i])
@@ -637,7 +642,10 @@ fun oneBlitGlyph(var surface: OneSurface, glyph: OneGlyphBitmap, penX: int, base
         val row = y * glyph.w
         while (x < columns) {
             val c = glyph.cover[row + x]
-            if (c != 0) surface.blend(x0 + x, y0 + y, color, if (alpha == 255) c else (c * alpha + 127) / 255)
+            if (surface.crisp) {
+                // (A little under half covered still counts: thin stems stay whole.)
+                if (c >= 100) surface.blend(x0 + x, y0 + y, color, alpha)
+            } else if (c != 0) surface.blend(x0 + x, y0 + y, color, if (alpha == 255) c else (c * alpha + 127) / 255)
             x = x + 1
         }
         y = y + 1
