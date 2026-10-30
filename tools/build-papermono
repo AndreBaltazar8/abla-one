@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Builds an Abla One app for the M5Stack PaperMono (ESP32-S3) and, with a
+# command (build, flash, monitor), runs ESP-IDF on its project.
+#   tools/build-papermono examples/gallery/papermono [build|flash -p PORT|...]
+# Needs the sibling ablac (its nix shell has LLVM with Xtensa) and
+# abla-embedded (ESP-IDF 6.0.2 under ~/.cache/abla-embedded: make setup there).
+set -euo pipefail
+project="${1:?usage: tools/build-papermono PROJECT [IDF COMMAND...]}"
+shift
+root="$(cd "$(dirname "$0")/.." && pwd)"
+ablac="$(cd "$root/../ablac" && pwd)"
+embedded="$(cd "$root/../abla-embedded" && pwd)"
+
+cd "$root"
+mkdir -p build/papermono
+nix-shell "$ablac/shell.nix" --run "
+  set -e
+  ulimit -s 131072 2>/dev/null || true
+  export ABLA_ESP_CPU=esp32s3 ABLA_SYSROOT='$ablac' PATH='$embedded/tools/esp-llvm-bin':\$PATH
+  '$ablac/build/ablac' build '$project/build.ab' -o build/papermono/build-driver
+  build/papermono/build-driver"
+[[ $# -eq 0 ]] && exit 0
+
+idf_root="${IDF_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/abla-embedded/esp-idf-v6.0.2}"
+cd "$root/$project"
+unset PYTHONPATH
+exec nix-shell "$embedded/shell.nix" --run "steam-run bash -c 'source \"$idf_root/export.sh\" >/dev/null && idf.py $*'"

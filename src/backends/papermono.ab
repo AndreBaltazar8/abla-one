@@ -1,0 +1,96 @@
+import "epaper.ab"
+import "abla/io"
+import "abla/runtime/memory"
+import "../../../abla-embedded/src/esp32/abla_host_esp_idf.ab"
+import "../../../abla-embedded/src/m5stack/papermono_board.ab"
+import "../../../abla-embedded/src/m5stack/papermono_gestures.ab"
+
+// An Abla One app on an M5Stack PaperMono, entirely on the device (SPEC §10):
+// the app, its state, layout, scrolling, hit testing and drawing run on the
+// ESP32-S3, with the Abla heap in PSRAM (abla-embedded's ESP-IDF platform).
+// Each render's changed rectangles (the e-paper backend's) are copied into
+// the panel's canvas and refreshed in the mode the backend chose; taps and
+// swipes go straight to the app. abla-embedded brings up the board.
+//
+//   @export("app_main")
+//   fun appMain(): void {
+//       var app: OneApp = MyApp()
+//       onePaperMonoRun(app, myTheme(), OneIconSource({ name -> "" }))
+//   }
+
+trusted noescape extern:"c" fun vTaskDelay(ticks: u32): void
+
+trusted fun onePaperMonoPause(milliseconds: int): void {
+    vTaskDelay(u32(milliseconds))
+    return
+}
+
+trusted fun onePaperMonoMilliseconds(): int = int(esp_timer_get_time()) / 1000
+
+// Copies an update's rectangles (both planes) into the canvas and refreshes.
+trusted fun onePaperMonoShow(session: Ssd1677Session, update: OneEpaperUpdate): void {
+    if (update.rects.size == 0) return
+    val canvas = session.canvas()
+    for (r in update.rects) {
+        var plane = 0
+        while (plane < 2) {
+            var row = r.y
+            while (row < r.y + r.h) {
+                val base = plane * 48000 + row * 100
+                var column = r.x / 8
+                while (column < (r.x + r.w) / 8) {
+                    canvas.store(base + column, update.planes[base + column])
+                    column = column + 1
+                }
+                row = row + 1
+            }
+            plane = plane + 1
+        }
+        session.markDirtyOwned(r.x, r.y, r.w, r.h, true)
+    }
+    if (!paperMonoRefresh(session, update.mode)) paperMonoRefresh(session, paperMonoQuality)
+    return
+}
+
+// White, before the first refresh (the first frame then comes as a full one).
+trusted fun onePaperMonoClear(): void {
+    val canvas = paperMonoCanvas()
+    var offset = 0
+    while (offset < 96000) {
+        canvas.storeU32(offset, 4294967295)
+        offset = offset + 4
+    }
+    return
+}
+
+// Runs `app` until the device powers off.
+fun onePaperMonoRun(var app: OneApp, theme: Theme, icons: OneIconSource): void {
+    // Collect after every 512 KiB of new objects: the heap is a few MB.
+    runtimeMemorySetCollectionGrowth(524288)
+    val control = paperMonoOpen()
+    if ((control|0) == 0) return
+    onePaperMonoClear()
+    val session = paperMonoDisplayStart(control)
+    if ((session|0) == 0) return
+    paperMonoFrontlight(control, 26)
+    if (!paperMonoGesturesOpen(control)) println("papermono: no touch")
+    var state = oneEpaperState(onePaperMonoOptions())
+    var started = onePaperMonoMilliseconds()
+    onePaperMonoShow(session, oneEpaperRender(app, theme, state, icons))
+    println("papermono: first frame in ${onePaperMonoMilliseconds() - started} ms")
+    while (true) {
+        paperMonoGestureSample()
+        val gesture = paperMonoGestureTake()
+        if (gesture != paperMonoGestureNone) {
+            started = onePaperMonoMilliseconds()
+            val x = paperMonoGestureAtX()
+            val y = paperMonoGestureAtY()
+            val acted = if (gesture == paperMonoGestureTap) oneEpaperTouch(app, theme, state, x, y)
+                else oneEpaperScroll(state, x, y, paperMonoGestureTravel())
+            val update = oneEpaperRender(app, theme, state, icons)
+            println("papermono: ${if (gesture == paperMonoGestureTap) "tap" else "swipe"} at $x,$y acted=$acted, ${update.rects.size} rectangles, mode ${update.mode}, ${onePaperMonoMilliseconds() - started} ms")
+            onePaperMonoShow(session, update)
+        }
+        onePaperMonoPause(20)
+    }
+}

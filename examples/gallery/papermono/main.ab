@@ -1,0 +1,12 @@
+import "../gallery.ab"
+import "../../../src/backends/papermono.ab"
+#requiredInternalFunction("freestandingMemorySet32", "memset")
+
+// The gallery on an M5Stack PaperMono, running on the device:
+//   make papermono-gallery flash-papermono   (PORT=/dev/ttyACM0)
+
+@export("app_main")
+fun appMain(): void {
+    var app: OneApp = Gallery()
+    onePaperMonoRun(app, oneDefaultTheme(), OneIconSource({ name -> "" }))
+}

@@ -3,7 +3,7 @@ ABLAC ?= $(abspath ../ablac/build/ablac)
 NIX := nix-shell ../ablac/shell.nix --run
 TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab)
 
-.PHONY: test ui ui-web ui-web-client gallery-client services-client gallery-epaper ui-epaper ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
+.PHONY: papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-epaper ui-epaper ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
 
 # Unit, backend and integration tests (host only).
 test:
@@ -76,3 +76,11 @@ ui-desktop: gallery-desktop
 	tests/ui/desktop_gallery.sh
 
 ui: ui-web ui-web-live ui-web-client ui-epaper ui-desktop ui-android ui-android-services
+
+# The gallery on an M5Stack PaperMono, entirely on the device (ESP32-S3).
+PORT ?= /dev/ttyACM0
+papermono-gallery:
+	tools/build-papermono examples/gallery/papermono build
+
+flash-papermono:
+	tools/build-papermono examples/gallery/papermono -p $(PORT) flash
