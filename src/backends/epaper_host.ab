@@ -10,6 +10,7 @@ import "web_live.ab"
 //
 //   GET  /one/epaper/update?have=<revision>  → 200 wire update, or 204
 //   POST /one/epaper/touch?x=<px>&y=<px>     → 200 wire update, or 204
+//   POST /one/epaper/scroll?x=&y=&dy=<px>    → 200 wire update, or 204
 //   GET  /one/epaper/canvas                  → the full 96000-byte canvas
 //   GET  /one/epaper/preview.png             → what the panel shows
 //
@@ -53,7 +54,7 @@ fun OneEpaperHost.refresh(): void {
 // The whole panel as one update (a device that is new or fell behind).
 fun OneEpaperHost.fullWire(): string {
     val o = state.options
-    oneEpaperWire(OneEpaperUpdate(state.revision, oneEpaperQuality, [OneEpaperRect(0, 0, o.height, o.width)], oneEpaperPlanes(state.levels, o.height, o.width)), o.height, o.width)
+    oneEpaperWire(OneEpaperUpdate(state.revision, oneEpaperQuality, [OneEpaperRect(0, 0, o.height, o.width)], state.planes), o.height, o.width)
 }
 
 fun OneEpaperHost.wireFor(have: int): string =
@@ -75,9 +76,15 @@ fun OneEpaperHost.handle(request: HttpRequest): HttpResponse? {
         refresh()
         return oneEpaperBinary(wireFor(have))
     }
+    if (request.path == "/one/epaper/scroll" && request.method == "POST") {
+        val have = oneParseInt(request.queryParameter("have"), state.revision)
+        oneEpaperScroll(state, oneParseInt(request.queryParameter("x"), -1), oneParseInt(request.queryParameter("y"), -1), oneParseInt(request.queryParameter("dy"), 0))
+        refresh()
+        return oneEpaperBinary(wireFor(have))
+    }
     if (request.path == "/one/epaper/canvas" && request.method == "GET") {
         var out = byteBuffer()
-        for (b in oneEpaperPlanes(state.levels, state.options.height, state.options.width)) out.appendByteValue(b)
+        for (b in state.planes) out.appendByteValue(b)
         return oneEpaperBinary(out.toText())
     }
     if (request.path == "/one/epaper/preview.png" && request.method == "GET")

@@ -15,19 +15,32 @@ fun main: int {
     expectEqual(oneEpaperPhysicalX(10, 20), 20, "portrait x → physical x")
     expectEqual(oneEpaperPhysicalY(10, 20, 480), 469, "portrait x → physical y (rotation 3)")
 
-    // Planes: LSB then MSB, MSB-first bits.
-    val levels = filledArray(16 * 2, 3)
-    levels[0] = 0
-    levels[1] = 1
-    levels[2] = 2
-    levels[17] = 0
-    val planes = oneEpaperPlanes(levels, 16, 2)
-    expectEqual(planes.size, 8, "two planes of 2 bytes × 2 rows")
-    expectEqual(planes[0], 0x5F, "LSB plane row 0: levels 0,1,2,3… → 0101 1111")
-    expectEqual(planes[4], 0x3F, "MSB plane row 0: 0011 1111")
-    expectEqual(planes[2], 0xBF, "LSB plane row 1: pixel 1 black")
+    // Planes: LSB then MSB (48000 bytes each), rows of 100 bytes, MSB-first bits.
+    val planes = filledArray(96000, 0)
+    planes[0] = 0x5F
+    planes[48000] = 0x3F
+    planes[100] = 0xBF
+    planes[48100] = 0xFF
+    expectEqual(oneEpaperPlaneLevel(planes, 0, 0), 0, "LSB 0, MSB 0: black")
+    expectEqual(oneEpaperPlaneLevel(planes, 1, 0), 1, "LSB 1, MSB 0")
+    expectEqual(oneEpaperPlaneLevel(planes, 2, 0), 2, "LSB 0, MSB 1")
+    expectEqual(oneEpaperPlaneLevel(planes, 3, 0), 3, "both bits: white")
+    expectEqual(oneEpaperPlaneLevel(planes, 1, 1), 2, "row 1 is the next 100 bytes")
 
-    // Rendering the gallery.
+    // Rendering the gallery, band by band, matches rendering it whole.
+    var sample = Gallery()
+    var sampleUi = oneUiSized("epaper", oneDefaultTheme(), 360)
+    val scaled = oneEpaperScaleFrame(onePaintFrame(oneLayout(sample.render(sampleUi), oneDefaultTheme(), "epaper", 360, 601, Map()), 360, 601), 133, 480, 800)
+    val whole = oneRasterFrame(scaled, "#ffffff", noIcons())
+    val banded = oneRasterBand(scaled, "#ffffff", noIcons(), 200, 40)
+    var same = true
+    var at = 0
+    while (at < 480 * 40) {
+        if (banded.pixels[at] != whole.pixels[200 * 480 + at]) same = false
+        at = at + 1
+    }
+    expect(same, "a band's pixels are the frame's rows 200-239")
+
     val t = oneDefaultTheme()
     var app = Gallery()
     var state = oneEpaperState(onePaperMonoOptions())
@@ -38,7 +51,15 @@ fun main: int {
     expect(first.rects[0].w == 800 && first.rects[0].h == 480, "the whole panel")
     expectEqual(first.planes.size, 96000, "PaperMono canvas: two 48000-byte planes")
     var dark = 0
-    for (level in state.levels) if (level < 3) dark = dark + 1
+    var py = 0
+    while (py < 480) {
+        var px = 0
+        while (px < 800) {
+            if (oneEpaperPlaneLevel(state.planes, px, py) < 3) dark = dark + 1
+            px = px + 1
+        }
+        py = py + 1
+    }
     expect(dark > 10000 && dark < 300000, "something is drawn (${dark} non-white pixels)")
 
     val again = oneEpaperRender(app, t, state, noIcons())
@@ -89,6 +110,15 @@ fun main: int {
         n = n + 1
     }
     expect(full, "a full quality refresh comes back after ${state.options.fullEvery} partials")
+
+    // A swipe scrolls the page's scroll area, within its bounds.
+    expect(oneEpaperScroll(state, 240, 400, 300), "a swipe up scrolls the page")
+    val scrolled = oneEpaperRender(app, t, state, noIcons())
+    expect(scrolled.rects.size >= 1, "and the scrolled page is refreshed")
+    expect(oneEpaperScroll(state, 240, 400, -100000), "scrolling back")
+    oneEpaperRender(app, t, state, noIcons())
+    expect(!oneEpaperScroll(state, 240, 400, -10), "stops at the top")
+    expect(!oneEpaperScroll(state, 240, 790, 300), "the tab bar is not a scroll area")
 
     Path("build/ui").createDirectories()
     Path("build/ui/epaper-gallery.png").writeText(oneEpaperPreview(state))

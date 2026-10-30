@@ -8,7 +8,7 @@ import "../raster/raster.ab"
 // host (like a live web session); each change is laid out, painted and
 // rasterized (one-layout, one-raster), then quantised to the panel's four
 // grey levels with the SSD1677 driver's own Bayer dither, in its drawing
-// planes. Changed areas become byte-aligned dirty rectangles, and the
+// planes, a band of rows at a time. Changed areas become byte-aligned dirty rectangles, and the
 // backend picks the refresh mode: a full quality refresh first and
 // periodically, fast partial refreshes in between. The device only copies
 // the rectangles into its canvas and refreshes them (abla-embedded's
@@ -45,16 +45,24 @@ class OneEpaperUpdate(val revision: int, val mode: int, val rects: array<OneEpap
 
 class OneEpaperState(
     val options: OneEpaperOptions,
-    // Grey level (0 black … 3 white) per physical pixel, index py * 800 + px.
-    val levels: array<int>,
+    // The panel as last rendered: the SSD1677 drawing planes (the layout
+    // oneEpaperPlaneLevel reads), one byte value per element.
+    val planes: array<int>,
     var revision: int,
     var partials: int,
     var frame: OneFrame,
-    var full: bool
+    var full: bool,
+    // Scroll offsets by scroll area (layout path), in logical pixels.
+    val scroll: Map<string, int>
 )
 
 fun oneEpaperState(options: OneEpaperOptions): OneEpaperState =
-    OneEpaperState(options, filledArray(options.width * options.height, -1), 0, 0, OneFrame([], [], [], 0, 0), true)
+    OneEpaperState(options, filledArray(options.width * options.height / 4, 0), 0, 0, OneFrame([], [], [], 0, 0), true, Map())
+
+// Portrait rows rasterized at a time: a multiple of 8 (a canvas byte) that
+// divides 800. A whole frame at once would take a 480×800 surface, more
+// memory than a microcontroller's heap.
+val oneEpaperBandRows = 40
 
 fun oneEpaperLogicalWidth(o: OneEpaperOptions): int = o.width * 100 / o.scale
 fun oneEpaperLogicalHeight(o: OneEpaperOptions): int = o.height * 100 / o.scale
@@ -118,35 +126,54 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     val lw = oneEpaperLogicalWidth(o)
     val lh = oneEpaperLogicalHeight(o)
     var ui = oneUiSized("epaper", theme, lw)
-    val frame = onePaintFrame(oneLayout(app.render(ui), theme, "epaper", lw, lh, Map()), lw, lh)
+    val frame = onePaintFrame(oneLayout(app.render(ui), theme, "epaper", lw, lh, state.scroll), lw, lh)
     state.frame = frame
-    val surface = oneRasterFrame(oneEpaperScaleFrame(frame, o.scale, o.width, o.height), o.background, icons)
-    // Quantise, and mark changed 8×8 tiles of the physical canvas.
+    val scaled = oneEpaperScaleFrame(frame, o.scale, o.width, o.height)
+    // Rasterize band by band, quantise each portrait column of a band into
+    // canvas bytes (eight portrait rows are one physical byte), and mark the
+    // 8×8 tiles whose bytes changed.
     val pw = o.height
     val ph = o.width
+    val stride = pw / 8
+    val plane = stride * ph
     val tilesX = pw / 8
     val tilesY = (ph + 7) / 8
     val dirty = filledArray(tilesX * tilesY, 0)
     var changed = 0
-    var y = 0
-    while (y < o.height) {
+    var y0 = 0
+    while (y0 < o.height) {
+        val rows = if (y0 + oneEpaperBandRows > o.height) o.height - y0 else oneEpaperBandRows
+        val surface = oneRasterBand(scaled, o.background, icons, y0, rows)
         var x = 0
         while (x < o.width) {
-            val px = oneEpaperPhysicalX(x, y)
-            val py = oneEpaperPhysicalY(x, y, o.width)
-            val level = oneEpaperLevel(oneEpaperGray(surface.pixels[y * o.width + x]), px, py)
-            val index = py * pw + px
-            if (state.levels[index] != level) {
-                state.levels[index] = level
-                val tile = (py / 8) * tilesX + px / 8
-                if (dirty[tile] == 0) {
-                    dirty[tile] = 1
-                    changed = changed + 1
+            val py = oneEpaperPhysicalY(x, 0, o.width)
+            var column = y0 / 8
+            while (column * 8 < y0 + rows) {
+                var lsb = 0
+                var msb = 0
+                var k = 0
+                while (k < 8) {
+                    val y = column * 8 + k
+                    val level = oneEpaperLevel(oneEpaperGray(surface.pixels[(y - y0) * o.width + x]), y, py)
+                    if (level % 2 == 1) lsb = lsb + oneEpaperBit(k)
+                    if (level >= 2) msb = msb + oneEpaperBit(k)
+                    k = k + 1
                 }
+                val offset = py * stride + column
+                if (state.planes[offset] != lsb || state.planes[offset + plane] != msb) {
+                    state.planes[offset] = lsb
+                    state.planes[offset + plane] = msb
+                    val tile = (py / 8) * tilesX + column
+                    if (dirty[tile] == 0) {
+                        dirty[tile] = 1
+                        changed = changed + 1
+                    }
+                }
+                column = column + 1
             }
             x = x + 1
         }
-        y = y + 1
+        y0 = y0 + rows
     }
     var rects = oneEpaperRects(dirty, tilesX, tilesY, ph)
     var mode = oneEpaperFastest
@@ -163,7 +190,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
         }
         state.revision = state.revision + 1
     }
-    OneEpaperUpdate(state.revision, mode, rects, oneEpaperPlanes(state.levels, pw, ph))
+    OneEpaperUpdate(state.revision, mode, rects, state.planes)
 }
 
 // Dirty tiles as rectangles: runs per tile row, joined downwards while the
@@ -216,28 +243,13 @@ fun oneEpaperRects(dirty: array<int>, tilesX: int, tilesY: int, height: int): ar
 }
 
 // The SSD1677 drawing planes (abla-embedded ssd1677_canvas.ab): the LSB
-// plane, then the MSB plane, each one bit per pixel, rows of width/8 bytes,
-// most significant bit first.
-fun oneEpaperPlanes(levels: array<int>, width: int, height: int): array<int> {
-    val stride = (width + 7) / 8
-    val plane = stride * height
-    val out = filledArray(plane * 2, 0)
-    var py = 0
-    while (py < height) {
-        var px = 0
-        while (px < width) {
-            val level = levels[py * width + px]
-            if (level > 0) {
-                val offset = py * stride + px / 8
-                val bit = oneEpaperBit(px % 8)
-                if (level % 2 == 1) out[offset] = out[offset] + bit
-                if (level >= 2) out[offset + plane] = out[offset + plane] + bit
-            }
-            px = px + 1
-        }
-        py = py + 1
-    }
-    out
+// plane, then the MSB plane, each one bit per pixel, rows of 100 bytes (800
+// physical pixels), most significant bit first. The grey level (0 black … 3
+// white) of physical pixel (px, py):
+fun oneEpaperPlaneLevel(planes: array<int>, px: int, py: int): int {
+    val offset = py * 100 + px / 8
+    val bit = oneEpaperBit(px % 8)
+    (if ((planes[offset] / bit) % 2 == 1) 1 else 0) + (if ((planes[offset + 48000] / bit) % 2 == 1) 2 else 0)
 }
 
 fun oneEpaperBit(position: int): int = if (position == 0) 128 else if (position == 1) 64 else if (position == 2) 32 else if (position == 3) 16 else if (position == 4) 8 else if (position == 5) 4 else if (position == 6) 2 else 1
@@ -251,6 +263,31 @@ fun oneEpaperTouch(var app: OneApp, theme: Theme, state: OneEpaperState, x: int,
         val h = state.frame.hits[i]
         if (h.kind == "press" && lx >= h.x && lx < h.x + h.w && ly >= h.y && ly < h.y + h.h)
             return oneDispatch(app, "epaper", theme, h.event, "", oneEpaperLogicalWidth(state.options))
+        i = i - 1
+    }
+    false
+}
+
+// A swipe at portrait pixel (x, y): scrolls the innermost scroll area there
+// by `dy` panel pixels (positive moves the content up, as a finger dragging
+// up does), within its bounds. Whether anything moved.
+fun oneEpaperScroll(var state: OneEpaperState, x: int, y: int, dy: int): bool {
+    val lx = x * 100 / state.options.scale
+    val ly = y * 100 / state.options.scale
+    var i = state.frame.hits.size - 1
+    while (i >= 0) {
+        val h = state.frame.hits[i]
+        if (h.kind == "scroll" && lx >= h.x && lx < h.x + h.w && ly >= h.y && ly < h.y + h.h) {
+            val current = oneParseInt(h.value, 0)
+            val most = oneParseInt(h.placeholder, 0)
+            var next = current + dy * 100 / state.options.scale
+            if (next > most) next = most
+            if (next < 0) next = 0
+            if (next != current) {
+                state.scroll.set(h.key, next)
+                return true
+            }
+        }
         i = i - 1
     }
     false
@@ -306,8 +343,7 @@ fun oneEpaperPreview(state: OneEpaperState): string {
     while (y < o.height) {
         var x = 0
         while (x < o.width) {
-            val level = state.levels[oneEpaperPhysicalY(x, y, o.width) * o.height + oneEpaperPhysicalX(x, y)]
-            val v = if (level < 0) 255 else level * 85
+            val v = oneEpaperPlaneLevel(state.planes, oneEpaperPhysicalX(x, y), oneEpaperPhysicalY(x, y, o.width)) * 85
             surface.pixels[y * o.width + x] = v * 65536 + v * 256 + v
             x = x + 1
         }

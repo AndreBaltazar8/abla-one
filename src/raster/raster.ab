@@ -11,7 +11,9 @@ import "inter_glyphs.ab"
 
 // --- surface ---------------------------------------------------------------------
 
-class OneSurface(val width: int, val height: int, val pixels: array<int>, val clips: array<int>) {
+// `pixels` holds rows originY… of a width×height frame: all of them, or one
+// band (oneSurfaceBand), which bounds memory on a small device.
+class OneSurface(val width: int, val height: int, val pixels: array<int>, val clips: array<int>, val originY: int = 0) {
     fun clipX0(): int = if (clips.size == 0) 0 else clips[clips.size - 4]
     fun clipY0(): int = if (clips.size == 0) 0 else clips[clips.size - 3]
     fun clipX1(): int = if (clips.size == 0) width else clips[clips.size - 2]
@@ -34,7 +36,7 @@ class OneSurface(val width: int, val height: int, val pixels: array<int>, val cl
     // Blends `color` (0xRRGGBB) at coverage 0..255 over the pixel.
     fun blend(x: int, y: int, color: int, alpha: int): void {
         if (alpha <= 0 || x < clipX0() || y < clipY0() || x >= clipX1() || y >= clipY1()) return
-        val i = y * width + x
+        val i = (y - originY) * width + x
         if (alpha >= 255) {
             pixels[i] = color
             return
@@ -50,6 +52,10 @@ class OneSurface(val width: int, val height: int, val pixels: array<int>, val cl
 }
 
 fun oneSurface(width: int, height: int, background: int): OneSurface = OneSurface(width, height, filledArray(width * height, background), [])
+
+// Rows y0 until y0 + rows of a width×height frame: drawing is clipped to them.
+fun oneSurfaceBand(width: int, height: int, y0: int, rows: int, background: int): OneSurface =
+    OneSurface(width, height, filledArray(width * rows, background), [0, y0, width, y0 + rows], y0)
 
 fun oneHex(c: int): int = if (c >= 48 && c <= 57) c - 48 else if (c >= 97 && c <= 102) c - 87 else if (c >= 65 && c <= 70) c - 55 else 0
 
@@ -696,8 +702,27 @@ class OneIconSource(val load: (string) -> string)
 
 fun oneRasterFrame(frame: OneFrame, background: string, icons: OneIconSource): OneSurface {
     var surface = oneSurface(frame.width, frame.height, oneColorValue(background))
+    oneRasterInto(surface, frame, icons)
+    surface
+}
+
+// One band of the frame (oneSurfaceBand): the paints that reach it.
+fun oneRasterBand(frame: OneFrame, background: string, icons: OneIconSource, y0: int, rows: int): OneSurface {
+    var surface = oneSurfaceBand(frame.width, frame.height, y0, rows, oneColorValue(background))
+    oneRasterInto(surface, frame, icons)
+    surface
+}
+
+fun oneRasterInto(var surface: OneSurface, frame: OneFrame, icons: OneIconSource): void {
+    val bandTop = surface.originY
+    val bandBottom = surface.originY + surface.pixels.size / surface.width
     for (p in frame.paints) {
-        if (p.op == "rect") {
+        // (Text and icons may reach a little past their box.)
+        val reach = if (p.op == "text") p.h else 0
+        val outside = p.op != "clip" && p.op != "unclip" &&
+            (p.y - reach >= bandBottom || p.y + p.h + reach <= bandTop)
+        if (outside) {
+        } else if (p.op == "rect") {
             var path = onePath()
             oneRoundRectPath(f64FromInt(p.x), f64FromInt(p.y), f64FromInt(p.w), f64FromInt(p.h), f64FromInt(p.radius), path)
             oneFill(surface, path, oneColorValue(p.color), oneColorAlpha(p.color))
@@ -741,7 +766,7 @@ fun oneRasterFrame(frame: OneFrame, background: string, icons: OneIconSource): O
         } else if (p.op == "clip") surface.pushClip(p.x, p.y, p.w, p.h)
         else if (p.op == "unclip") surface.popClip()
     }
-    surface
+    return
 }
 
 fun oneStarts(text: string, prefix: string): bool = text.size >= prefix.size && text.slice(0, prefix.size) == prefix
