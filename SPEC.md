@@ -624,23 +624,58 @@ as server stays out of them.
 
 ### What stays on the server
 
-Everything is client code unless marked. A function marked `@server` runs on the
-backend, wherever it is called from:
+Built in abla-one on what ablac already offers, with no compiler changes:
+`import contract` (signatures and data shapes, no implementations, none of the
+module's private dependencies), annotations, subparsers and the compile-time API.
+abla-mobile's `$mobileRpc` and `rpc_server.ab` prove the pattern for
+`(string) -> string`; abla-one generalizes it to any value.
+
+Server code lives in its own modules, and is free to import abla-postgres, secrets
+and anything else. A function clients may call is marked:
+
+    // server/orders.ab
+    import "abla/postgres"
+
+    class Order(val id: int, val total: Money, val lines: array<Line>, val note: string?)
 
     @server fun orders(session: Session, status: string): array<Order> { ... }
 
-    // in a screen, on any client:
-    val found by remote { orders(ui.session, "open") }
+A client imports the same file as a contract, and calls through `$remote`:
 
-- **Server build:** the function is compiled as written and gets a route.
-- **Client builds:** the body and everything only it reaches are left out, and the
-  call becomes a typed request through the services layer (§9). Secrets, database
-  code and server libraries are never in a client binary.
-- **Checks at compile time:** parameters and results must be plain data the wire
-  can carry. Client code touching a server-only module directly is an error naming
-  the `@server` function to go through, so nothing leaks by accident.
+    // app/orders_screen.ab
+    import contract "../server/orders.ab" as orders
+
+    $remote(orders.orders(session, "open")) { result -> ... }
+
+- **Client builds:** the contract brings only signatures and data shapes, so
+  abla-postgres and the bodies never reach a client binary. `$remote` replaces the
+  call with a typed request through the services layer (§9), so it works on every
+  target. A contract call left unreplaced is already a compile error
+  (`E_CONTRACT_CALL_NOT_CONSUMED`).
+- **Server build:** imports the module normally. A generated router, found through
+  `compiler.functionsAnnotated("server")`, gives each function a route.
+- **Any value:** parameters and results can be any plain data: numbers, strings,
+  booleans, nullable values, arrays, maps and classes, nested and generic.
+  Serializers are generated at compile time by walking the type (`fieldsOf`,
+  `typeArguments`, the nullable check), on both sides from the one declaration.
+  Closures, resources and native handles can't cross a network, and are a compile
+  error naming the field that holds one. Large bodies and files go through the
+  services layer's existing file support.
 - **Authentication:** every route authenticates the session itself. Being marked
   `@server` hides nothing: a client can call any route with any arguments.
+
+### Stable routes
+
+Devices update rarely, so an old build keeps calling a newer server. Routes stay
+stable by default, and removing one is deliberate:
+
+- A lock file (`server.lock`, committed) records each route's signature and data
+  shapes. Adding a route, or a new field with a default, passes. Changing or removing
+  anything recorded fails the server build, naming what changed.
+- To remove or replace a route, mark it `@retired("reason")`: it stays recorded, and
+  answers with a clear "update the app" response that `$remote` passes to the app.
+  The entry can be dropped once no supported client calls it.
+- Clients send their build's contract fingerprint, so logs show who still calls what.
 
 ### Deployments
 
@@ -680,12 +715,10 @@ still vary by target through theming (§8) and `ui.target`.
 
 ### Open questions
 
-- Does `@server` belong in the language (ablac splitting builds) or in a build step
-  of Abla One? Recommended: ablac, because leaving code out reliably needs the
-  compiler's reachability, but it is the bigger change.
-- Versioning: an old device or phone calling a newer server. Routes likely need a
-  version or additive-only rules, since embedded builds update rarely.
-- Offline: what `remote` shows on a device with no network.
+- First check by a spike: that `fieldsOf` walks data shapes through a contract
+  import, nested and generic, as ablac's docs describe. The stability rules depend
+  on the fingerprint or the lock file reading the same shapes.
+- Offline: what `$remote` gives an app on a device with no network.
 - How thin mode sends tree updates to a small device: whole trees or diffs.
 
 ## 15. Decisions
