@@ -1,0 +1,46 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/backends/test.ab"
+
+fun main: int {
+    expectEqual(oneInitials("Sofia Costa"), "SC", "two words")
+    expectEqual(oneInitials("ana"), "A", "lowercase single word")
+    expectEqual(oneInitials("maya.townsend@example.test"), "MT", "email local part")
+    expectEqual(oneInitials("Inês Rocha"), "IR", "accented name")
+    expectEqual(oneInitials("élio ávila"), "ÉÁ", "accented initials are uppercased")
+    expectEqual(oneInitials("  "), "?", "blank")
+    expectEqual(oneInitials("André Silva Costa"), "AS", "at most two")
+    expect(oneAvatarTone("a") >= 1 && oneAvatarTone("a") <= 6, "tone range")
+    expectEqual(oneAvatarTone("sofia"), oneAvatarTone("sofia"), "tone is stable")
+
+    var t = oneDefaultTheme()
+    t.define("Button.primary", t.named("Button.primary").with(style().radius(24)))
+    var ui = oneUi("android", t)
+    val primary = button(ui, "Guardar", "primary", ui.press { }, style().fillWidth())
+    val r = oneResolve(t, primary.kind, primary.style, "android")
+    expectEqual(r.get("height"), "48", "base Button style")
+    expectEqual(r.get("radius"), "24", "variant redefinition wins over base")
+    expectEqual(r.get("background"), "#1f2328", "variant background token")
+    expectEqual(r.get("pressed:background"), "#000000", "variant pressed state")
+    expectEqual(r.get("width"), "fill", "instance style applies last")
+    val label = oneResolve(t, "text", primary.children[0].style, "android")
+    expectEqual(label.get("color"), "#ffffff", "variant label part")
+    expectEqual(label.get("size"), "15", "label preset")
+    expectEqual(primary.attr("label"), "Guardar", "accessible label")
+    val web = oneResolve(t, primary.kind, primary.style, "web-document")
+    expectEqual(web.get("cursor"), "pointer", "web-only kind default")
+    expect(!r.has("cursor"), "web-only default absent on android")
+
+    val tabs = tabBar(ui, [TabItem("nav_home", "Início", 7), TabItem("nav_chat", "Conversas", 8)], 1)
+    expectEqual(tabs.children[1].attr("selected"), "true", "active tab is selected")
+    expectEqual(oneResolve(t, "text", tabs.children[1].children[1].style, "android").get("color"), "#16181a", "active tab label")
+    expectEqual(oneResolve(t, "text", tabs.children[0].children[1].style, "android").get("color"), "#9aa0a6", "inactive tab label")
+
+    val row = listRow(ui, ListRowParts(avatar(ui, "Sofia Costa", "u1", 44, none()), "geral", "Bom dia", "09:41", badge(ui, "3", "")), ui.press { }, style())
+    val dump = oneTestDump(row, t, "android")
+    expect(dump.size > 0, "list row dumps")
+    expectEqual(row.children[0].children.size, 2, "meta rows keep trailing in the subtitle line")
+    val plain = listRow(ui, ListRowParts(none(), "Equipa", "", "", icon("icon_right", "", style())), ui.press { }, style())
+    expectEqual(plain.children[0].children.size, 2, "without meta the trailing node sits at the end")
+    testsPassed()
+}

@@ -1,0 +1,87 @@
+import "abla/test"
+import "../../src/one.ab"
+import "../../src/backends/web_document.ab"
+
+fun has(haystack: string, needle: string): bool {
+    var i = 0
+    while (i + needle.size <= haystack.size) {
+        if (haystack.slice(i, i + needle.size) == needle) return true
+        i = i + 1
+    }
+    false
+}
+
+fun count(haystack: string, needle: string): int {
+    var n = 0
+    var i = 0
+    while (i + needle.size <= haystack.size) {
+        if (haystack.slice(i, i + needle.size) == needle) n = n + 1
+        i = i + 1
+    }
+    n
+}
+
+fun main: int {
+    var t = theme()
+    t.token("brand", "#193c30")
+    t.token("web:brand", "#204a3b")
+    var ui = oneUi("web-document", t)
+    val tree = column(style().gap(8).padding(16), [
+        text("<b>Tom & \"Jerry\"</b>", style().color("@brand").maxLines(1)),
+        text("second", style().color("@brand")),
+        pressable(ui.press { }, style().background("#fff").pressed(style().background("#eee")).on("web", style().hover(style().background("#f5f5f5"))).on("android", style().set("ripple", "#000")), [
+            text("Abrir", style().weight("semibold").tracking(-20))
+        ]).set("label", "Abrir conversa"),
+        row(style(), [text("a", style().fillWidth()), icon("bell", "Sino", style().size(20).tint("#333"))]),
+        input("v", "Pesquisar", ui.change { v -> }, style()).set("keyboard", "email"),
+        input("", "Mensagem", ui.change { v -> }, style()).set("multiline", "true"),
+        column(style().set("box-shadow", "0 1px 2px #0002").set("cursor", "pointer").set("ripple", "x").set("css:scroll-snap-type", "y"), []),
+        native("web", "div", "{\"html\":\"<video></video>\"}", [], text("fallback", style())),
+        native("android", "chatList", "{}", [], text("fallback-shown", style())),
+        rich("[{\"kind\":\"text\",\"text\":\"Olá \"},{\"kind\":\"mention\",\"text\":\"@Ana\"}]", style())
+    ]).keyed("root")
+    val page = oneWebRender(tree, t, "/icons")
+    val html = page.html
+    val css = page.css
+    expect(has(html, "&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt;"), "text is escaped")
+    expect(has(html, "data-one=\"root\""), "explicit keys")
+    expect(has(html, "data-one=\"root.1\""), "path keys")
+    expect(has(html, "class=\"one k-column"), "root class")
+    expect(has(html, "<button type=\"button\""), "pressable is a button")
+    expect(has(html, "data-one-press=\"1\""), "press event id")
+    expect(has(html, "aria-label=\"Abrir conversa\""), "accessible label")
+    expect(has(html, "data-one-change=\"1000001\""), "change event id")
+    expect(has(html, "type=\"email\""), "email keyboard")
+    expect(has(html, "<textarea"), "multiline input")
+    expect(has(html, "--i:url('/icons/bell.svg')"), "icon mask url")
+    expect(has(html, "<video></video>"), "web native node renders raw html")
+    expect(!has(html, ">fallback<"), "web native skips its fallback")
+    expect(has(html, ">fallback-shown<"), "other-target native renders fallback")
+    expect(has(html, "<strong class=\"one-mention\">@Ana</strong>"), "rich mention")
+
+    expect(has(css, "{color:#204a3b}"), "web-scoped token used")
+    expectEqual(count(css, "{color:#204a3b}"), 1, "identical declarations share one class")
+    expect(has(css, ":active{background:#eee}"), "pressed maps to :active")
+    expect(has(css, ":hover{background:#f5f5f5}"), "hover maps to :hover")
+    expect(!has(css, "ripple"), "android and unknown properties don't leak")
+    expect(has(css, "{box-shadow:0 1px 2px #0002}"), "css-like properties pass through")
+    expect(has(css, "{cursor:pointer}"), "known passthrough")
+    expect(has(css, "{scroll-snap-type:y}"), "css: prefix passthrough")
+    expect(has(css, "{letter-spacing:-0.20px}"), "tracking in hundredths")
+    expect(has(css, "{font-weight:600}"), "weights")
+    expect(has(css, "text-overflow:ellipsis"), "single-line ellipsis")
+    expect(has(css, "{flex:1 1 0}"), "fill width in a row grows")
+    expect(has(css, "{width:20px;flex-shrink:0}") && has(css, "{height:20px;flex-shrink:0}"), "icon size")
+    expectEqual(oneWebHundredths("5"), "0.05", "small tracking")
+    expectEqual(oneWebPercent("40"), ".40", "opacity")
+    expectEqual(oneHtmlEscape("it's"), "it&#39;s", "apostrophe")
+    val boxed = oneWebRender(column(style().padding(8).paddingTop(20).borderTop(1, "#e6e8ea").focus(style().borderColor("#000")), [stack(style().align("center"), [])]), t, "/icons").css
+    expect(has(boxed, "{padding-top:20px}") && has(boxed, "{padding-left:8px}"), "padding expands per side")
+    expect(!has(boxed, "{padding:8px}"), "no padding shorthand")
+    expect(has(boxed, "{border-top:1px solid #e6e8ea}"), "border carries its colour")
+    expect(has(boxed, ":focus-visible,.__f:focus-within{border-color:#000}"), "state border colour")
+    expect(has(boxed, "{place-items:center}"), "stack alignment")
+    val doc = oneWebDocument("NovaKind", "pt-PT", tree, t, "/icons", "#fff")
+    expect(doc.startsWith("<!doctype html><html lang=\"pt-PT\">"), "document wrapper")
+    testsPassed()
+}

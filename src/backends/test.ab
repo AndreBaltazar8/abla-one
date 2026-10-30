@@ -1,0 +1,100 @@
+import "../one.ab"
+
+// The `test` target: a canonical, line-per-node dump of the resolved tree.
+// Properties and attributes are sorted, so output only changes when the tree
+// does. Used by golden tests and tooling.
+
+fun oneTestDump(root: Node, theme: Theme, target: string): string =
+    oneTestDumpNode(root, theme, target, "0", 0)
+
+fun oneTestDumpNode(node: Node, outer: Theme, target: string, path: string, depth: int): string {
+    val theme = if (node.attr("theme") != "") outer.scoped(node.attr("theme")) else outer
+    var line = ""
+    var i = 0
+    while (i < depth) {
+        line = "$line  "
+        i = i + 1
+    }
+    val key = if (node.key != "") node.key else path
+    line = "$line${node.kind}#$key"
+    val resolved = oneResolve(theme, node.kind, node.style, target)
+    val props = oneSortedKeys(resolved.props.keys())
+    if (props.size > 0) {
+        var parts = ""
+        for (name in props) parts = if (parts == "") "$name=${resolved.get(name)}" else "$parts $name=${resolved.get(name)}"
+        line = "$line {$parts}"
+    }
+    val attrNames: array<string> = []
+    for (item in node.attrs) attrNames.append(item.name)
+    for (name in oneSortedKeys(attrNames)) line = "$line $name=${oneTestQuote(node.attr(name))}"
+    var out = "$line\n"
+    var index = 0
+    for (child in node.children) {
+        out = "$out${oneTestDumpNode(child, theme, target, "$key.$index", depth + 1)}"
+        index = index + 1
+    }
+    out
+}
+
+fun oneTestQuote(value: string): string = "\"$value\""
+
+fun oneSortedKeys(values: array<string>): array<string> {
+    val out: array<string> = []
+    for (value in values) {
+        var inserted = false
+        val next: array<string> = []
+        for (existing in out) {
+            if (!inserted && oneStringLess(value, existing)) {
+                next.append(value)
+                inserted = true
+            }
+            next.append(existing)
+        }
+        if (!inserted) next.append(value)
+        out.clear()
+        for (item in next) out.append(item)
+    }
+    out
+}
+
+fun oneStringLess(left: string, right: string): bool {
+    var index = 0
+    while (index < left.size && index < right.size) {
+        if (left[index] != right[index]) return left[index] < right[index]
+        index = index + 1
+    }
+    left.size < right.size
+}
+
+// Test helpers: find a node by its text or accessible label, depth first.
+fun oneFind(root: Node, needle: string): Node {
+    if (root.attr("text") == needle || root.attr("label") == needle || root.attr("placeholder") == needle) return root
+    for (child in root.children) {
+        val found = oneFind(child, needle)
+        if (found.kind != "none") return found
+    }
+    none()
+}
+
+// The press id of the nearest pressable at or above the node with `needle`.
+fun onePressFor(root: Node, needle: string): int {
+    if (root.kind == "pressable" && oneFind(root, needle).kind != "none") {
+        for (child in root.children) {
+            val inner = onePressFor(child, needle)
+            if (inner > 0) return inner
+        }
+        return oneParseInt(root.attr("onPress"), 0)
+    }
+    for (child in root.children) {
+        val found = onePressFor(child, needle)
+        if (found > 0) return found
+    }
+    0
+}
+
+fun oneTexts(root: Node): array<string> {
+    val out: array<string> = []
+    if (root.attr("text") != "") out.append(root.attr("text"))
+    for (child in root.children) for (value in oneTexts(child)) out.append(value)
+    out
+}

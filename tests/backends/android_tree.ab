@@ -1,0 +1,34 @@
+import "abla/test"
+import "abla/json"
+import "../../src/one.ab"
+import "../../src/backends/android_tree.ab"
+
+fun main: int {
+    var t = theme()
+    t.token("brand", "#193c30")
+    t.token("mobile:brand", "#10291f")
+    var ui = oneUi("android", t)
+    val tree = column(style().gap(8), [
+        pressable(ui.press { }, style().background("@brand").pressed(style().background("#000")).on("web", style().hover(style().background("#fff"))), [
+            text("Olá", style().fontSize(15))
+        ]),
+        spacer(12).keyed("gap"),
+        text("x", style().on("android", style().set("ripple", "none")))
+    ])
+    val root = oneAndroidNode(tree, t, "root")
+    expectEqual(root.kind, "one.column", "kind prefix")
+    expectEqual(root.key, "root", "root key")
+    expectEqual(root.properties.getString("gap"), "8", "style props as strings")
+    val button = root.children[0]
+    expectEqual(button.key, "0", "index keys")
+    expectEqual(button.properties.getString("background"), "#10291f", "family-scoped token for android")
+    expectEqual(button.properties.getString("pressed:background"), "#000", "state keys pass through")
+    expect(!button.properties.get("hover:background").isString(), "web-only entries are dropped")
+    expectEqual(button.properties.getString("a.onPress"), "1", "attributes are prefixed")
+    expectEqual(button.children[0].properties.getString("a.text"), "Olá", "text attribute")
+    val gap = root.children[1]
+    expectEqual(gap.key, "gap", "explicit keys")
+    expectEqual(gap.properties.getString("a.size"), "12", "attribute size doesn't collide with style size")
+    expectEqual(root.children[2].properties.getString("ripple"), "none", "android passthrough property")
+    testsPassed()
+}

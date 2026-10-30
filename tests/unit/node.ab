@@ -1,0 +1,31 @@
+import "abla/test"
+import "../../src/one.ab"
+
+fun main: int {
+    val label = text("Hi", style().color("#000"))
+    expectEqual(label.kind, "text", "text kind")
+    expectEqual(label.attr("text"), "Hi", "text attribute")
+    expectEqual(label.attr("missing"), "", "missing attribute is empty")
+    val changed = label.set("text", "Bye")
+    expectEqual(changed.attr("text"), "Bye", "set replaces")
+    expectEqual(changed.attrs.size, 1, "set doesn't duplicate")
+    expectEqual(label.attr("text"), "Hi", "set returns a copy")
+    expectEqual(label.keyed("greeting").key, "greeting", "keyed")
+    expectEqual(label.styled(style().fontSize(9)).style.entries.size, 2, "styled appends")
+
+    val list = column(style(), [text("a", style()), none(), if (false) text("b", style()) else none(), text("c", style())])
+    expectEqual(list.children.size, 2, "none children are dropped")
+    expectEqual(row(style(), [none()]).children.size, 0, "rows drop none too")
+
+    val raw = native("android", "chatList", "{\"event\":1}", [], text("fallback", style()))
+    expectEqual(raw.attr("target"), "android", "native target")
+    expectEqual(raw.attr("nativeKind"), "chatList", "native kind")
+    expectEqual(raw.children[raw.children.size - 1].attr("oneFallback"), "true", "fallback child is marked")
+
+    val box = input("v", "Placeholder", 1000001, style()).set("keyboard", "email")
+    expectEqual(box.attr("placeholder"), "Placeholder", "input placeholder")
+    expectEqual(box.attr("keyboard"), "email", "input options")
+    expectEqual(feed(style(), [], "bottom", 0, 3).attr("anchor"), "bottom", "feed anchor")
+    expectEqual(spacer(12).attr("size"), "12", "spacer size")
+    testsPassed()
+}

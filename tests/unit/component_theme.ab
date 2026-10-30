@@ -1,0 +1,66 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/dsl/theme.ab"
+import "../../src/dsl/one.ab"
+import "../../src/backends/test.ab"
+import "../../src/backends/web_document.ab"
+
+// A component that ships its own defaults and a theme fragment.
+fun Callout(var ui: Ui, title: string): Node = $one
+    <Column style={ui.part("Callout", "", style().padding(12).radius(10).background("@callout"))}>
+      <Text style={ui.part("Callout", "title", style().text("label").color("@callout-ink"))}>{title}</Text>
+    </Column>
+
+fun calloutTheme(): Theme = $theme {
+    tokens { callout: #fdf3d8; callout-ink: #7a5a0b; }
+}
+
+fun appTheme(): Theme {
+    var t = $theme from={oneDefaultTheme()} {
+        tokens { surface: #ffffff; ink: #16181a; }
+        Callout.title { weight: bold; }
+        scope dark {
+            tokens { surface: #10291f; ink: #f7f8f2; callout: #193c30; callout-ink: #c5ee76; }
+            Callout { radius: 0; }
+        }
+    }
+    t.merge(calloutTheme())
+    t
+}
+
+fun main: int {
+    val t = appTheme()
+    var ui = oneUi("android", t)
+    val light = Callout(ui, "Novidade")
+    val box = oneResolve(t, "column", light.style, "android")
+    expectEqual(box.get("background"), "#fdf3d8", "component token from its merged fragment")
+    expectEqual(box.get("padding"), "12", "component's own default")
+    val title = oneResolve(t, "text", light.children[0].style, "android")
+    expectEqual(title.get("weight"), "bold", "app theme overrides a component part")
+    expectEqual(title.get("color"), "#7a5a0b", "component part default kept")
+
+    val page = column(style().background("@surface"), [
+        text("Claro", style().color("@ink")),
+        column(style().background("@surface"), [text("Escuro", style().color("@ink")), Callout(ui, "No escuro")]).themed("dark")
+    ])
+    val dump = oneTestDump(page, t, "android")
+    expect(oneContainsText(dump, "column#0 {background=#ffffff"), "outer page uses the base theme")
+    expect(oneContainsText(dump, "{background=#10291f"), "themed subtree uses the scope")
+    expect(oneContainsText(dump, "text=\"Escuro\"") && oneContainsText(dump, "color=#f7f8f2"), "scope tokens reach descendants")
+    expect(oneContainsText(dump, "{background=#193c30 font=sans padding=12 radius=0}"), "scope overrides a component style and its tokens")
+    val css = oneWebRender(page, t, "/i").css
+    expect(oneContainsText(css, "{background:#10291f}"), "web backend resolves the scope")
+    expectEqual(t.scoped("missing").value("@surface", "android"), "#ffffff", "unknown scope falls back")
+    expectEqual(t.scoped("dark").value("@forest", "android"), "@forest", "scopes don't invent tokens")
+    expectEqual(t.scoped("dark").value("@primary", "android"), "#1f2328", "scopes inherit base tokens")
+    testsPassed()
+}
+
+fun oneContainsText(text: string, query: string): bool {
+    var i = 0
+    while (i + query.size <= text.size) {
+        if (text.slice(i, i + query.size) == query) return true
+        i = i + 1
+    }
+    false
+}

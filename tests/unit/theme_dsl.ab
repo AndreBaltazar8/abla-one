@@ -1,0 +1,47 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/dsl/theme.ab"
+
+fun brand(): Theme = $theme from={oneDefaultTheme()} {
+    tokens {
+        brand: #193c30;
+        muted: #5f6e66;
+        epaper { brand: #000000; }
+    }
+    text {
+        title: 17/22 semibold -0.2;
+        caption: 12/16;
+    }
+    kind text { color: @muted; }
+    Button.primary {
+        background: @brand;
+        radius: 12;
+        pressed { background: #10291f; }
+        web { cursor: pointer; transition: "background .12s"; }
+        web:hover { background: #204a3b; }
+    }
+}
+
+fun main: int {
+    val t = brand()
+    expectEqual(t.value("@brand", "android"), "#193c30", "token")
+    expectEqual(t.value("@brand", "epaper"), "#000000", "target-scoped token")
+    expectEqual(t.value("@surface", "android"), "#ffffff", "base theme tokens kept")
+    val title = oneResolve(t, "text", style().text("title"), "android")
+    expectEqual(title.get("size"), "17", "preset size")
+    expectEqual(title.get("lineHeight"), "22", "preset line height")
+    expectEqual(title.get("weight"), "semibold", "preset weight")
+    expectEqual(title.get("tracking"), "-20", "preset tracking in hundredths")
+    expectEqual(oneResolve(t, "text", style().text("caption"), "android").get("size"), "12", "short preset")
+    expectEqual(oneResolve(t, "text", style(), "android").get("color"), "#5f6e66", "kind default")
+    val b = oneResolve(t, "pressable", t.named("Button").with(t.named("Button.primary")), "android")
+    expectEqual(b.get("background"), "#193c30", "component style")
+    expectEqual(b.get("radius"), "12", "component number")
+    expectEqual(b.get("height"), "48", "base component style kept (extended, not replaced)")
+    expectEqual(b.get("pressed:background"), "#10291f", "state block")
+    val w = oneResolve(t, "pressable", t.named("Button.primary"), "web-document")
+    expectEqual(w.get("transition"), "background .12s", "quoted value in target block")
+    expectEqual(w.get("hover:background"), "#204a3b", "target:state block")
+    expect(!b.has("transition"), "web block not on android")
+    testsPassed()
+}

@@ -1,0 +1,18 @@
+import "abla/test"
+import "abla/text"
+import "../../examples/services/services.ab"
+import "../../src/backends/test.ab"
+
+fun main: int {
+    val t = oneDefaultTheme()
+    var app = ServicesDemo(oneRecordedServices(), "https://echo.test")
+    var ui = oneUi("test", t)
+    expect(oneDispatch(app, "test", t, onePressFor(app.render(ui), "JSON PUT"), ""), "press JSON PUT")
+    expectEqual(app.pending, 1, "request id is pending")
+    app.receive("result", oneResponsePayload(1, 200, "{\"m\":\"PUT\"}", ""))
+    expectEqual(app.pending, 0, "completion clears pending")
+    expect(app.log.startsWith("json: 200"), "completion is logged")
+    var ui2 = oneUi("test", t)
+    expect(oneFind(app.render(ui2), "log").kind == "text", "log is rendered")
+    testsPassed()
+}

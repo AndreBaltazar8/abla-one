@@ -1,0 +1,86 @@
+import "abla/http"
+import "abla/process/time"
+import "epaper.ab"
+import "web_live.ab"
+
+// A PaperMono showing an app that runs on a host (SPEC §10, M4): the device
+// polls for updates and sends taps over HTTP, and copies the rectangles it
+// receives into its canvas before a partial (or full) refresh. Mount the
+// routes on any server, such as the live web server's handler:
+//
+//   GET  /one/epaper/update?have=<revision>  → 200 wire update, or 204
+//   POST /one/epaper/touch?x=<px>&y=<px>     → 200 wire update, or 204
+//   GET  /one/epaper/canvas                  → the full 96000-byte canvas
+//   GET  /one/epaper/preview.png             → what the panel shows
+//
+// A device that is one revision behind gets just the changed rectangles;
+// one further behind (or new) gets the whole panel with a quality refresh.
+// The app's services are a session queue ("epaper"): timers run on each
+// request, and its requests go to `handler` (relative URLs, in process).
+
+class OneEpaperHost(
+    var app: OneApp,
+    val theme: Theme,
+    var state: OneEpaperState,
+    val icons: OneIconSource,
+    val handler: (HttpRequest) -> HttpResponse,
+    var lastWire: string
+)
+
+fun oneEpaperHost(app: OneApp, theme: Theme, options: OneEpaperOptions, icons: OneIconSource, handler: (HttpRequest) -> HttpResponse): OneEpaperHost {
+    var host = OneEpaperHost(app, theme, oneEpaperState(options), icons, handler, "")
+    host.refresh()
+    host
+}
+
+// Platform work, then a render; keeps the wire form of the latest change.
+fun OneEpaperHost.refresh(): void {
+    val index = oneLiveQueueIndex("epaper")
+    var rounds = 0
+    while (rounds < 8) {
+        oneLiveQueueList[index].fireTimers(monotonicMilliseconds())
+        for (item in oneLiveQueueList[index].takeRequests()) oneLiveQueueList[index].complete(oneLiveExecute(handler, item))
+        val completions = oneLiveQueueList[index].takeCompletions()
+        for (payload in completions) app.receive("result", payload)
+        if (completions.size == 0) rounds = 8
+        rounds = rounds + 1
+    }
+    val update = oneEpaperRender(app, theme, state, icons)
+    if (update.rects.size > 0) lastWire = oneEpaperWire(update, state.options.height, state.options.width)
+    return
+}
+
+// The whole panel as one update (a device that is new or fell behind).
+fun OneEpaperHost.fullWire(): string {
+    val o = state.options
+    oneEpaperWire(OneEpaperUpdate(state.revision, oneEpaperQuality, [OneEpaperRect(0, 0, o.height, o.width)], oneEpaperPlanes(state.levels, o.height, o.width)), o.height, o.width)
+}
+
+fun OneEpaperHost.wireFor(have: int): string =
+    if (have == state.revision) "" else if (have == state.revision - 1 && lastWire != "") lastWire else fullWire()
+
+fun oneEpaperBinary(body: string): HttpResponse =
+    if (body == "") HttpResponse(204, [HttpHeader("Cache-Control", "no-store")], "")
+    else HttpResponse(200, [HttpHeader("Content-Type", "application/octet-stream"), HttpHeader("Cache-Control", "no-store")], body)
+
+// Answers the device's requests; null for other paths.
+fun OneEpaperHost.handle(request: HttpRequest): HttpResponse? {
+    if (request.path == "/one/epaper/update" && request.method == "GET") {
+        refresh()
+        return oneEpaperBinary(wireFor(oneParseInt(request.queryParameter("have"), -1)))
+    }
+    if (request.path == "/one/epaper/touch" && request.method == "POST") {
+        val have = oneParseInt(request.queryParameter("have"), state.revision)
+        oneEpaperTouch(app, theme, state, oneParseInt(request.queryParameter("x"), -1), oneParseInt(request.queryParameter("y"), -1))
+        refresh()
+        return oneEpaperBinary(wireFor(have))
+    }
+    if (request.path == "/one/epaper/canvas" && request.method == "GET") {
+        var out = byteBuffer()
+        for (b in oneEpaperPlanes(state.levels, state.options.height, state.options.width)) out.appendByteValue(b)
+        return oneEpaperBinary(out.toText())
+    }
+    if (request.path == "/one/epaper/preview.png" && request.method == "GET")
+        return HttpResponse(200, [HttpHeader("Content-Type", "image/png"), HttpHeader("Cache-Control", "no-store")], oneEpaperPreview(state))
+    null
+}

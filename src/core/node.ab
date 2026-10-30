@@ -1,0 +1,107 @@
+import "style.ab"
+
+// Nodes are plain data: a kind from the closed set every backend implements,
+// a key, a style, string attributes and children. Event handlers are not
+// stored here; nodes carry the ids `Ui` handed out for this revision.
+
+class Attr(val name: string, val value: string)
+
+class Node(val kind: string, val key: string, val style: Style, val attrs: array<Attr>, val children: array<Node>) {
+    fun attr(name: string): string {
+        var found = ""
+        for (item in attrs) if (item.name == name) found = item.value
+        found
+    }
+    fun has(name: string): bool {
+        var found = false
+        for (item in attrs) if (item.name == name) found = true
+        found
+    }
+    fun set(name: string, value: string): Node {
+        val out: array<Attr> = []
+        for (item in attrs) if (item.name != name) out.append(item)
+        out.append(Attr(name, value))
+        Node(kind, key, style, out, children)
+    }
+    fun setInt(name: string, value: int): Node = set(name, "$value")
+    fun keyed(value: string): Node = Node(kind, value, style, attrs, children)
+    fun styled(extra: Style): Node = Node(kind, key, style.with(extra), attrs, children)
+    // Resolves this node and its subtree with a theme scope (`$theme` scope blocks).
+    fun themed(scope: string): Node = set("theme", scope)
+}
+
+fun oneNode(kind: string, value: Style, children: array<Node>): Node = Node(kind, "", value, [], children)
+
+fun column(value: Style, children: array<Node>): Node = oneNode("column", value, oneVisible(children))
+fun row(value: Style, children: array<Node>): Node = oneNode("row", value, oneVisible(children))
+fun stack(value: Style, children: array<Node>): Node = oneNode("stack", value, oneVisible(children))
+fun scroll(value: Style, children: array<Node>): Node = oneNode("scroll", value, oneVisible(children))
+
+// A lazy keyed list. `anchor` is "top", "bottom" or "id"; with "id" the list
+// opens at the first child whose `item` attribute is greater than `anchorId`.
+// `onVisible` receives the largest fully visible `item`.
+fun feed(value: Style, children: array<Node>, anchor: string, anchorId: int, onVisible: int): Node =
+    oneNode("feed", value, oneVisible(children)).set("anchor", anchor).setInt("anchorId", anchorId).setInt("onVisible", onVisible)
+
+fun text(value: string, look: Style): Node = oneNode("text", look, []).set("text", value)
+
+// Inline runs as JSON: [{"kind":"text|mention|emoji|link","text":..,"src":..}].
+fun rich(runs: string, look: Style): Node = oneNode("rich", look, []).set("runs", runs)
+
+fun icon(name: string, label: string, look: Style): Node = oneNode("icon", look, []).set("name", name).set("label", label)
+
+// `src` is an absolute URL or a local asset name. Remote images may carry an
+// authorization header value and a local fallback.
+fun image(src: string, label: string, look: Style): Node = oneNode("image", look, []).set("src", src).set("label", label)
+
+fun pressable(event: int, look: Style, children: array<Node>): Node =
+    oneNode("pressable", look, oneVisible(children)).setInt("onPress", event)
+
+fun input(value: string, placeholder: string, onChange: int, look: Style): Node =
+    oneNode("input", look, []).set("value", value).set("placeholder", placeholder).setInt("onChange", onChange)
+
+// A page: the root of a web document, with its title, language and meta
+// tags (`og:*` become properties). Its content scrolls with the document
+// instead of filling the viewport. Other targets ignore all of this.
+fun page(title: string, lang: string, meta: Map<string, string>, content: Node): Node {
+    var root = content.set("page.title", title).set("page.lang", lang).set("page.flow", "document")
+    for (name in meta.keys()) {
+        val value = meta.get(name)
+        if (value != null) root = root.set("meta:$name", value)
+    }
+    root
+}
+
+// A link: a document anchor on the web (`href` may be "#section" or a URL);
+// elsewhere a container that opens it through the platform when pressed.
+fun link(href: string, look: Style, children: array<Node>): Node = oneNode("link", look, oneVisible(children)).set("href", href)
+// A link that also delivers an event (`ui.press`) as it is followed.
+fun linkPress(href: string, event: int, look: Style, children: array<Node>): Node = link(href, look, children).setInt("onPress", event)
+
+fun spacer(amount: int): Node = oneNode("spacer", style(), []).setInt("size", amount)
+fun grower(): Node = oneNode("spacer", style().grow(1), [])
+fun divider(look: Style): Node = oneNode("divider", look, [])
+fun none(): Node = oneNode("none", style(), [])
+
+// Escape hatch: a raw node for one target, `props` as a JSON object. Other
+// targets render `fallback` instead.
+fun native(target: string, kind: string, props: string, children: array<Node>, fallback: Node): Node =
+    Node("native", "", style(), [Attr("target", target), Attr("nativeKind", kind), Attr("props", props)], children).set("hasFallback", "true").withFallback(fallback)
+
+fun Node.withFallback(fallback: Node): Node {
+    val out: array<Node> = []
+    for (child in children) out.append(child)
+    out.append(fallback.set("oneFallback", "true"))
+    Node(kind, key, style, attrs, out)
+}
+
+// Drops `none` and splices `fragment` children into the parent.
+fun oneVisible(children: array<Node>): array<Node> {
+    val out: array<Node> = []
+    for (child in children) {
+        if (child.kind == "fragment") {
+            for (inner in oneVisible(child.children)) out.append(inner)
+        } else if (child.kind != "none") out.append(child)
+    }
+    out
+}

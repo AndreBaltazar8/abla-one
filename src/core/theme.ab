@@ -1,0 +1,175 @@
+import "style.ab"
+
+// A theme holds tokens and named styles. Tokens may be scoped by target or
+// family ("epaper:muted"). Named styles are kind defaults ("kind:text"), text
+// presets ("text:title") and component variants ("Button.primary").
+class Theme(val tokens: Map<string, string>, val styles: Map<string, Style>, val scopes: Map<string, Theme>) {
+    fun token(name: string, value: string): void {
+        tokens.set(name, value)
+        return
+    }
+    fun define(name: string, value: Style): void {
+        styles.set(name, value)
+        return
+    }
+    fun textPreset(name: string, value: Style): void {
+        styles.set("text:$name", value)
+        return
+    }
+    fun kind(name: string, value: Style): void {
+        styles.set("kind:$name", value)
+        return
+    }
+    // Copies this theme's tokens, styles and scopes (shallow: styles are values).
+    fun copy(): Theme {
+        var out = theme()
+        for (key in tokens.keys()) {
+            val value = tokens.get(key)
+            if (value != null) out.tokens.set(key, value)
+        }
+        for (key in styles.keys()) {
+            val value = styles.get(key)
+            if (value != null) out.styles.set(key, value)
+        }
+        for (key in scopes.keys()) {
+            val value = scopes.get(key)
+            if (value != null) out.scopes.set(key, value)
+        }
+        out
+    }
+    // Adds another theme on top: its tokens replace, its styles extend these
+    // (text presets replace), its scopes are added. Components can ship a
+    // theme fragment that apps merge.
+    fun merge(other: Theme): void {
+        for (key in other.tokens.keys()) {
+            val value = other.tokens.get(key)
+            if (value != null) tokens.set(key, value)
+        }
+        for (key in other.styles.keys()) {
+            val value = other.styles.get(key)
+            if (value != null) {
+                if (key.size > 5 && key.slice(0, 5) == "text:") styles.set(key, value)
+                else styles.set(key, named(key).with(value))
+            }
+        }
+        for (key in other.scopes.keys()) {
+            val value = other.scopes.get(key)
+            if (value != null) scopes.set(key, value)
+        }
+        return
+    }
+    // A named variant of this theme for a subtree (`node.themed(name)`):
+    // this theme with the scope's overrides. Unknown names give this theme.
+    fun scope(name: string, overrides: Theme): void {
+        var full = copy()
+        full.merge(overrides)
+        scopes.set(name, full)
+        return
+    }
+    fun scoped(name: string): Theme {
+        val found = scopes.get(name)
+        if (found != null) found else this
+    }
+    fun named(name: string): Style {
+        val found = styles.get(name)
+        if (found != null) found else style()
+    }
+    fun lookup(name: string, target: string): string {
+        val exact = tokens.get("$target:$name")
+        if (exact != null) return exact
+        val family = tokens.get("${oneTargetFamily(target)}:$name")
+        if (family != null) return family
+        val plain = tokens.get(name)
+        if (plain != null) plain else ""
+    }
+    // `@name` values resolve through tokens, which may themselves be tokens.
+    fun value(raw: string, target: string): string {
+        var current = raw
+        var depth = 0
+        while (depth < 8 && current.size > 1 && current[0] == 64) {
+            val next = lookup(current.slice(1, current.size), target)
+            if (next == "") return current
+            current = next
+            depth = depth + 1
+        }
+        current
+    }
+}
+
+fun theme(): Theme = Theme(Map(), Map(), Map())
+
+// The flat result a backend receives: "property" and "state:property" keys.
+class Resolved(val props: Map<string, string>) {
+    fun get(name: string): string {
+        val found = props.get(name)
+        if (found != null) found else ""
+    }
+    fun has(name: string): bool = props.has(name)
+    fun int(name: string, fallback: int): int = oneParseInt(get(name), fallback)
+}
+
+fun oneResolve(theme: Theme, kind: string, value: Style, target: string): Resolved {
+    var out = Resolved(Map())
+    oneApply(theme, theme.named("kind:$kind"), target, "", out, 0)
+    oneApply(theme, value, target, "", out, 0)
+    out
+}
+
+// Within one style: unscoped entries, then the target family, then the exact
+// target. A `text` entry expands its preset in place.
+fun oneApply(theme: Theme, value: Style, target: string, stateOverride: string, var out: Resolved, depth: int): void {
+    val family = oneTargetFamily(target)
+    var pass = 0
+    while (pass < 3) {
+        for (entry in value.entries) {
+            val inPass = if (pass == 0) entry.target == "" else if (pass == 1) entry.target == family && family != target else entry.target == target
+            if (inPass) {
+                val state = if (entry.state != "") entry.state else stateOverride
+                if (entry.property == "part" && depth < 6) {
+                    // A component part, looked up in the theme doing the resolving,
+                    // so theme scopes restyle components too.
+                    oneApply(theme, theme.named(entry.value), target, state, out, depth + 1)
+                } else if (entry.property == "text" && depth < 4) {
+                    val preset = if (entry.value.size > 0 && entry.value[0] == 64) entry.value.slice(1, entry.value.size) else entry.value
+                    oneApply(theme, theme.named("text:$preset"), target, state, out, depth + 1)
+                } else if (oneViewportState(state) && target != "web-document") {
+                    // Viewport conditions: the web document writes media
+                    // queries; every other target knows its width.
+                    if (oneViewportMatches(state, oneViewportWidth)) out.props.set(entry.property, theme.value(entry.value, target))
+                } else {
+                    out.props.set(if (state == "") entry.property else "$state:${entry.property}", theme.value(entry.value, target))
+                }
+            }
+        }
+        pass = pass + 1
+    }
+    return
+}
+
+// The width the current render is for, in logical pixels (0: unknown, which
+// counts as narrow). `oneUiSized` and the layout engine set it.
+var oneViewportWidth = 0
+
+// `max760` applies at widths up to 760, `min1500` from 1500 up.
+fun oneViewportState(state: string): bool =
+    state.size > 3 && (state.startsWith("max") || state.startsWith("min")) && oneParseInt(state.slice(3, state.size), -1) > 0
+
+fun oneViewportMatches(state: string, width: int): bool {
+    val limit = oneParseInt(state.slice(3, state.size), 0)
+    if (state.startsWith("max")) width <= limit else width >= limit
+}
+
+fun oneParseInt(value: string, fallback: int): int {
+    if (value.size == 0) return fallback
+    var negative = value[0] == 45
+    var index = if (negative) 1 else 0
+    if (index >= value.size) return fallback
+    var result = 0
+    while (index < value.size) {
+        val byte = value[index]
+        if (byte < 48 || byte > 57) return fallback
+        result = result * 10 + byte - 48
+        index = index + 1
+    }
+    if (negative) -result else result
+}

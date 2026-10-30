@@ -1,0 +1,32 @@
+import "abla/json"
+import "../../../abla-mobile/src/ui.ab"
+import "../one.ab"
+
+// Encoding for the `android` target. Resolved trees are sent to the
+// abla-mobile host as `one.*` nodes and drawn by its generic OneRenderer
+// (Compose). Style keys go through unchanged ("gap", "pressed:background");
+// node attributes are prefixed with "a." so they can't collide with style
+// properties. Sibling keys are the node's key or its index.
+
+fun oneAndroidNode(node: Node, outer: Theme, key: string): MobileNode {
+    val theme = if (node.attr("theme") != "") outer.scoped(node.attr("theme")) else outer
+    val resolved = oneResolve(theme, node.kind, node.style, "android")
+    val keys: array<string> = []
+    val values: array<Json> = []
+    for (name in resolved.props.keys()) {
+        keys.append(name)
+        values.append(jsonString(resolved.get(name)))
+    }
+    for (item in node.attrs) {
+        keys.append("a.${item.name}")
+        values.append(jsonString(item.value))
+    }
+    val children: array<MobileNode> = []
+    var index = 0
+    for (child in node.children) {
+        children.append(oneAndroidNode(child, theme, if (child.key != "") child.key else "$index"))
+        index = index + 1
+    }
+    MobileNode("one.${node.kind}", key, jsonObject(keys, values), children)
+}
+

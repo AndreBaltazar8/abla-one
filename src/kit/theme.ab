@@ -1,0 +1,118 @@
+import "../one.ab"
+
+// A neutral default theme. Apps start from it and redefine tokens and named
+// styles; anything they don't redefine keeps these values.
+fun oneDefaultTheme(): Theme {
+    var t = theme()
+    t.token("ink", "#16181a")
+    t.token("muted", "#6b7178")
+    t.token("subtle", "#9aa0a6")
+    t.token("surface", "#ffffff")
+    t.token("surface-alt", "#f3f4f5")
+    t.token("surface-pressed", "#eceef0")
+    t.token("line", "#e6e8ea")
+    t.token("primary", "#1f2328")
+    t.token("on-primary", "#ffffff")
+    t.token("accent", "#2f6feb")
+    t.token("danger", "#c62828")
+    t.token("avatar-1", "#e3ecf9")
+    t.token("avatar-1-ink", "#2b4f86")
+    t.token("avatar-2", "#e6f3ea")
+    t.token("avatar-2-ink", "#2e6b45")
+    t.token("avatar-3", "#fbeee2")
+    t.token("avatar-3-ink", "#8a4b17")
+    t.token("avatar-4", "#f3e8f6")
+    t.token("avatar-4-ink", "#6d3a7c")
+    t.token("avatar-5", "#fdf3d8")
+    t.token("avatar-5-ink", "#7a5a0b")
+    t.token("avatar-6", "#e3f2f3")
+    t.token("avatar-6-ink", "#22656b")
+    // E-paper has four greys: pale fills would round to white, so surfaces
+    // and lines are darker there, and avatars are plain grey.
+    t.token("epaper:muted", "#555555")
+    t.token("epaper:subtle", "#777777")
+    t.token("epaper:surface-alt", "#d0d0d0")
+    t.token("epaper:surface-pressed", "#a0a0a0")
+    t.token("epaper:line", "#808080")
+    t.token("epaper:accent", "#000000")
+    t.token("epaper:danger", "#000000")
+    for (n in ["1", "2", "3", "4", "5", "6"]) {
+        t.token("epaper:avatar-$n", "#d0d0d0")
+        t.token("epaper:avatar-$n-ink", "#000000")
+    }
+
+    t.textPreset("display", style().fontSize(28).lineHeight(34).weight("bold").tracking(-40))
+    t.textPreset("headline", style().fontSize(22).lineHeight(28).weight("bold").tracking(-30))
+    t.textPreset("title", style().fontSize(17).lineHeight(22).weight("semibold").tracking(-10))
+    t.textPreset("title-sm", style().fontSize(15).lineHeight(20).weight("semibold"))
+    t.textPreset("body", style().fontSize(15).lineHeight(21))
+    t.textPreset("body-sm", style().fontSize(14).lineHeight(19))
+    t.textPreset("caption", style().fontSize(12).lineHeight(16))
+    t.textPreset("label", style().fontSize(15).lineHeight(20).weight("semibold"))
+    t.textPreset("label-sm", style().fontSize(12).lineHeight(16).weight("medium"))
+
+    t.token("font", "sans")
+    t.kind("column", style().set("font", "@font"))
+    t.kind("text", style().text("body").color("@ink").set("font", "@font"))
+    t.kind("rich", style().text("body").color("@ink").set("font", "@font"))
+    t.kind("input", style().text("body").color("@ink").set("font", "@font").set("placeholderColor", "@subtle").set("caretColor", "@primary"))
+    t.kind("divider", style().background("@line"))
+    t.kind("icon", style().size(24).tint("@ink"))
+    t.kind("pressable", style().on("web", style().set("cursor", "pointer")))
+
+    t.define("Button", style().height(48).paddingX(18).radius(12).align("center").justify("center").on("web", style().set("transition", "background .12s")))
+    t.define("Button.label", style().text("label").maxLines(1))
+    t.define("Button.primary", style().background("@primary").pressed(style().background("@primary-pressed")))
+    t.define("Button.primary.label", style().color("@on-primary"))
+    t.define("Button.secondary", style().background("@surface-alt").pressed(style().background("@surface-pressed")))
+    t.define("Button.secondary.label", style().color("@ink"))
+    t.define("Button.plain", style().pressed(style().background("@surface-alt")))
+    t.define("Button.plain.label", style().color("@ink"))
+    t.define("Button.danger", style().background("@surface-alt").pressed(style().background("@surface-pressed")))
+    t.define("Button.danger.label", style().color("@danger"))
+    t.define("Button.disabled", style().background("@surface-alt"))
+    t.define("Button.disabled.label", style().color("@subtle"))
+
+    t.define("IconButton", style().size(44).radius(22).align("center").justify("center").pressed(style().background("@surface-alt")))
+    t.define("IconButton.icon", style().size(24))
+
+    t.define("Badge", style().minWidth(20).height(20).radius(10).paddingX(6).align("center").justify("center").background("@primary"))
+    t.define("Badge.label", style().text("label-sm").color("@on-primary").weight("semibold").lineHeight(14))
+    t.define("Badge.muted", style().background("@surface-alt"))
+    t.define("Badge.muted.label", style().color("@muted"))
+
+    t.define("Chip", style().height(32).paddingX(14).radius(16).justify("center").background("@surface-alt").pressed(style().background("@surface-pressed")))
+    t.define("Chip.label", style().text("label-sm").fontSize(13).color("@muted").maxLines(1))
+    t.define("Chip.selected", style().background("@primary").pressed(style().background("@primary")))
+    t.define("Chip.selected.label", style().color("@on-primary"))
+
+    t.define("ListRow", style().paddingX(16).paddingY(10).minHeight(64).justify("center").pressed(style().background("@surface-alt")).on("web", style().hover(style().background("@surface-alt"))))
+    t.define("ListRow.title", style().text("title-sm").color("@ink"))
+    t.define("ListRow.subtitle", style().text("body-sm").color("@muted"))
+    t.define("ListRow.meta", style().text("caption").color("@subtle"))
+
+    t.define("TopBar", style().height(56).paddingLeft(16).paddingRight(8).gap(4).background("@surface"))
+
+    t.define("TabBar", style().height(64).paddingX(8).background("@surface").borderTop(1, "@line").safeBottom())
+    t.define("Tab", style().height(64).gap(4).align("center").justify("center"))
+    t.define("Tab.icon", style().size(24).tint("@subtle"))
+    t.define("Tab.label", style().text("caption").weight("medium").color("@subtle").maxLines(1))
+    t.define("Tab.active.icon", style().tint("@ink"))
+    t.define("Tab.active.label", style().color("@ink").weight("semibold"))
+
+    t.define("SearchField", style().height(44).radius(22).paddingLeft(14).paddingRight(16).gap(8).background("@surface-alt"))
+    t.define("SearchField.icon", style().size(20).tint("@subtle"))
+    t.define("SearchField.input", style().text("body"))
+
+    t.define("TextField", style().height(52).paddingX(16).radius(12).border(1, "@line").background("@surface").focus(style().borderColor("@primary")))
+
+    t.define("SectionHeader", style().paddingX(16).paddingTop(20).paddingBottom(8).gap(8))
+    t.define("SectionHeader.label", style().text("label-sm").color("@muted").tracking(20))
+
+    t.define("Card", style().padding(16).gap(12).radius(16).background("@surface").border(1, "@line"))
+    t.define("EmptyState", style().paddingX(32).paddingY(48).gap(6).align("center"))
+    t.define("EmptyState.title", style().text("title").color("@ink").textAlign("center"))
+    t.define("EmptyState.body", style().text("body-sm").color("@muted").textAlign("center"))
+    t.token("primary-pressed", "#000000")
+    t
+}

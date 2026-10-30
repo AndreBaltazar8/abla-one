@@ -1,0 +1,396 @@
+import "abla/compiler/parser"
+import "abla/bytes"
+import "runtime.ab"
+
+// `$one`: XML-like component syntax (SPEC §5). A template is one element; it
+// compiles to ordinary calls (column, text, pressable, button, ...) and needs a
+// `ui: Ui` in scope, which handlers register with.
+//
+//   $one
+//     <Pressable onPress={ count += 1 } paddingX=16 height=68 gap=12
+//                pressed:background=@surface-pressed web:hover:background=@surface-alt>
+//       <Text text="title-sm" maxLines=1>Count {count}</Text>
+//     </Pressable>
+//
+// Attributes are style properties unless the element takes them as data
+// (label, key, value, ...). A prefix scopes a property to a target or a state:
+// `android:radius=14`, `pressed:background=@x`, `web:hover:background=@y`.
+// Values: "text", numbers, @tokens, bare words, or {Abla expressions}.
+// `on*={...}` handlers hold statements separated by `;`; onChange receives
+// `value`. Capitalised tags that aren't built in call the function of that
+// name with `ui`, the attribute values in order, and the children (if any).
+// <If cond={...}>…</If> <Else>…</Else> and <For each={xs} as="x">…</For>
+// control what is rendered.
+
+compile fun oneDslState(name: string): bool =
+    name == "pressed" || name == "hover" || name == "focus" || name == "disabled" || name == "selected" || name == "checked" ||
+    oneDslViewport(name)
+
+// `max760:gap=8`, `min1500:height=480`.
+compile fun oneDslViewport(name: string): bool {
+    if (name.size < 4 || !(name.startsWith("max") || name.startsWith("min"))) return false
+    var i = 3
+    while (i < name.size) {
+        if (name[i] < 48 || name[i] > 57) return false
+        i = i + 1
+    }
+    true
+}
+
+compile fun oneDslContainer(tag: string): bool =
+    tag == "Column" || tag == "Row" || tag == "Stack" || tag == "Scroll" || tag == "Pressable"
+
+compile fun oneDslTextual(tag: string): bool =
+    tag == "Text" || tag == "Button" || tag == "Badge" || tag == "Chip"
+
+compile fun oneDslBuiltin(tag: string): bool =
+    oneDslContainer(tag) || oneDslTextual(tag) || tag == "Icon" || tag == "Image" || tag == "Input" ||
+    tag == "Spacer" || tag == "Divider" || tag == "Avatar" || tag == "If" || tag == "Else" || tag == "For"
+
+// Attributes the element keeps as data (node attributes or call arguments).
+compile fun oneDslData(tag: string, name: string): bool {
+    if (name == "key" || name == "label" || name == "selected" || name == "enabled" || name == "item" || name == "style") return true
+    when (tag) {
+        "Icon" -> name == "name"
+        "Image" -> name == "src" || name == "authorization" || name == "fallback"
+        "Input" -> name == "value" || name == "placeholder" || name == "keyboard" || name == "multiline" || name == "secure" || name == "maxLength" || name == "onChange" || name == "onSubmit"
+        "Pressable" -> name == "onPress"
+        "Spacer" -> name == "amount"
+        "Button" -> name == "variant" || name == "onPress"
+        "Chip" -> name == "onPress"
+        "Badge" -> name == "variant"
+        "Avatar" -> name == "name" || name == "seed" || name == "diameter" || name == "photo"
+        "If" -> name == "cond"
+        "For" -> name == "each" || name == "as"
+        else -> false
+    }
+}
+
+// Parsed attributes. `kinds`: string, int, bool, expr, action. `texts` keeps
+// literal text so a value can be rebuilt as a fresh string expression.
+class OneDslAttributes(
+    val names: array<string>,
+    val kinds: array<string>,
+    val texts: array<string>,
+    val values: array<SyntaxExpression>
+)
+
+compile fun oneDslIndex(a: OneDslAttributes, name: string): int {
+    var i = 0
+    while (i < a.names.size) {
+        if (a.names[i] == name) return i
+        i = i + 1
+    }
+    -1
+}
+
+compile fun oneDslAction(cursor: ParserCursor, name: string): SyntaxExpression {
+    val statements: array<SyntaxExpression> = []
+    var complete = false
+    while (!complete) {
+        parserRawSkipWhitespace(cursor)
+        if (parserRawAt(cursor, "}")) complete = true
+        else {
+            statements.append(parserParseAblaExpression(cursor))
+            parserRawSkipWhitespace(cursor)
+            if (!parserRawAt(cursor, "}") && !parserRawConsume(cursor, ";")) parserFail(cursor, "$name statements are separated by `;`")
+        }
+    }
+    // Handlers return void, whatever their last statement's value is.
+    statements.append(syntaxCall("oneDone", []))
+    val body = syntaxBlock(statements)
+    syntaxInferredLambda(if (name == "onChange") ["value"] else [], body, false)
+}
+
+compile fun oneDslName(cursor: ParserCursor): string {
+    var name = parserRawTakeName(cursor)
+    while (name != "" && parserRawConsume(cursor, ":")) name = "$name:${parserRawTakeName(cursor)}"
+    name
+}
+
+compile fun oneDslAttributes(cursor: ParserCursor, var a: OneDslAttributes): bool {
+    while (true) {
+        parserRawSkipWhitespace(cursor)
+        if (parserRawConsume(cursor, "/>")) return true
+        if (parserRawConsume(cursor, ">")) return false
+        val name = oneDslName(cursor)
+        if (name == "") {
+            parserFail(cursor, "expected an attribute")
+            return true
+        }
+        parserRawSkipWhitespace(cursor)
+        if (!parserRawConsume(cursor, "=")) {
+            a.names.append(name)
+            a.kinds.append("bool")
+            a.texts.append("true")
+            a.values.append(syntaxBoolean(true))
+            continue
+        }
+        parserRawSkipWhitespace(cursor)
+        if (parserRawConsume(cursor, "\"")) {
+            val text = parserRawTakeUntil(cursor, "\"")
+            parserRawExpect(cursor, "\"")
+            a.names.append(name)
+            a.kinds.append("string")
+            a.texts.append(text)
+            a.values.append(syntaxString(text))
+        } else if (parserRawConsume(cursor, "{")) {
+            val value = if (name.size > 2 && name.slice(0, 2) == "on") oneDslAction(cursor, name) else parserParseAblaExpression(cursor)
+            parserRawSkipWhitespace(cursor)
+            parserRawExpect(cursor, "}")
+            a.names.append(name)
+            a.kinds.append(if (name.size > 2 && name.slice(0, 2) == "on") "action" else "expr")
+            a.texts.append("")
+            a.values.append(value)
+        } else {
+            val text = parserRawTakeUntil(cursor, " \t\r\n/>")
+            var numeric = text.size > 0
+            for (b in text) if (!((b >= 48 && b <= 57) || b == 45)) numeric = false
+            a.names.append(name)
+            a.kinds.append(if (numeric) "int" else "string")
+            a.texts.append(text)
+            a.values.append(if (numeric) syntaxInteger(oneDslInt(text)) else syntaxString(text))
+        }
+    }
+    true
+}
+
+compile fun oneDslInt(text: string): int {
+    var negative = text.size > 0 && text[0] == 45
+    var n = 0
+    var i = if (negative) 1 else 0
+    while (i < text.size) {
+        n = n * 10 + text[i] - 48
+        i = i + 1
+    }
+    if (negative) -n else n
+}
+
+// The attribute as a string expression (style values and node attributes).
+compile fun oneDslString(var a: OneDslAttributes, index: int): SyntaxExpression {
+    val kind = a.kinds[index]
+    if (kind == "expr") return syntaxCall("oneString", [a.values[index]])
+    syntaxString(a.texts[index])
+}
+
+compile fun oneDslValue(var a: OneDslAttributes, name: string, fallback: SyntaxExpression): SyntaxExpression {
+    val i = oneDslIndex(a, name)
+    if (i < 0) fallback else a.values[i]
+}
+
+compile fun oneDslText(var a: OneDslAttributes, name: string, fallback: string): SyntaxExpression {
+    val i = oneDslIndex(a, name)
+    if (i < 0) syntaxString(fallback) else oneDslString(a, i)
+}
+
+compile fun oneDslStyle(cursor: ParserCursor, tag: string, var a: OneDslAttributes): SyntaxExpression {
+    var result = oneDslValue(a, "style", syntaxCall("style", []))
+    var i = 0
+    while (i < a.names.size) {
+        val name = a.names[i]
+        if (!oneDslData(tag, name)) {
+            if (a.kinds[i] == "action") parserFail(cursor, "$tag doesn't handle $name")
+            var target = ""
+            var state = ""
+            var property = name
+            var start = 0
+            var j = 0
+            while (j <= name.size) {
+                if (j == name.size || name[j] == 58) {
+                    val part = name.slice(start, j)
+                    if (j == name.size) property = part
+                    else if (oneDslState(part)) state = part
+                    else target = part
+                    start = j + 1
+                }
+                j = j + 1
+            }
+            result = syntaxCall("oneStyleSet", [result, syntaxString(target), syntaxString(state), syntaxString(property), oneDslString(a, i)])
+        }
+        i = i + 1
+    }
+    result
+}
+
+// Node attributes kept on the element (label, selected, keyboard, ...).
+compile fun oneDslNodeAttributes(tag: string, node: SyntaxExpression, var a: OneDslAttributes): SyntaxExpression {
+    var result = node
+    var i = 0
+    while (i < a.names.size) {
+        val name = a.names[i]
+        if (name == "key") result = syntaxCall("oneKey", [result, oneDslString(a, i)])
+        else if (name == "label" || name == "selected" || name == "enabled" || name == "item" ||
+            (tag == "Input" && (name == "keyboard" || name == "multiline" || name == "secure" || name == "maxLength")) ||
+            (tag == "Image" && (name == "authorization" || name == "fallback")))
+            result = syntaxCall("oneAttrSet", [result, syntaxString(name), oneDslString(a, i)])
+        i = i + 1
+    }
+    result
+}
+
+compile fun oneDslPress(var a: OneDslAttributes, name: string): SyntaxExpression {
+    val i = oneDslIndex(a, name)
+    if (i < 0) syntaxInteger(0) else syntaxCall("onePress", [syntaxIdentifier("ui"), a.values[i]])
+}
+
+// Text content with {expressions}, whitespace collapsed like HTML.
+compile fun oneDslTextContent(cursor: ParserCursor, tag: string): SyntaxExpression {
+    val parts: array<SyntaxExpression> = []
+    var pendingSpace = false
+    var any = false
+    while (true) {
+        if (parserRawEnd(cursor)) {
+            parserFail(cursor, "unterminated $tag")
+            return syntaxString("")
+        }
+        if (parserRawAt(cursor, "</")) return syntaxCall("oneJoin", [syntaxArray(parts)])
+        if (parserRawAt(cursor, "<")) {
+            parserFail(cursor, "$tag holds text, not elements")
+            return syntaxString("")
+        }
+        if (parserRawConsume(cursor, "{")) {
+            if (pendingSpace && any) parts.append(syntaxString(" "))
+            pendingSpace = false
+            parts.append(syntaxCall("oneString", [parserParseAblaExpression(cursor)]))
+            parserRawSkipWhitespace(cursor)
+            parserRawExpect(cursor, "}")
+            any = true
+        } else {
+            val literal = parserRawTakeUntil(cursor, "<{")
+            var word = ""
+            for (b in literal) {
+                if (b == 32 || b == 9 || b == 10 || b == 13) {
+                    if (word != "") {
+                        parts.append(syntaxString(if (pendingSpace && any) " $word" else word))
+                        any = true
+                        word = ""
+                    }
+                    pendingSpace = true
+                } else {
+                    if (word == "" && pendingSpace && any) {
+                        word = " "
+                        pendingSpace = false
+                    } else if (word == "") pendingSpace = false
+                    word = oneDslAppendByte(word, b)
+                }
+            }
+            if (word != "") {
+                parts.append(syntaxString(word))
+                any = true
+            }
+        }
+    }
+    syntaxString("")
+}
+
+compile fun oneDslAppendByte(word: string, b: int): string = "$word${byteEncode(b)}"
+
+compile fun oneDslChildren(cursor: ParserCursor, tag: string): array<SyntaxExpression> {
+    val children: array<SyntaxExpression> = []
+    while (true) {
+        parserRawSkipWhitespace(cursor)
+        if (parserRawEnd(cursor)) {
+            parserFail(cursor, "unterminated $tag")
+            return children
+        }
+        if (parserRawAt(cursor, "</")) return children
+        if (parserRawAt(cursor, "<Else")) {
+            if (children.size == 0) parserFail(cursor, "<Else> must follow an <If>")
+            // Handled by the <If> before it (see oneDslElement).
+            return children
+        }
+        if (parserRawAt(cursor, "<")) children.append(oneDslElement(cursor))
+        else if (parserRawConsume(cursor, "{")) {
+            children.append(parserParseAblaExpression(cursor))
+            parserRawSkipWhitespace(cursor)
+            parserRawExpect(cursor, "}")
+        } else {
+            val text = parserRawTakeUntil(cursor, "<{")
+            var blank = true
+            for (b in text) if (!(b == 32 || b == 9 || b == 10 || b == 13)) blank = false
+            if (!blank) parserFail(cursor, "$tag holds elements; put text in <Text>")
+        }
+    }
+    children
+}
+
+compile fun oneDslClose(cursor: ParserCursor, tag: string): void {
+    parserRawExpect(cursor, "</")
+    val closing = parserRawTakeName(cursor)
+    if (closing != tag) parserFail(cursor, "</$closing> doesn't close <$tag>")
+    parserRawSkipWhitespace(cursor)
+    parserRawExpect(cursor, ">")
+    return
+}
+
+compile fun oneDslElement(cursor: ParserCursor): SyntaxExpression {
+    parserRawSkipWhitespace(cursor)
+    parserRawExpect(cursor, "<")
+    val tag = parserRawTakeName(cursor)
+    if (tag == "" || tag[0] < 65 || tag[0] > 90) parserFail(cursor, "element names are capitalised: <$tag>")
+    var a = OneDslAttributes([], [], [], [])
+    val selfClosing = oneDslAttributes(cursor, a)
+    var content = syntaxString("")
+    var children: array<SyntaxExpression> = []
+    if (!selfClosing) {
+        if (oneDslTextual(tag)) content = oneDslTextContent(cursor, tag)
+        else children = oneDslChildren(cursor, tag)
+        oneDslClose(cursor, tag)
+    }
+    val styled = oneDslStyle(cursor, tag, a)
+    var node = when (tag) {
+        "Column" -> syntaxCall("column", [styled, syntaxArray(children)])
+        "Row" -> syntaxCall("row", [styled, syntaxArray(children)])
+        "Stack" -> syntaxCall("stack", [styled, syntaxArray(children)])
+        "Scroll" -> syntaxCall("scroll", [styled, syntaxArray(children)])
+        "Pressable" -> syntaxCall("pressable", [oneDslPress(a, "onPress"), styled, syntaxArray(children)])
+        "Text" -> syntaxCall("text", [content, styled])
+        "Icon" -> syntaxCall("icon", [oneDslText(a, "name", ""), oneDslText(a, "label", ""), styled])
+        "Image" -> syntaxCall("image", [oneDslText(a, "src", ""), oneDslText(a, "label", ""), styled])
+        "Input" -> syntaxCall("input", [oneDslValue(a, "value", syntaxString("")), oneDslText(a, "placeholder", ""),
+            if (oneDslIndex(a, "onChange") >= 0) syntaxCall("oneChange", [syntaxIdentifier("ui"), oneDslValue(a, "onChange", syntaxNull())]) else syntaxInteger(0), styled])
+        "Spacer" -> syntaxCall("spacer", [oneDslValue(a, "amount", syntaxInteger(0))])
+        "Divider" -> syntaxCall("divider", [styled])
+        "Button" -> syntaxCall("button", [syntaxIdentifier("ui"), content, oneDslText(a, "variant", "primary"), oneDslPress(a, "onPress"), styled])
+        "Chip" -> syntaxCall("chip", [syntaxIdentifier("ui"), content, oneDslValue(a, "selected", syntaxBoolean(false)), oneDslPress(a, "onPress")])
+        "Badge" -> syntaxCall("badge", [syntaxIdentifier("ui"), content, oneDslText(a, "variant", "")])
+        "Avatar" -> syntaxCall("avatar", [syntaxIdentifier("ui"), oneDslText(a, "name", ""), oneDslText(a, "seed", ""), oneDslValue(a, "diameter", syntaxInteger(40)), oneDslValue(a, "photo", syntaxCall("none", []))])
+        "If" -> {
+            val chosen = syntaxCall("fragment", [syntaxArray(children)])
+            var otherwise = syntaxCall("none", [])
+            parserRawSkipWhitespace(cursor)
+            if (parserRawConsume(cursor, "<Else")) {
+                parserRawSkipWhitespace(cursor)
+                if (!parserRawConsume(cursor, "/>")) {
+                    parserRawExpect(cursor, ">")
+                    otherwise = syntaxCall("fragment", [syntaxArray(oneDslChildren(cursor, "Else"))])
+                    oneDslClose(cursor, "Else")
+                }
+            }
+            syntaxIf(oneDslValue(a, "cond", syntaxBoolean(false)), chosen, otherwise)
+        }
+        "For" -> {
+            val i = oneDslIndex(a, "as")
+            val name = if (i >= 0) a.texts[i] else "item"
+            syntaxCall("oneEach", [oneDslValue(a, "each", syntaxArray([])), syntaxInferredLambda([name], syntaxCall("fragment", [syntaxArray(children)]), false)])
+        }
+        else -> {
+            // A user component: Name(ui, attributes in order, children).
+            val arguments: array<SyntaxExpression> = [syntaxIdentifier("ui")]
+            var i = 0
+            while (i < a.names.size) {
+                arguments.append(if (a.kinds[i] == "action") syntaxCall("onePress", [syntaxIdentifier("ui"), a.values[i]]) else a.values[i])
+                i = i + 1
+            }
+            if (children.size > 0) arguments.append(syntaxArray(children))
+            syntaxCall(tag, arguments)
+        }
+    }
+    if (oneDslBuiltin(tag) && tag != "If" && tag != "For") node = oneDslNodeAttributes(tag, node, a)
+    if (tag == "Input" && oneDslIndex(a, "onSubmit") >= 0) node = syntaxCall("oneAttrSet", [node, syntaxString("onSubmit"), syntaxCall("oneString", [oneDslPress(a, "onSubmit")])])
+    node
+}
+
+compile fun oneDslParse(cursor: ParserCursor): SyntaxExpression = oneDslElement(cursor)
+
+#compilerRegisterSubparser("one", oneDslParse)

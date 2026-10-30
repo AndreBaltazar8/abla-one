@@ -1,0 +1,25 @@
+import "abla/test"
+import "abla/text"
+import "../../src/one.ab"
+import "../../src/backends/test.ab"
+
+fun main: int {
+    var t = theme()
+    t.token("brand", "#193c30")
+    t.kind("text", style().fontSize(15))
+    val tree = column(style().gap(8).on("epaper", style().gap(4)), [
+        text("Olá", style().color("@brand")),
+        row(style(), [icon("bell", "Atividade", style().size(24))]).keyed("bar")
+    ])
+    val android = oneTestDump(tree, t, "android")
+    expectEqual(android,
+        "column#0 {gap=8}\n" +
+        "  text#0.0 {color=#193c30 size=15} text=\"Olá\"\n" +
+        "  row#bar\n" +
+        "    icon#bar.0 {height=24 width=24} label=\"Atividade\" name=\"bell\"\n" +
+        "", "android dump")
+    expect(oneTestDump(tree, t, "epaper").startsWith("column#0 {gap=4}"), "epaper dump applies its scope")
+    expectEqual(oneSortedKeys(["b", "a", "ab", "B"]).size, 4, "sort keeps all")
+    expectEqual(oneSortedKeys(["b", "a", "ab"])[1], "ab", "sort order")
+    testsPassed()
+}

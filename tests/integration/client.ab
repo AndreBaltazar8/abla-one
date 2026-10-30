@@ -1,0 +1,112 @@
+import "abla/test"
+import "abla/json"
+import "abla/crypto"
+import "../../examples/services/services.ab"
+import "../../src/backends/web_client.ab"
+
+// Wasm client mode, driven natively: the page messages a module receives and
+// the messages it answers with. Uses the services demo, so requests become
+// fetches, storage becomes `store`, timers `wait`, and picked files arrive as
+// uploads.
+
+fun demo(): OneApp = ServicesDemo(oneLiveServices("client"), ".")
+
+fun call(message: string): Json = jsonParse(oneClientMessage(message, { session -> demo() }, oneDefaultTheme(), "icons")).value
+
+fun has(text: string, needle: string): bool = text.contains(needle)
+
+// The press id of the button labelled `label` in the last patch.
+fun pressFor(html: string, label: string): int {
+    val at = html.indexOf(">$label<")
+    if (at < 0) return 0
+    var i = at
+    while (i > 0) {
+        if (html.slice(i, i + 16) == "data-one-press=\"") {
+            var end = i + 16
+            while (html[end] != 34) end = end + 1
+            return oneParseInt(html.slice(i + 16, end), 0)
+        }
+        i = i - 1
+    }
+    0
+}
+
+fun kinds(out: Json): string {
+    var s = ""
+    for (m in out.values) s = "$s${m.getString("t")} "
+    s
+}
+
+fun find(out: Json, kind: string): Json {
+    for (m in out.values) if (m.getString("t") == kind) return m
+    jsonNull()
+}
+
+fun main: int {
+    expectEqual(oneClientMessage("{\"t\":\"event\",\"r\":1,\"id\":1,\"v\":\"\"}", { session -> demo() }, oneDefaultTheme(), "icons"), "[]", "nothing runs before hello")
+    var out = call("{\"t\":\"hello\",\"r\":1,\"w\":390,\"storage\":{\"demo\":\"{\\\"count\\\":3,\\\"on\\\":true}\"}}")
+    var html = find(out, "patch").getString("html")
+    expect(has(html, ">JSON PUT<"), "hello renders the app")
+    expect(find(out, "patch").getString("css").size > 500, "with its CSS")
+    var r = find(out, "patch").get("r").asInt()
+
+    // Storage seeded from the page's localStorage.
+    out = call("{\"t\":\"event\",\"r\":$r,\"id\":${pressFor(html, "Secure read")},\"v\":\"\"}")
+    html = find(out, "patch").getString("html")
+    r = find(out, "patch").get("r").asInt()
+    expect(has(html, "load: 200 count=3"), "secure read sees the page's storage")
+
+    // A request becomes a fetch; its result comes back as a message.
+    out = call("{\"t\":\"event\",\"r\":$r,\"id\":${pressFor(html, "JSON PUT")},\"v\":\"\"}")
+    val fetch = find(out, "fetch")
+    expectEqual(fetch.get("request").getString("method"), "PUT", "fetch method")
+    expectEqual(fetch.get("request").getString("url"), "./echo", "fetch url")
+    expect(has(jsonStringify(fetch.get("request").get("headers")), "X-Abla"), "fetch headers")
+    expect(has(fetch.get("request").getString("body"), "\"n\":7"), "fetch body")
+    out = call(jsonStringify(jsonObject(["t", "payload"], [jsonString("result"), jsonString(oneResponsePayload(fetch.get("id").asInt(), 200, "echoed", ""))])))
+    html = find(out, "patch").getString("html")
+    r = find(out, "patch").get("r").asInt()
+    expect(has(html, "json: 200 echoed"), "the result reaches the app")
+
+    // Bytes go as base64.
+    out = call("{\"t\":\"event\",\"r\":$r,\"id\":${pressFor(html, "Bytes POST")},\"v\":\"\"}")
+    expectEqual(find(out, "fetch").get("request").getString("bodyBase64"), "AAECAwQ=", "byte bodies")
+
+    // Writes reach the page's storage.
+    out = call("{\"t\":\"event\",\"r\":$r,\"id\":${pressFor(html, "Secure write")},\"v\":\"\"}")
+    expect(has(find(out, "store").get("storage").getString("demo"), "\"count\":3"), "store message carries storage")
+    r = find(out, "patch").get("r").asInt()
+    html = find(out, "patch").getString("html")
+
+    // Timers ask the page to wake the module.
+    out = call("{\"t\":\"event\",\"r\":$r,\"id\":${pressFor(html, "Timer")},\"v\":\"\"}")
+    val wait = find(out, "wait")
+    expect(!wait.isNull() && wait.get("ms").asInt() <= 300, "wait message for a timer")
+
+    // Files: the page picks, the bytes arrive as uploads.
+    out = call("{\"t\":\"event\",\"r\":$r,\"id\":${pressFor(html, "Pick file")},\"v\":\"\"}")
+    val pick = find(out, "pick")
+    expectEqual(pick.getString("kind"), "files", "pick message")
+    out = call(jsonStringify(jsonObject(["t", "id", "kind", "name", "mime", "base64", "last"], [jsonString("upload"), pick.get("id"), jsonString("files"), jsonString("fatura.pdf"), jsonString("application/pdf"), jsonString(base64Encode("%PDF-1.4 hello")), jsonBoolean(true)])))
+    html = find(out, "patch").getString("html")
+    r = find(out, "patch").get("r").asInt()
+    expect(has(html, "pick: 1 fatura.pdf 14"), "picked file reaches the app")
+    out = call("{\"t\":\"event\",\"r\":$r,\"id\":${pressFor(html, "Upload file")},\"v\":\"\"}")
+    expectEqual(base64Decode(find(out, "fetch").get("request").getString("bodyBase64")), "%PDF-1.4 hello", "file bodies are the picked bytes")
+    out = call("{\"t\":\"event\",\"r\":$r,\"id\":${pressFor(html, "Multipart")},\"v\":\"\"}")
+    val multipart = find(out, "fetch").get("request")
+    val body = base64Decode(multipart.getString("bodyBase64"))
+    expect(has(body, "name=\"title\"\r\n\r\nFatura") && has(body, "filename=\"fatura.pdf\"") && has(body, "%PDF-1.4 hello"), "multipart body")
+    expect(has(jsonStringify(multipart.get("headers")), "multipart/form-data; boundary="), "multipart content type")
+
+    // Saved responses become files the app can read.
+    out = call("{\"t\":\"event\",\"r\":$r,\"id\":${pressFor(html, "Download to file")},\"v\":\"\"}")
+    val download = find(out, "fetch")
+    expect(download.get("request").get("save").asBoolean(), "save flag")
+    val saved = jsonStringify(jsonObject(["requestId", "status", "body", "error", "headers", "bodyBase64", "name"], [download.get("id"), jsonInteger(200), jsonString(""), jsonString(""), jsonObject(["content-type"], [jsonString("application/octet-stream")]), jsonString(base64Encode("0123456789")), jsonString("big")]))
+    out = call(jsonStringify(jsonObject(["t", "payload", "save"], [jsonString("result"), jsonString(saved), jsonBoolean(true)])))
+    html = find(out, "patch").getString("html")
+    expect(has(html, "download: 200 big 10 application/octet-stream"), "saved file reaches the app")
+    expectEqual(kinds(call("{\"t\":\"tick\"}")), "wait ", "a tick before the timer is due only asks to wait again")
+    testsPassed()
+}

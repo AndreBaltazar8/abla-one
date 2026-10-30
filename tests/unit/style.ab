@@ -1,0 +1,33 @@
+import "abla/test"
+import "../../src/one.ab"
+
+fun main: int {
+    val base = style().padding(16).gap(8)
+    expectEqual(base.entries.size, 2, "builders append entries")
+    expectEqual(style().paddingX(4).entries.size, 2, "paddingX writes left and right")
+    val more = base.background("@brand")
+    expectEqual(base.entries.size, 2, "builders don't mutate the receiver")
+    expectEqual(more.entries.size, 3, "builders return a new style")
+
+    val scoped = style().on("android", style().radius(14).pressed(style().background("#000")))
+    expectEqual(scoped.entries[0].target, "android", "on() scopes entries")
+    expectEqual(scoped.entries[1].target, "android", "on() scopes nested state entries")
+    expectEqual(scoped.entries[1].state, "pressed", "nested state survives target scoping")
+    val nested = style().hover(style().on("web", style().color("#111")))
+    expectEqual(nested.entries[0].state, "hover", "state scopes entries")
+    expectEqual(nested.entries[0].target, "web", "inner target scope is kept")
+
+    val custom = style().set("box-shadow", "0 1px 2px #0002")
+    expectEqual(custom.entries[0].property, "box-shadow", "set accepts any property")
+    expectEqual(style().with(base).with(more).entries.size, 5, "with concatenates")
+
+    expectEqual(oneTargetFamily("web-document"), "web", "web-document family")
+    expectEqual(oneTargetFamily("web-canvas"), "web", "web-canvas family")
+    expectEqual(oneTargetFamily("android"), "mobile", "android family")
+    expectEqual(oneTargetFamily("ios"), "mobile", "ios family")
+    expectEqual(oneTargetFamily("epaper"), "epaper", "epaper is its own family")
+    expect(oneTargetMatches("", "android"), "unscoped matches any target")
+    expect(oneTargetMatches("mobile", "android"), "family matches")
+    expect(!oneTargetMatches("web", "android"), "other family doesn't match")
+    testsPassed()
+}

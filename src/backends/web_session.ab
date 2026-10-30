@@ -1,0 +1,371 @@
+import "abla/json"
+import "abla/crypto"
+import "abla/process/time"
+import "../one.ab"
+import "web_document.ab"
+import "../layout/paint.ab"
+
+// A web session, wherever it runs: on the server (web_live.ab, over a
+// WebSocket) or in the browser (web_client.ab, compiled to Wasm). The page
+// speaks the same messages to both. The session holds the app, the CSS the
+// page has, the event maps of recent revisions, and its platform queue.
+
+class OneLiveRequest(val id: int, val request: OneRequest)
+class OneLiveTimer(val id: int, val due: int)
+
+// A session's platform state, shared between the session and its services.
+class OneLiveQueue(
+    var nextId: int,
+    val requests: array<OneLiveRequest>,
+    val completions: array<string>,
+    val timers: array<OneLiveTimer>,
+    val storage: Map<string, string>,
+    val topics: array<string>,
+    val pushes: array<string>,
+    var cookiesChanged: bool,
+    // Messages for the page (file pickers), sent on the next settle.
+    val outbox: array<string>,
+    // Uploaded files by handle: bytes and their {handle, name, size, mime}.
+    val fileBytes: Map<string, string>,
+    val fileInfo: Map<string, string>
+) {
+    fun takeRequests(): array<OneLiveRequest> {
+        val out: array<OneLiveRequest> = []
+        for (item in requests) out.append(item)
+        requests.clear()
+        out
+    }
+    fun takeCompletions(): array<string> {
+        val out: array<string> = []
+        for (item in completions) out.append(item)
+        completions.clear()
+        out
+    }
+    fun takePushes(): array<string> {
+        val out: array<string> = []
+        for (item in pushes) out.append(item)
+        pushes.clear()
+        out
+    }
+    fun complete(payload: string): void {
+        completions.append(payload)
+        return
+    }
+    fun allocate(): int {
+        nextId = nextId + 1
+        nextId
+    }
+    fun request(item: OneLiveRequest): void {
+        requests.append(item)
+        return
+    }
+    fun store(key: string, value: string): void {
+        storage.set(key, value)
+        cookiesChanged = true
+        return
+    }
+    fun unstore(key: string): void {
+        storage.set(key, "")
+        cookiesChanged = true
+        return
+    }
+    fun schedule(item: OneLiveTimer): void {
+        timers.append(item)
+        return
+    }
+    fun toPage(message: string): void {
+        outbox.append(message)
+        return
+    }
+    fun takeOutbox(): array<string> {
+        val out: array<string> = []
+        for (item in outbox) out.append(item)
+        outbox.clear()
+        out
+    }
+    fun addFile(handle: string, bytes: string, info: string): void {
+        fileBytes.set(handle, bytes)
+        fileInfo.set(handle, info)
+        return
+    }
+    fun removeFile(handle: string): bool {
+        val existed = fileBytes.has(handle)
+        fileBytes.remove(handle)
+        fileInfo.remove(handle)
+        existed
+    }
+    fun subscribe(topic: string): void {
+        if (!subscribed(topic)) topics.append(topic)
+        return
+    }
+    fun unsubscribe(topic: string): void {
+        val kept: array<string> = []
+        for (item in topics) if (item != topic) kept.append(item)
+        topics.clear()
+        for (item in kept) topics.append(item)
+        return
+    }
+    fun push(payload: string): void {
+        pushes.append(payload)
+        return
+    }
+    fun subscribed(topic: string): bool {
+        for (item in topics) if (item == topic) return true
+        false
+    }
+    // Completes timers that are due; returns the milliseconds until the next.
+    fun fireTimers(now: int): int {
+        var next = 1000
+        val waiting: array<OneLiveTimer> = []
+        for (t in timers) {
+            if (t.due <= now) completions.append(oneResponsePayload(t.id, 200, "timer", ""))
+            else {
+                waiting.append(t)
+                if (t.due - now < next) next = t.due - now
+            }
+        }
+        timers.clear()
+        for (t in waiting) timers.append(t)
+        next
+    }
+    fun nextTimer(now: int): int {
+        var next = 1000
+        for (t in timers) if (t.due - now < next) next = if (t.due - now < 0) 0 else t.due - now
+        next
+    }
+}
+
+fun oneLiveQueue(): OneLiveQueue = OneLiveQueue(0, [], [], [], Map(), [], [], false, [], Map(), Map())
+
+// Session queues, shared by each session's services and the server. They are
+// reached through this global (by session id), which is how both sides may
+// change the same queue.
+val oneLiveQueueList: array<OneLiveQueue> = []
+val oneLiveQueueIds: array<string> = []
+
+fun oneLiveQueueIndex(session: string): int {
+    var i = 0
+    while (i < oneLiveQueueIds.size) {
+        if (oneLiveQueueIds[i] == session) return i
+        i = i + 1
+    }
+    oneLiveQueueIds.append(session)
+    oneLiveQueueList.append(oneLiveQueue())
+    oneLiveQueueIds.size - 1
+}
+
+fun oneLiveForget(session: string): void {
+    val ids: array<string> = []
+    val queues: array<OneLiveQueue> = []
+    var i = 0
+    while (i < oneLiveQueueIds.size) {
+        if (oneLiveQueueIds[i] != session) {
+            ids.append(oneLiveQueueIds[i])
+            queues.append(oneLiveQueueList[i])
+        }
+        i = i + 1
+    }
+    oneLiveQueueIds.clear()
+    oneLiveQueueList.clear()
+    for (id in ids) oneLiveQueueIds.append(id)
+    for (q in queues) oneLiveQueueList.append(q)
+    return
+}
+
+// The services for a new session; call it in the server's app factory with
+// the session id the factory receives.
+fun oneLiveServices(session: string): OneServices {
+    oneLiveQueueIndex(session)
+    OneLiveServices(session)
+}
+
+class OneLiveServices(val session: string) : OneServices {
+    fun nextId(): int = oneLiveQueueList[oneLiveQueueIndex(session)].allocate()
+    fun complete(id: int, status: int, body: string, error: string): int {
+        oneLiveQueueList[oneLiveQueueIndex(session)].complete(oneResponsePayload(id, status, body, error))
+        id
+    }
+    fun send(request: OneRequest): int {
+        val id = nextId()
+        oneLiveQueueList[oneLiveQueueIndex(session)].request(OneLiveRequest(id, request))
+        id
+    }
+    fun secureRead(key: string): int {
+        val value = oneLiveQueueList[oneLiveQueueIndex(session)].storage.get(key)
+        if (value != null && value != "") complete(nextId(), 200, value, "") else complete(nextId(), 404, "", "")
+    }
+    fun secureWrite(key: string, value: Json): int {
+        oneLiveQueueList[oneLiveQueueIndex(session)].store(key, jsonStringify(value))
+        complete(nextId(), 204, "", "")
+    }
+    fun secureRemove(key: string): int {
+        oneLiveQueueList[oneLiveQueueIndex(session)].unstore(key)
+        complete(nextId(), 204, "", "")
+    }
+    fun timer(milliseconds: int): int {
+        val id = nextId()
+        oneLiveQueueList[oneLiveQueueIndex(session)].schedule(OneLiveTimer(id, monotonicMilliseconds() + milliseconds))
+        id
+    }
+    // The page opens the browser's file picker and uploads what was chosen
+    // to /one/upload; the completion arrives when the upload does.
+    fun pickFiles(mime: array<string>, multiple: bool): int {
+        val id = nextId()
+        val types: array<Json> = []
+        for (item in mime) types.append(jsonString(item))
+        oneLiveQueueList[oneLiveQueueIndex(session)].toPage(jsonStringify(jsonObject(["t", "id", "kind", "accept", "multiple"], [jsonString("pick"), jsonInteger(id), jsonString("files"), jsonArray(types), jsonBoolean(multiple)])))
+        id
+    }
+    fun readFile(file: OneFile, offset: int, length: int): int {
+        val bytes = oneLiveQueueList[oneLiveQueueIndex(session)].fileBytes.get(file.handle)
+        if (bytes == null) return complete(nextId(), 404, "", "unknown file handle")
+        val start = if (offset < 0) 0 else if (offset > bytes.size) bytes.size else offset
+        val count = if (length > 262144) 262144 else if (length < 0) 0 else length
+        val end = if (start + count > bytes.size) bytes.size else start + count
+        val id = nextId()
+        oneLiveQueueList[oneLiveQueueIndex(session)].complete(jsonStringify(jsonObject(["requestId", "status", "body", "error", "bodyBase64"], [jsonInteger(id), jsonInteger(200), jsonString(""), jsonString(""), jsonString(base64Encode(bytes.slice(start, end)))])))
+        id
+    }
+    fun deleteFile(file: OneFile): int =
+        complete(nextId(), if (oneLiveQueueList[oneLiveQueueIndex(session)].removeFile(file.handle)) 204 else 404, "", "")
+    // Normalized in the browser like the Android host: "profile" is a 256px
+    // square JPEG, "emoji" a small transparent PNG, both at most 10 KB.
+    fun pickImage(kind: string): int {
+        val id = nextId()
+        oneLiveQueueList[oneLiveQueueIndex(session)].toPage(jsonStringify(jsonObject(["t", "id", "kind", "accept", "multiple"], [jsonString("pick"), jsonInteger(id), jsonString(if (kind == "emoji") "emoji" else "profile"), jsonArray([jsonString("image/*")]), jsonBoolean(false)])))
+        id
+    }
+    fun clearImageCache(): void { return }
+    fun effect(kind: string, payload: string): bool {
+        if (kind == "subscribe") {
+            oneLiveQueueList[oneLiveQueueIndex(session)].subscribe(payload)
+            return true
+        }
+        if (kind == "unsubscribe") {
+            oneLiveQueueList[oneLiveQueueIndex(session)].unsubscribe(payload)
+            return true
+        }
+        false
+    }
+}
+
+class OneLiveSession(
+    val id: string,
+    var app: OneApp,
+    val queue: OneLiveQueue,
+    var css: OneCss,
+    var cssSent: int,
+    var revision: int,
+    var html: string,
+    var htmlSent: string,
+    val maps: array<OneEventMap>,
+    var slot: int,
+    var lastSeen: int,
+    var changed: bool,
+    var width: int,
+    // web-canvas sessions: laid out and painted on the server.
+    var canvas: bool,
+    var height: int,
+    val scroll: Map<string, int>,
+    val delivered: Map<int, int>,
+    // From a `page(...)` root: document title, language, meta tags, flow.
+    var title: string,
+    var lang: string,
+    var meta: string,
+    var document: bool
+) {
+    // Renders the current state; returns the markup and records the event map.
+    fun render(theme: Theme, iconBase: string): string {
+        oneMemoScope = id
+        var ui = oneUiSized(if (canvas) "web-canvas" else "web-document", theme, width)
+        val root = app.render(ui)
+        title = root.attr("page.title")
+        lang = root.attr("page.lang")
+        meta = oneWebPageMeta(root)
+        document = root.attr("page.flow") == "document"
+        revision = revision + 1
+        maps.append(oneEventMap(root))
+        if (maps.size > 8) {
+            val kept: array<OneEventMap> = []
+            var i = maps.size - 8
+            while (i < maps.size) {
+                kept.append(maps[i])
+                i = i + 1
+            }
+            maps.clear()
+            for (item in kept) maps.append(item)
+        }
+        if (canvas) {
+            val frame = onePaintFrame(oneLayout(root, theme, "web-canvas", if (width > 0) width else 390, if (height > 0) height else 844, scroll), if (width > 0) width else 390, if (height > 0) height else 844)
+            // Rows the page shows in full are reported like the DOM host does.
+            for (v in frame.visible) {
+                val last = delivered.get(v.event)
+                if (last == null || v.item > last) {
+                    delivered.set(v.event, v.item)
+                    oneDispatch(app, "web-canvas", theme, v.event, "${v.item}", width)
+                    changed = true
+                }
+            }
+            html = oneFrameJson(frame)
+        } else html = oneWebRenderInto(root, theme, css, iconBase)
+        html
+    }
+    // An event from the page; `eventRevision` is the revision it was shown at.
+    fun event(theme: Theme, eventRevision: int, eventId: int, value: string): void {
+        oneMemoScope = id
+        val age = revision - eventRevision
+        var target = 0
+        if (age == 0) target = eventId
+        else if (age > 0 && age < maps.size) target = maps[maps.size - 1].translate(maps[maps.size - 1 - age], eventId)
+        if (target > 0) {
+            oneDispatch(app, if (canvas) "web-canvas" else "web-document", theme, target, value, width)
+            changed = true
+        }
+        return
+    }
+    fun receive(kind: string, payload: string): void {
+        oneMemoScope = id
+        app.receive(kind, payload)
+        changed = true
+        return
+    }
+}
+
+
+// A message from the page: hello, event, viewport, scroll.
+fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void {
+    val kind = m.getString("t")
+    if (kind == "event") session.event(theme, m.get("r").asInt(), m.get("id").asInt(), m.getString("v"))
+    else if (kind == "hello") {
+        session.htmlSent = ""
+        session.cssSent = 0
+        session.changed = true
+        if (m.get("w").intAvailable()) session.width = m.get("w").asInt()
+        if (m.get("h").intAvailable()) session.height = m.get("h").asInt()
+    } else if (kind == "viewport" && m.get("w").intAvailable()) {
+        session.width = m.get("w").asInt()
+        if (m.get("h").intAvailable()) session.height = m.get("h").asInt()
+        session.changed = true
+    } else if (kind == "scroll" && m.get("y").intAvailable()) {
+        session.scroll.set(m.getString("key"), m.get("y").asInt())
+        session.changed = true
+    }
+    return
+}
+
+// Renders a changed session; returns the page message (a patch, or a frame
+// for canvas sessions), or "" when nothing the page shows changed.
+fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string): string {
+    if (!session.changed) return ""
+    session.changed = false
+    val markup = session.render(theme, iconBase)
+    if (markup == session.htmlSent) return ""
+    val css = session.css.since(session.cssSent)
+    session.cssSent = session.css.rules.size
+    session.htmlSent = markup
+    if (session.canvas) "{\"t\":\"frame\",\"r\":${session.revision},\"frame\":$markup}"
+    else jsonStringify(jsonObject(["t", "r", "html", "css", "title"], [jsonString("patch"), jsonInteger(session.revision), jsonString(markup), jsonString(css), jsonString(session.title)]))
+}
+
+fun oneSession(id: string, app: OneApp, queue: OneLiveQueue): OneLiveSession =
+    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false)

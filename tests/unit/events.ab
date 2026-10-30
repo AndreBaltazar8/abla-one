@@ -1,0 +1,27 @@
+import "abla/test"
+import "../../src/one.ab"
+
+fun tree(var ui: Ui, rows: array<string>, extra: bool): Node {
+    val items: array<Node> = []
+    if (extra) items.append(pressable(ui.press { }, style(), [text("Banner", style())]))
+    for (row in rows) items.append(pressable(ui.press { }, style(), [text(row, style())]).keyed(row))
+    items.append(input("", "Search", ui.change { v -> }, style()))
+    column(style(), items)
+}
+
+fun main: int {
+    var a = oneUi("t", theme())
+    val before = oneEventMap(tree(a, ["geral", "design"], false))
+    var b = oneUi("t", theme())
+    val after = oneEventMap(tree(b, ["novo", "geral", "design"], true))
+    // In `before`: geral=1, design=2, search change=1000001.
+    expectEqual(after.translate(before, 1), 3, "a keyed row keeps its place after rows are added above")
+    expectEqual(after.translate(before, 2), 4, "second keyed row")
+    expectEqual(after.translate(before, oneChangeBase + 1), oneChangeBase + 1, "change events translate too")
+    var c = oneUi("t", theme())
+    val removed = oneEventMap(tree(c, ["design"], false))
+    expectEqual(removed.translate(before, 1), 0, "a removed row's event is dropped")
+    expectEqual(before.translate(before, 2), 2, "same tree, same id")
+    expectEqual(after.translate(before, 99), 0, "unknown ids are dropped")
+    testsPassed()
+}

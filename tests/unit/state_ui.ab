@@ -1,0 +1,62 @@
+import "abla/test"
+import "../../src/one.ab"
+
+class Counter(var count: int by State(0), var name: string by State("ada"), var log: string by State("")) : OneApp {
+    fun render(var ui: Ui): Node = column(style().gap(8), [
+        pressable(ui.press { count += 1 }, style(), [text("Count $count", style())]),
+        input(name, "Name", ui.change { value -> name = value }, style()),
+        pressable(ui.press { record("second") }, style(), [text("Second", style())]),
+        pressable(ui.press { record("third"); count = 100 }, style(), [text("Third", style())])
+    ])
+    // Handlers may call methods that change state (FnMut closures).
+    fun record(entry: string): void {
+        log = "$log$entry;"
+        return
+    }
+    fun receive(kind: string, value: string): void {
+        if (kind == "reset") count = 0
+        return
+    }
+}
+
+fun main: int {
+    var app = Counter()
+    val start = oneRevision()
+    app.name = "ada"
+    expectEqual(oneRevision(), start, "writing the same value doesn't invalidate")
+    app.count = 3
+    expectEqual(oneRevision(), start + 1, "a change bumps the revision")
+    oneInvalidate()
+    expectEqual(oneRevision(), start + 2, "manual invalidation")
+
+    var ui = oneUi("test", theme())
+    val tree = app.render(ui)
+    val press = oneParseInt(tree.children[0].attr("onPress"), 0)
+    val change = oneParseInt(tree.children[1].attr("onChange"), 0)
+    expectEqual(press, 1, "first press id")
+    expectEqual(oneParseInt(tree.children[2].attr("onPress"), 0), 2, "ids follow render order")
+    expect(change > oneChangeBase, "change ids live above the change base")
+    expect(!ui.handled, "a plain render runs no handler")
+    expectEqual(app.count, 3, "rendering doesn't change state")
+
+    expect(oneDispatch(app, "test", theme(), press, ""), "press dispatches")
+    expect(oneDispatch(app, "test", theme(), press, ""), "the same id dispatches again")
+    expectEqual(app.count, 5, "press handler mutated state")
+    expect(oneDispatch(app, "test", theme(), change, "grace"), "change dispatches")
+    expectEqual(app.name, "grace", "change handler received the payload")
+    expect(oneDispatch(app, "test", theme(), 2, ""), "method-calling handler")
+    expectEqual(app.log, "second;", "handler called a mutating method")
+    expect(oneDispatch(app, "test", theme(), 3, ""), "third handler")
+    expectEqual(app.log, "second;third;", "only the matching handler ran")
+    expectEqual(app.count, 100, "a handler can change several fields")
+    expect(!oneDispatch(app, "test", theme(), 99, ""), "unknown press id is rejected")
+    expect(!oneDispatch(app, "test", theme(), oneChangeBase + 50, "x"), "unknown change id is rejected")
+    expect(!oneDispatch(app, "test", theme(), 0, ""), "zero is not an event")
+
+    var next = oneUi("test", theme())
+    val again = app.render(next)
+    expectEqual(again.children[0].children[0].attr("text"), "Count 100", "re-render sees new state")
+    app.receive("reset", "")
+    expectEqual(app.count, 0, "platform input reaches the app")
+    testsPassed()
+}

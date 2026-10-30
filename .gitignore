@@ -1,0 +1,8 @@
+/build/
+*.o
+examples/*/android/.gradle/
+examples/*/android/android-app/build/
+examples/*/android/android-app/.cxx/
+examples/*/android/build/
+build/
+.abla-cache/

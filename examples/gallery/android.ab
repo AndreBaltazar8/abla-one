@@ -1,0 +1,10 @@
+import "abla/build"
+import "gallery.ab"
+import "../../src/backends/android.ab"
+
+// Android entry: the shared gallery on the abla-mobile Compose host.
+fun galleryApplication(): int {
+    var app = Gallery()
+    oneAndroidRun(app, oneDefaultTheme(), "#FFFFFF")
+}
+val exported = #exportFunction("galleryApplication", "abla_mobile_run")

@@ -1,0 +1,93 @@
+import "../../src/one_kit.ab"
+
+// The gallery: every kit component with live state. Shared by all targets;
+// see android.ab and web.ab for the entry files.
+
+class Person(val name: string, val role: string, val seed: string)
+
+class Gallery(
+    var tab: int by State(0),
+    var count: int by State(0),
+    var filter: int by State(0),
+    var query: string by State(""),
+    var opened: string by State("")
+) : OneApp {
+    fun people(): array<Person> = [
+        Person("Sofia Costa", "Proprietária", "u1"), Person("André Silva", "Membro", "u2"),
+        Person("Inês Rocha", "Membro", "u3"), Person("Maya Townsend", "Administradora", "u4"),
+        Person("Tiago Mendes", "Membro", "u5")
+    ]
+
+    fun render(var ui: Ui): Node = column(style().fill().background("@surface"), [
+        topBar(ui, [], text("Abla One", style().text("title")), [iconButton(ui, "icon_bell", "Avisos", ui.press { count = 0 }, style())]),
+        scroll(style().grow(1), [
+            if (tab == 0) components(ui) else peopleList(ui)
+        ]),
+        tabBar(ui, [TabItem("nav_home", "Componentes", ui.press { tab = 0 }), TabItem("nav_team", "Pessoas", ui.press { tab = 1 })], tab)
+    ])
+
+    fun components(var ui: Ui): Node = column(style().gap(4), [
+        sectionHeader(ui, "BOTÕES", none()),
+        column(style().paddingX(16).gap(8), [
+            button(ui, "Adicionar ($count)", "primary", ui.press { count += 1 }, style()),
+            row(style().gap(8), [
+                button(ui, "Secundário", "secondary", ui.press { count -= 1 }, style().grow(1)),
+                button(ui, "Simples", "plain", ui.press { }, style().grow(1))
+            ]),
+            button(ui, "Eliminar", "danger", ui.press { count = 0 }, style())
+        ]),
+        sectionHeader(ui, "PESQUISA E FILTROS", badge(ui, "$count", "muted")),
+        column(style().paddingX(16).gap(12), [
+            searchField(ui, query, "Pesquisar pessoas", ui.change { value -> query = value }),
+            row(style().gap(8), [
+                chip(ui, "Todas", filter == 0, ui.press { filter = 0 }),
+                chip(ui, "Não lidas", filter == 1, ui.press { filter = 1 }),
+                chip(ui, "Diretas", filter == 2, ui.press { filter = 2 })
+            ])
+        ]),
+        sectionHeader(ui, "CARTÃO", none()),
+        column(style().paddingX(16), [
+            card(ui, [
+                text("Faturação certificada", style().text("title")),
+                text("Os componentes vêm do tema e cada propriedade pode ser alterada por plataforma.", style().text("body-sm").color("@muted")),
+                text(if (opened != "") "Última pessoa aberta: $opened" else "Ainda não abriu ninguém.", style().text("caption").color("@subtle"))
+            ], style())
+        ]),
+        spacer(24)
+    ])
+
+    fun peopleList(var ui: Ui): Node {
+        val rows: array<Node> = []
+        for (person in people()) {
+            if (query == "" || oneContainsText(person.name, query)) {
+                val name = person.name
+                rows.append(listRow(ui, ListRowParts(avatar(ui, person.name, person.seed, 44, none()), person.name, person.role, "", icon("icon_right", "", style().size(18).tint("@subtle"))), ui.press { opened = name }, style()))
+            }
+        }
+        if (rows.size == 0) rows.append(emptyState(ui, "Ninguém encontrado", "Experimente outro nome."))
+        column(style(), rows)
+    }
+
+    fun receive(kind: string, value: string): void {
+        return
+    }
+}
+
+fun oneContainsText(text: string, query: string): bool {
+    var i = 0
+    while (i + query.size <= text.size) {
+        var j = 0
+        var same = true
+        while (same && j < query.size) {
+            var a = text[i + j]
+            var b = query[j]
+            if (a >= 65 && a <= 90) a = a + 32
+            if (b >= 65 && b <= 90) b = b + 32
+            same = a == b
+            j = j + 1
+        }
+        if (same) return true
+        i = i + 1
+    }
+    false
+}

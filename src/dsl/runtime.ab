@@ -1,0 +1,81 @@
+import "../one.ab"
+import "../kit/kit.ab"
+
+// Runtime helpers the $one and $theme syntaxes compile to. They are ordinary
+// functions, so generated code reads like hand-written code.
+
+fun oneString(value: any): string = "$value"
+
+fun oneDone(): void { return }
+
+fun oneJoin(parts: array<string>): string {
+    var out = ""
+    for (part in parts) out = "$out$part"
+    out
+}
+
+// One style property, optionally scoped to a target and a state. Shorthands
+// expand like the Style builders of the same name. `size` is passed through:
+// backends read it as font size on text and as dimensions on icons/images.
+fun oneStyleSet(base: Style, target: string, state: string, property: string, value: string): Style {
+    var inner = style()
+    when (property) {
+        "paddingX" -> inner = inner.set("paddingLeft", value).set("paddingRight", value)
+        "paddingY" -> inner = inner.set("paddingTop", value).set("paddingBottom", value)
+        "fill" -> inner = inner.set("width", "fill").set("height", "fill")
+        "fillWidth" -> inner = inner.set("width", "fill")
+        "fillHeight" -> inner = inner.set("height", "fill")
+        "fontSize" -> inner = inner.set("size", value)
+        else -> inner = inner.set(property, value)
+    }
+    if (state != "") inner = style().inState(state, inner)
+    if (target != "") base.on(target, inner) else base.with(inner)
+}
+
+fun oneAttrSet(node: Node, name: string, value: string): Node = node.set(name, value)
+
+fun oneKey(node: Node, key: string): Node = node.keyed(key)
+
+fun onePress(var ui: Ui, var handler: FnMut() -> void): int = ui.press(handler)
+
+fun oneChange(var ui: Ui, var handler: FnMut(string) -> void): int = ui.change(handler)
+
+// Children spliced into the parent (from <For> and <If> with several children).
+fun fragment(children: array<Node>): Node = oneNode("fragment", style(), children)
+
+fun <T> oneEach(items: array<T>, var render: FnMut(T) -> Node): Node {
+    val out: array<Node> = []
+    for (item in items) out.append(render(item))
+    fragment(out)
+}
+
+fun oneBool(value: string): bool = value == "true" || value == "1"
+fun oneInt(value: string): int = oneParseInt(value, 0)
+
+// What $theme compiles to: tokens, then named styles merged onto the base
+// theme's. Names: "text:<preset>", "kind:<node kind>" or a component part
+// ("Button", "Button.primary.label"). Presets replace; others extend.
+fun oneThemeBuild(base: Theme, tokenNames: array<string>, tokenValues: array<string>, styleNames: array<string>, styles: array<Style>, scopeNames: array<string>, scopes: array<Theme>): Theme {
+    var t = base
+    var i = 0
+    while (i < tokenNames.size) {
+        t.token(tokenNames[i], tokenValues[i])
+        i = i + 1
+    }
+    i = 0
+    while (i < styleNames.size) {
+        val name = styleNames[i]
+        if (name.size > 5 && name.slice(0, 5) == "text:") t.define(name, styles[i])
+        else t.define(name, t.named(name).with(styles[i]))
+        i = i + 1
+    }
+    // Scopes are this theme plus their overrides, so they inherit everything.
+    i = 0
+    while (i < scopeNames.size) {
+        t.scope(scopeNames[i], scopes[i])
+        i = i + 1
+    }
+    t
+}
+
+fun oneThemeCopy(base: Theme): Theme = base.copy()

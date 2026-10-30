@@ -1,0 +1,358 @@
+// Abla One thin web host (web-document). The server renders the page (SSR);
+// this script only forwards events and applies patches. It hydrates the
+// server-rendered markup by event delegation, so nothing is re-created on
+// load. The app runs either on the server (live mode: messages go over a
+// WebSocket) or in the page (`boot.wasm`: the same messages go to the app's
+// Wasm module, and this script runs its fetches, storage and timers).
+(() => {
+  const boot = window.__one;
+  if (!boot) return;
+  const root = document.getElementById('one-root');
+  const style = document.getElementById('one-css');
+  let revision = boot.r;
+  let socket = null;
+  let retry = 0;
+  const queue = [];
+
+  let local = null;
+  const send = (message) => {
+    if (boot.wasm) {
+      if (local) local(message);
+      else queue.push(message);
+      return;
+    }
+    const text = JSON.stringify(message);
+    if (socket && socket.readyState === 1) socket.send(text);
+    else queue.push(text);
+  };
+  const event = (id, value) => send({t: 'event', r: revision, id: Number(id), v: value == null ? '' : String(value)});
+
+  // --- events -------------------------------------------------------------
+  root.addEventListener('click', (e) => {
+    const target = e.target.closest('[data-one-press]');
+    if (!target || target.getAttribute('aria-disabled') === 'true') return;
+    const id = target.getAttribute('data-one-press');
+    if (id && id !== '0') event(id, '');
+  });
+  root.addEventListener('input', (e) => {
+    const id = e.target.getAttribute && e.target.getAttribute('data-one-change');
+    if (id) event(id, e.target.value);
+    if (e.target.tagName === 'TEXTAREA') grow(e.target);
+  });
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    const field = e.target;
+    const submit = field.getAttribute && field.getAttribute('data-one-submit');
+    // Enter submits a field that declares onSubmit; Shift+Enter keeps a newline.
+    if (submit && submit !== '0') {
+      e.preventDefault();
+      event(submit, '');
+    }
+  });
+  const grow = (area) => {
+    area.style.height = 'auto';
+    area.style.height = Math.min(area.scrollHeight, 140) + 'px';
+  };
+
+  // --- feeds: anchoring and read positions --------------------------------
+  const visible = new Map();
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const feed = entry.target.closest('[data-one-feed]');
+      if (!feed || !entry.isIntersecting || entry.intersectionRatio < 0.99) continue;
+      const item = Number(entry.target.getAttribute('data-one-item'));
+      const id = feed.getAttribute('data-one-visible');
+      if (id && id !== '0' && item > (visible.get(feed.getAttribute('data-one')) || 0)) {
+        visible.set(feed.getAttribute('data-one'), item);
+        event(id, item);
+      }
+    }
+  }, {threshold: [0.99]});
+  const watchFeeds = () => {
+    for (const feed of root.querySelectorAll('[data-one-feed]')) {
+      if (!feed.__oneAnchored) {
+        feed.__oneAnchored = true;
+        const anchor = feed.getAttribute('data-one-feed');
+        if (anchor === 'bottom') feed.scrollTop = feed.scrollHeight;
+      }
+      for (const item of feed.querySelectorAll('[data-one-item]')) observer.observe(item);
+    }
+  };
+
+  // --- patching -------------------------------------------------------------
+  const keyOf = (node) => node.nodeType === 1 ? node.getAttribute('data-one') : null;
+  const morph = (from, to) => {
+    if (from.nodeType !== to.nodeType || from.nodeName !== to.nodeName || keyOf(from) !== keyOf(to)) {
+      from.replaceWith(to);
+      return;
+    }
+    if (from.nodeType === 3) {
+      if (from.data !== to.data) from.data = to.data;
+      return;
+    }
+    if (from.nodeType !== 1) return;
+    for (const attr of Array.from(from.attributes)) if (!to.hasAttribute(attr.name) && attr.name !== 'style') from.removeAttribute(attr.name);
+    for (const attr of Array.from(to.attributes)) {
+      if (from.getAttribute(attr.name) !== attr.value) from.setAttribute(attr.name, attr.value);
+    }
+    // Keep what the person is typing: a focused field keeps its value unless the
+    // server cleared it (a sent message) or changed it deliberately.
+    if (from.tagName === 'INPUT' || from.tagName === 'TEXTAREA') {
+      const wanted = to.tagName === 'TEXTAREA' ? to.textContent : to.getAttribute('value') || '';
+      if (document.activeElement !== from || wanted === '' || from.__oneLast !== wanted) {
+        if (from.value !== wanted) from.value = wanted;
+        if (from.tagName === 'TEXTAREA') grow(from);
+      }
+      from.__oneLast = wanted;
+      return;
+    }
+    const current = Array.from(from.childNodes);
+    const next = Array.from(to.childNodes);
+    const keyed = new Map();
+    for (const child of current) {
+      const key = keyOf(child);
+      if (key) keyed.set(key, child);
+    }
+    let index = 0;
+    for (const child of next) {
+      const key = keyOf(child);
+      let match = key ? keyed.get(key) : current[index];
+      if (match && keyOf(match) !== key) match = null;
+      const position = from.childNodes[index];
+      if (match) {
+        if (match !== position) from.insertBefore(match, position || null);
+        morph(match, child);
+      } else {
+        from.insertBefore(child, position || null);
+      }
+      index++;
+    }
+    while (from.childNodes.length > next.length) from.lastChild.remove();
+  };
+
+  const apply = (message) => {
+    if (message.css) style.appendChild(document.createTextNode(message.css));
+    if (message.title && document.title !== message.title) document.title = message.title;
+    const feeds = new Map();
+    for (const feed of root.querySelectorAll('[data-one-feed]')) {
+      feeds.set(feed.getAttribute('data-one'), feed.scrollHeight - feed.scrollTop - feed.clientHeight < 24);
+    }
+    const template = document.createElement('template');
+    template.innerHTML = message.html;
+    const fresh = template.content.firstElementChild;
+    if (root.firstElementChild && fresh) morph(root.firstElementChild, fresh);
+    else if (fresh) root.replaceChildren(fresh);
+    revision = message.r;
+    for (const feed of root.querySelectorAll('[data-one-feed]')) {
+      const atBottom = feeds.get(feed.getAttribute('data-one'));
+      if (atBottom === undefined) feed.__oneAnchored = false;
+      else if (atBottom) feed.scrollTop = feed.scrollHeight;
+    }
+    watchFeeds();
+  };
+
+  // --- file pickers --------------------------------------------------------
+  // The session asks for a file; the picker opens while the tap that caused it
+  // still counts as a user action. Images are normalized like the Android host.
+  const upload = async (query, body, headers = {}) => {
+    if (!boot.wasm) return fetch(`one/upload?s=${encodeURIComponent(boot.s)}&${query}`, {method: 'POST', body, headers, credentials: 'same-origin'});
+    // In the page, the module takes the bytes directly.
+    const q = new URLSearchParams(query);
+    const base64 = typeof body === 'string' ? body : await new Promise((done) => {
+      const reader = new FileReader();
+      reader.onload = () => done(String(reader.result).slice(String(reader.result).indexOf(',') + 1));
+      reader.readAsDataURL(body);
+    });
+    send({t: 'upload', id: Number(q.get('id')), kind: q.get('kind'), files: q.get('files') || '', base64,
+      name: decodeURIComponent(headers['X-One-Name'] || ''), mime: headers['Content-Type'] || '', last: headers['X-One-Last'] === '1'});
+    return {text: async () => ''};
+  };
+  const encode = (canvas, type, limit) => {
+    let quality = 0.9;
+    let data = canvas.toDataURL(type, quality);
+    while (type === 'image/jpeg' && data.length > limit && quality > 0.3) data = canvas.toDataURL(type, quality -= 0.1);
+    return data.slice(data.indexOf(',') + 1);
+  };
+  const normalize = async (file, kind) => {
+    const bitmap = await createImageBitmap(file);
+    const limit = 13336;
+    let size = kind === 'emoji' ? 128 : 256;
+    for (;;) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      const g = canvas.getContext('2d');
+      const side = Math.min(bitmap.width, bitmap.height);
+      if (kind === 'emoji') {
+        const scale = size / Math.max(bitmap.width, bitmap.height);
+        g.drawImage(bitmap, (size - bitmap.width * scale) / 2, (size - bitmap.height * scale) / 2, bitmap.width * scale, bitmap.height * scale);
+      } else {
+        g.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, size, size);
+      }
+      const data = encode(canvas, kind === 'emoji' ? 'image/png' : 'image/jpeg', limit);
+      if (data.length <= limit || size <= 32) return data;
+      size = Math.round(size * 0.75);
+    }
+  };
+  const pick = (message) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = (message.accept || []).join(',');
+    input.multiple = !!message.multiple;
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    let done = false;
+    const finish = () => { done = true; input.remove(); };
+    input.addEventListener('cancel', () => { if (!done) { finish(); upload(`id=${message.id}&kind=cancel${message.kind === 'files' ? '&files=1' : ''}`, ''); } });
+    input.addEventListener('change', async () => {
+      const files = Array.from(input.files || []);
+      finish();
+      if (!files.length) return upload(`id=${message.id}&kind=cancel${message.kind === 'files' ? '&files=1' : ''}`, '');
+      if (message.kind !== 'files') {
+        try {
+          return upload(`id=${message.id}&kind=${message.kind}`, await normalize(files[0], message.kind));
+        } catch (_) {
+          return upload(`id=${message.id}&kind=cancel`, '');
+        }
+      }
+      let picked = '';
+      for (let i = 0; i < files.length; i++) {
+        const response = await upload(`id=${message.id}&kind=files&picked=${encodeURIComponent(picked)}`, files[i], {
+          'Content-Type': files[i].type || 'application/octet-stream',
+          'X-One-Name': encodeURIComponent(files[i].name),
+          'X-One-Last': i === files.length - 1 ? '1' : '0'});
+        const handle = await response.text();
+        picked = picked ? `${picked},${handle}` : handle;
+      }
+    });
+    input.click();
+  };
+
+  // --- connection -------------------------------------------------------------
+  const receive = (message) => {
+    if (message.t === 'patch') apply(message);
+    else if (message.t === 'pick') pick(message);
+    else if (message.t === 'cookies') fetch(`one/cookies?s=${encodeURIComponent(boot.s)}`, {method: 'POST', credentials: 'same-origin'});
+    else if (message.t === 'reload') location.reload();
+    else if (message.t === 'fetch') request(message);
+    else if (message.t === 'store') store(message.storage);
+    else if (message.t === 'wait') { clearTimeout(ticking); ticking = setTimeout(() => send({t: 'tick'}), message.ms); }
+  };
+
+  // Wasm mode: the module's requests, storage and timers.
+  let ticking = 0;
+  const bytes = (base64) => Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  const request = async ({id, request: r}) => {
+    const abort = new AbortController();
+    const timer = r.timeoutMs > 0 ? setTimeout(() => abort.abort(), r.timeoutMs) : 0;
+    let payload;
+    try {
+      const response = await fetch(new URL(r.url, location.href), {method: r.method, headers: r.headers,
+        body: r.method === 'GET' || r.method === 'HEAD' ? undefined : (r.bodyBase64 ? bytes(r.bodyBase64) : r.body),
+        credentials: 'same-origin', signal: abort.signal});
+      const headers = {};
+      response.headers.forEach((value, name) => { headers[name] = value; });
+      payload = {requestId: id, status: response.status, body: '', error: '', headers};
+      if (r.binary || r.save) {
+        const data = new Uint8Array(await response.arrayBuffer());
+        let text = '';
+        for (let i = 0; i < data.length; i += 32768) text += String.fromCharCode.apply(null, data.subarray(i, i + 32768));
+        payload.bodyBase64 = btoa(text);
+        payload.name = decodeURIComponent(new URL(r.url, location.href).pathname.split('/').pop() || '');
+      } else payload.body = await response.text();
+    } catch (error) {
+      payload = {requestId: id, status: 0, body: '', error: String(error && error.message || error)};
+    }
+    clearTimeout(timer);
+    send({t: 'result', payload: JSON.stringify(payload), save: !!r.save});
+  };
+  const prefix = 'one:';
+  const stored = () => {
+    const out = {};
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key.startsWith(prefix)) out[key.slice(prefix.length)] = localStorage.getItem(key);
+      }
+    } catch (_) {}
+    return out;
+  };
+  const store = (values) => {
+    try {
+      for (const [key, value] of Object.entries(values)) {
+        if (value === '') localStorage.removeItem(prefix + key);
+        else localStorage.setItem(prefix + key, value);
+      }
+    } catch (_) {}
+  };
+  const run = async () => {
+    let memory = null;
+    const host = {
+      clock_ns: (clock) => BigInt(Math.round((clock === 0 ? Date.now() : performance.now()) * 1e6)),
+      write: (fd, data, length) => { console[fd === 2 ? 'error' : 'log'](new TextDecoder().decode(new Uint8Array(memory.buffer, data, length))); return length; },
+      exit: (code) => { throw new Error(`Abla One app exited (${code})`); },
+      random: (data, length) => { crypto.getRandomValues(new Uint8Array(memory.buffer, data, length)); return length; }
+    };
+    const response = await fetch(new URL(boot.wasm, location.href));
+    const {instance} = await WebAssembly.instantiate(await response.arrayBuffer(), {abla_host: host});
+    memory = instance.exports.memory;
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    local = (message) => {
+      const data = encoder.encode(JSON.stringify(message));
+      const pointer = instance.exports.one_alloc(data.length);
+      new Uint8Array(memory.buffer, pointer, data.length).set(data);
+      const packed = instance.exports.one_message(pointer, data.length);
+      const text = decoder.decode(new Uint8Array(memory.buffer, Number(packed >> 32n), Number(packed & 0xffffffffn)));
+      for (const message of JSON.parse(text)) receive(message);
+    };
+    local({t: 'hello', r: revision, w: innerWidth, h: innerHeight, storage: stored()});
+    // Taps before the module was ready, against the revision now shown.
+    while (queue.length) {
+      const message = queue.shift();
+      if (message.t === 'event') message.r = revision;
+      local(message);
+    }
+    document.documentElement.setAttribute('data-one-ready', '');
+  };
+
+  const connect = () => {
+    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // Relative to the page, so the app also works under a path prefix.
+    const url = new URL(`one/live?s=${encodeURIComponent(boot.s)}`, location.href);
+    socket = new WebSocket(`${scheme}//${url.host}${url.pathname}${url.search}`);
+    socket.onopen = () => {
+      retry = 0;
+      document.documentElement.removeAttribute('data-one-offline');
+      socket.send(JSON.stringify({t: 'hello', r: revision, w: innerWidth}));
+      while (queue.length) socket.send(queue.shift());
+    };
+    socket.onmessage = (e) => receive(JSON.parse(e.data));
+    socket.onclose = (e) => {
+      document.documentElement.setAttribute('data-one-offline', '');
+      // An unknown session (server restarted) needs a fresh page.
+      if (e.code === 1008) return location.reload();
+      setTimeout(connect, Math.min(1000 * 2 ** retry++, 10000));
+    };
+  };
+  // Layout follows the viewport width; the cookie gives the next first paint
+  // the right layout.
+  let resizing = 0;
+  const viewport = () => {
+    document.cookie = `one_width=${innerWidth}; max-age=31536000; samesite=lax`;
+    send({t: 'viewport', w: innerWidth});
+  };
+  addEventListener('resize', () => { clearTimeout(resizing); resizing = setTimeout(viewport, 150); });
+  document.cookie = `one_width=${innerWidth}; max-age=31536000; samesite=lax`;
+  // A reload resumes this tab's session: the next page request carries it.
+  // beforeunload runs before the browser requests the next page; pagehide
+  // covers navigations that skip it.
+  const resume = () => { document.cookie = `one_resume=${boot.s}; max-age=15; samesite=lax`; };
+  if (!boot.wasm) {
+    addEventListener('beforeunload', resume);
+    addEventListener('pagehide', resume);
+  }
+  for (const area of root.querySelectorAll('textarea')) grow(area);
+  watchFeeds();
+  if (boot.wasm) run().catch((error) => { console.error(error); document.documentElement.setAttribute('data-one-offline', ''); });
+  else connect();
+})();

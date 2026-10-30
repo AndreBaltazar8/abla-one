@@ -1,0 +1,317 @@
+import "abla/bytes"
+import "../one.ab"
+import "../layout/layout.ab"
+import "../layout/paint.ab"
+import "../raster/raster.ab"
+
+// The `epaper` target (SPEC §10, M4), PaperMono first. The app runs on a
+// host (like a live web session); each change is laid out, painted and
+// rasterized (one-layout, one-raster), then quantised to the panel's four
+// grey levels with the SSD1677 driver's own Bayer dither, in its drawing
+// planes. Changed areas become byte-aligned dirty rectangles, and the
+// backend picks the refresh mode: a full quality refresh first and
+// periodically, fast partial refreshes in between. The device only copies
+// the rectangles into its canvas and refreshes them (abla-embedded's
+// ssd1677 session upload/refresh), so it needs no heap.
+//
+// Coordinates: the panel is 800×480 physically and used in portrait
+// (480×800, PaperMono rotation 0). `scale` maps logical pixels to panel
+// pixels in percent (133: a 360×601 logical screen, text at phone sizes).
+
+class OneEpaperOptions(
+    val width: int,          // portrait panel pixels: 480
+    val height: int,         // 800
+    val scale: int,          // percent
+    val background: string,
+    // A full quality refresh after this many partial ones (clears ghosting).
+    val fullEvery: int,
+    // Above this share of the panel (percent), refresh fully.
+    val fullArea: int
+)
+
+fun onePaperMonoOptions(): OneEpaperOptions = OneEpaperOptions(480, 800, 133, "#ffffff", 12, 45)
+
+// A rectangle in physical canvas coordinates (800×480); x and w are
+// multiples of 8, as the controller addresses bytes.
+class OneEpaperRect(val x: int, val y: int, val w: int, val h: int)
+
+// Refresh modes, as abla-embedded's ssd1677Lut names them.
+val oneEpaperQuality = 1
+val oneEpaperText = 2
+val oneEpaperFast = 3
+val oneEpaperFastest = 4
+
+class OneEpaperUpdate(val revision: int, val mode: int, val rects: array<OneEpaperRect>, val planes: array<int>)
+
+class OneEpaperState(
+    val options: OneEpaperOptions,
+    // Grey level (0 black … 3 white) per physical pixel, index py * 800 + px.
+    val levels: array<int>,
+    var revision: int,
+    var partials: int,
+    var frame: OneFrame,
+    var full: bool
+)
+
+fun oneEpaperState(options: OneEpaperOptions): OneEpaperState =
+    OneEpaperState(options, filledArray(options.width * options.height, -1), 0, 0, OneFrame([], [], [], 0, 0), true)
+
+fun oneEpaperLogicalWidth(o: OneEpaperOptions): int = o.width * 100 / o.scale
+fun oneEpaperLogicalHeight(o: OneEpaperOptions): int = o.height * 100 / o.scale
+
+// Physical canvas position of a portrait pixel (SSD1677 rotation 3).
+fun oneEpaperPhysicalX(x: int, y: int): int = y
+fun oneEpaperPhysicalY(x: int, y: int, width: int): int = width - 1 - x
+
+// abla-embedded's ssd1677CanvasGray: a 4×4 Bayer dither to four levels,
+// in physical coordinates, so neighbouring updates line up.
+fun oneEpaperLevel(gray: int, px: int, py: int): int {
+    val index = (px % 4) + (py % 4) * 4
+    val word = if (index < 8) 2793726656 else 2511852019
+    var nibble = word
+    var shift = 0
+    while (shift < index % 8) {
+        nibble = nibble / 16
+        shift = shift + 1
+    }
+    val dither = (nibble % 16) * 4 - 30
+    val sum = gray + dither
+    if (sum < 0) return 0
+    val level = sum / 64
+    if (level > 3) 3 else level
+}
+
+fun oneEpaperGray(rgb: int): int = (((rgb / 65536) % 256) * 299 + ((rgb / 256) % 256) * 587 + (rgb % 256) * 114) / 1000
+
+// The paint list scaled from logical to panel pixels.
+fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int): OneFrame {
+    val paints: array<OnePaint> = []
+    for (p in frame.paints) {
+        val x = p.x * scale / 100
+        val y = p.y * scale / 100
+        paints.append(OnePaint(p.op, x, y, (p.x + p.w) * scale / 100 - x, (p.y + p.h) * scale / 100 - y, p.radius * scale / 100, p.color, p.text, p.size * scale / 100, p.weight, oneEpaperScaleSides(p.sides, scale)))
+    }
+    OneFrame(paints, frame.hits, frame.visible, width, height)
+}
+
+fun oneEpaperScaleSides(sides: string, scale: int): string {
+    if (sides == "") return ""
+    var out = ""
+    var start = 0
+    var i = 0
+    while (i <= sides.size) {
+        if (i == sides.size || sides[i] == 32) {
+            val n = oneParseInt(sides.slice(start, i), 0)
+            val scaled = if (n > 0 && n * scale / 100 == 0) 1 else n * scale / 100
+            out = if (out == "") "$scaled" else "$out $scaled"
+            start = i + 1
+        }
+        i = i + 1
+    }
+    out
+}
+
+// Renders the app and returns what the panel needs. An update without
+// rectangles means nothing visible changed.
+fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, icons: OneIconSource): OneEpaperUpdate {
+    val o = state.options
+    val lw = oneEpaperLogicalWidth(o)
+    val lh = oneEpaperLogicalHeight(o)
+    var ui = oneUiSized("epaper", theme, lw)
+    val frame = onePaintFrame(oneLayout(app.render(ui), theme, "epaper", lw, lh, Map()), lw, lh)
+    state.frame = frame
+    val surface = oneRasterFrame(oneEpaperScaleFrame(frame, o.scale, o.width, o.height), o.background, icons)
+    // Quantise, and mark changed 8×8 tiles of the physical canvas.
+    val pw = o.height
+    val ph = o.width
+    val tilesX = pw / 8
+    val tilesY = (ph + 7) / 8
+    val dirty = filledArray(tilesX * tilesY, 0)
+    var changed = 0
+    var y = 0
+    while (y < o.height) {
+        var x = 0
+        while (x < o.width) {
+            val px = oneEpaperPhysicalX(x, y)
+            val py = oneEpaperPhysicalY(x, y, o.width)
+            val level = oneEpaperLevel(oneEpaperGray(surface.pixels[y * o.width + x]), px, py)
+            val index = py * pw + px
+            if (state.levels[index] != level) {
+                state.levels[index] = level
+                val tile = (py / 8) * tilesX + px / 8
+                if (dirty[tile] == 0) {
+                    dirty[tile] = 1
+                    changed = changed + 1
+                }
+            }
+            x = x + 1
+        }
+        y = y + 1
+    }
+    var rects = oneEpaperRects(dirty, tilesX, tilesY, ph)
+    var mode = oneEpaperFastest
+    if (rects.size > 0) {
+        val area = changed * 100 / (tilesX * tilesY)
+        if (state.full || state.partials >= o.fullEvery || area >= o.fullArea) {
+            mode = oneEpaperQuality
+            rects = [OneEpaperRect(0, 0, pw, ph)]
+            state.partials = 0
+            state.full = false
+        } else {
+            mode = if (area >= 15) oneEpaperFast else oneEpaperFastest
+            state.partials = state.partials + 1
+        }
+        state.revision = state.revision + 1
+    }
+    OneEpaperUpdate(state.revision, mode, rects, oneEpaperPlanes(state.levels, pw, ph))
+}
+
+// Dirty tiles as rectangles: runs per tile row, joined downwards while the
+// run lines up. Many small rectangles collapse into their bounds.
+fun oneEpaperRects(dirty: array<int>, tilesX: int, tilesY: int, height: int): array<OneEpaperRect> {
+    val open: array<OneEpaperRect> = []
+    val done: array<OneEpaperRect> = []
+    var ty = 0
+    while (ty < tilesY) {
+        val runs: array<OneEpaperRect> = []
+        var tx = 0
+        while (tx < tilesX) {
+            if (dirty[ty * tilesX + tx] == 1) {
+                var end = tx
+                while (end < tilesX && dirty[ty * tilesX + end] == 1) end = end + 1
+                runs.append(OneEpaperRect(tx * 8, ty * 8, (end - tx) * 8, 8))
+                tx = end
+            } else tx = tx + 1
+        }
+        val next: array<OneEpaperRect> = []
+        for (r in open) {
+            var grown = false
+            for (run in runs) if (run.x == r.x && run.w == r.w) grown = true
+            if (grown) next.append(OneEpaperRect(r.x, r.y, r.w, r.h + 8)) else done.append(r)
+        }
+        for (run in runs) {
+            var joined = false
+            for (r in open) if (run.x == r.x && run.w == r.w) joined = true
+            if (!joined) next.append(run)
+        }
+        open.clear()
+        for (r in next) open.append(r)
+        ty = ty + 1
+    }
+    for (r in open) done.append(r)
+    val out: array<OneEpaperRect> = []
+    for (r in done) out.append(OneEpaperRect(r.x, r.y, r.w, if (r.y + r.h > height) height - r.y else r.h))
+    if (out.size <= 12) return out
+    var left = 100000
+    var top = 100000
+    var right = 0
+    var bottom = 0
+    for (r in out) {
+        if (r.x < left) left = r.x
+        if (r.y < top) top = r.y
+        if (r.x + r.w > right) right = r.x + r.w
+        if (r.y + r.h > bottom) bottom = r.y + r.h
+    }
+    [OneEpaperRect(left, top, right - left, bottom - top)]
+}
+
+// The SSD1677 drawing planes (abla-embedded ssd1677_canvas.ab): the LSB
+// plane, then the MSB plane, each one bit per pixel, rows of width/8 bytes,
+// most significant bit first.
+fun oneEpaperPlanes(levels: array<int>, width: int, height: int): array<int> {
+    val stride = (width + 7) / 8
+    val plane = stride * height
+    val out = filledArray(plane * 2, 0)
+    var py = 0
+    while (py < height) {
+        var px = 0
+        while (px < width) {
+            val level = levels[py * width + px]
+            if (level > 0) {
+                val offset = py * stride + px / 8
+                val bit = oneEpaperBit(px % 8)
+                if (level % 2 == 1) out[offset] = out[offset] + bit
+                if (level >= 2) out[offset + plane] = out[offset + plane] + bit
+            }
+            px = px + 1
+        }
+        py = py + 1
+    }
+    out
+}
+
+fun oneEpaperBit(position: int): int = if (position == 0) 128 else if (position == 1) 64 else if (position == 2) 32 else if (position == 3) 16 else if (position == 4) 8 else if (position == 5) 4 else if (position == 6) 2 else 1
+
+// A tap at a portrait panel pixel. Returns whether a handler ran.
+fun oneEpaperTouch(var app: OneApp, theme: Theme, state: OneEpaperState, x: int, y: int): bool {
+    val lx = x * 100 / state.options.scale
+    val ly = y * 100 / state.options.scale
+    var i = state.frame.hits.size - 1
+    while (i >= 0) {
+        val h = state.frame.hits[i]
+        if (h.kind == "press" && lx >= h.x && lx < h.x + h.w && ly >= h.y && ly < h.y + h.h)
+            return oneDispatch(app, "epaper", theme, h.event, "", oneEpaperLogicalWidth(state.options))
+        i = i - 1
+    }
+    false
+}
+
+// The update on the wire, for a device to apply: "ONE1", revision (u32),
+// mode (u8), rectangle count (u8), then per rectangle x, y, w, h (u16) and
+// its LSB rows followed by its MSB rows (w/8 bytes per row). Little endian.
+fun oneEpaperWire(update: OneEpaperUpdate, width: int, height: int): string {
+    var out = byteBuffer()
+    out.appendText("ONE1")
+    oneEpaperLe(out, update.revision, 4)
+    out.appendByteValue(update.mode)
+    out.appendByteValue(update.rects.size)
+    val stride = (width + 7) / 8
+    val plane = stride * height
+    for (r in update.rects) {
+        oneEpaperLe(out, r.x, 2)
+        oneEpaperLe(out, r.y, 2)
+        oneEpaperLe(out, r.w, 2)
+        oneEpaperLe(out, r.h, 2)
+        for (base in [0, plane]) {
+            var row = r.y
+            while (row < r.y + r.h) {
+                var col = r.x / 8
+                while (col < (r.x + r.w) / 8) {
+                    out.appendByteValue(update.planes[base + row * stride + col])
+                    col = col + 1
+                }
+                row = row + 1
+            }
+        }
+    }
+    out.toText()
+}
+
+fun oneEpaperLe(var out: ByteBuffer, value: int, bytes: int): void {
+    var v = value
+    var i = 0
+    while (i < bytes) {
+        out.appendByteValue(v % 256)
+        v = v / 256
+        i = i + 1
+    }
+    return
+}
+
+// A preview of the panel as it will look (four greys), as a PNG.
+fun oneEpaperPreview(state: OneEpaperState): string {
+    val o = state.options
+    var surface = oneSurface(o.width, o.height, 16777215)
+    var y = 0
+    while (y < o.height) {
+        var x = 0
+        while (x < o.width) {
+            val level = state.levels[oneEpaperPhysicalY(x, y, o.width) * o.height + oneEpaperPhysicalX(x, y)]
+            val v = if (level < 0) 255 else level * 85
+            surface.pixels[y * o.width + x] = v * 65536 + v * 256 + v
+            x = x + 1
+        }
+        y = y + 1
+    }
+    oneSurfacePng(surface)
+}

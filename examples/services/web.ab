@@ -1,0 +1,16 @@
+import "abla/io"
+import "abla/fs"
+import "services.ab"
+import "../../src/backends/web_document.ab"
+
+// Writes build/services/client.html: the demo's first paint, which the Wasm
+// module then takes over.
+fun main: int {
+    val t = oneDefaultTheme()
+    var app = ServicesDemo(OneNoServices(), ".")
+    var ui = oneUi("web-document", t)
+    Path("build/services/one").createDirectories()
+    Path("build/services/client.html").writeText(oneWebClientDocument("Serviços", "pt-PT", app.render(ui), t, "icons", "#ffffff", "one/host.js", "services.wasm"))
+    println("wrote build/services/client.html")
+    0
+}

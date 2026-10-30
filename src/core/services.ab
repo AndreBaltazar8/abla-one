@@ -1,0 +1,249 @@
+import "abla/json"
+
+// Platform effects (SPEC §9). Calls that produce a result return a request
+// id; the completion reaches the app as `receive("result", payload)` and
+// parses with `oneResponse(payload)`. A backend that lacks a service completes
+// it with status 501.
+
+class OneHeader(val name: string, val value: string)
+
+// A file the platform holds for the program: a document the user picked or a
+// response saved with `saveToFile`. Its bytes stay on the platform side until
+// read with `readFile`, sent as a request body or a multipart part.
+class OneFile(val handle: string, val name: string, val size: int, val mime: string)
+
+fun oneFileFrom(value: Json): OneFile =
+    OneFile(value.getString("handle"), value.getString("name"), if (value.get("size").intAvailable()) value.get("size").asInt() else -1, value.getString("mime"))
+
+// One multipart/form-data part: a text value, bytes (base64) or a file.
+class OnePart(val name: string, val value: string, val base64: string, val file: string, val filename: string, val contentType: string)
+
+fun oneTextPart(name: string, value: string): OnePart = OnePart(name, value, "", "", "", "")
+fun oneBytesPart(name: string, base64: string, filename: string, contentType: string): OnePart = OnePart(name, "", base64, "", filename, contentType)
+fun oneFilePart(name: string, file: OneFile): OnePart = OnePart(name, "", "", file.handle, file.name, file.mime)
+
+// An HTTP request. Build with `oneRequest(method, url)` and the methods below;
+// each returns a new request. The body is text or base64-encoded bytes.
+class OneRequest(
+    val method: string,
+    val url: string,
+    val headers: array<OneHeader>,
+    val body: string,
+    val bodyBase64: string,
+    val bodyFile: string,
+    val parts: array<OnePart>,
+    val timeoutMs: int,
+    val binaryResponse: bool,
+    val saveResponse: bool
+) {
+    fun copy(body: string, bodyBase64: string, bodyFile: string, parts: array<OnePart>): OneRequest =
+        OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, timeoutMs, binaryResponse, saveResponse)
+    fun header(name: string, value: string): OneRequest {
+        val out: array<OneHeader> = []
+        for (item in headers) if (oneLowerAscii(item.name) != oneLowerAscii(name)) out.append(item)
+        out.append(OneHeader(name, value))
+        OneRequest(method, url, out, body, bodyBase64, bodyFile, parts, timeoutMs, binaryResponse, saveResponse)
+    }
+    // Bodies: each replaces any previous body.
+    fun text(value: string, contentType: string): OneRequest = copy(value, "", "", []).header("Content-Type", contentType)
+    fun json(value: Json): OneRequest = text(jsonStringify(value), "application/json; charset=utf-8")
+    fun bytes(base64: string, contentType: string): OneRequest = copy("", base64, "", []).header("Content-Type", contentType)
+    // Streams a platform file as the body; its type is used unless a
+    // Content-Type header is set. Any size.
+    fun file(value: OneFile): OneRequest = copy("", "", value.handle, [])
+    // multipart/form-data; the platform sets the boundary header.
+    fun multipart(value: array<OnePart>): OneRequest = copy("", "", "", value)
+    fun timeout(milliseconds: int): OneRequest = OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, milliseconds, binaryResponse, saveResponse)
+    // Ask for the response body as base64 bytes instead of UTF-8 text.
+    fun binary(): OneRequest = OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, timeoutMs, true, saveResponse)
+    // Write a successful response to a new platform file instead of memory,
+    // for downloads of any size; the response carries it as `file`.
+    fun saveToFile(): OneRequest = OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, timeoutMs, binaryResponse, true)
+
+    // The JSON envelope backends receive.
+    fun envelope(): string {
+        val names: array<string> = []
+        val values: array<Json> = []
+        for (item in headers) {
+            names.append(item.name)
+            values.append(jsonString(item.value))
+        }
+        val keys = ["method", "headers", "timeoutMs", "binary", "saveToFile"]
+        val fields = [jsonString(method), jsonObject(names, values), jsonInteger(timeoutMs), jsonBoolean(binaryResponse), jsonBoolean(saveResponse)]
+        if (parts.size > 0) {
+            val encoded: array<Json> = []
+            for (part in parts) {
+                val pk = ["name"]
+                val pv = [jsonString(part.name)]
+                if (part.file != "") {
+                    pk.append("file")
+                    pv.append(jsonString(part.file))
+                } else if (part.base64 != "") {
+                    pk.append("base64")
+                    pv.append(jsonString(part.base64))
+                } else {
+                    pk.append("value")
+                    pv.append(jsonString(part.value))
+                }
+                if (part.filename != "") {
+                    pk.append("filename")
+                    pv.append(jsonString(part.filename))
+                }
+                if (part.contentType != "") {
+                    pk.append("contentType")
+                    pv.append(jsonString(part.contentType))
+                }
+                encoded.append(jsonObject(pk, pv))
+            }
+            keys.append("multipart")
+            fields.append(jsonArray(encoded))
+        } else if (bodyFile != "") {
+            keys.append("bodyFile")
+            fields.append(jsonString(bodyFile))
+        } else {
+            keys.append(if (bodyBase64 != "") "bodyBase64" else "body")
+            fields.append(jsonString(if (bodyBase64 != "") bodyBase64 else body))
+        }
+        jsonStringify(jsonObject(keys, fields))
+    }
+}
+
+fun oneRequest(method: string, url: string): OneRequest = OneRequest(method, url, [], "", "", "", [], 15000, false, false)
+
+// A completion: an HTTP response, a stored value, a picked file or a timer.
+// `status` 0 with `error` set means the request never completed.
+class OneResponse(
+    val requestId: int,
+    val status: int,
+    val headers: Json,
+    val body: string,
+    val bodyBase64: string,
+    val file: OneFile,
+    val error: string,
+    val valid: bool
+) {
+    fun hasFile(): bool = file.handle != ""
+    // Files from a pickFiles completion.
+    fun files(): array<OneFile> {
+        val out: array<OneFile> = []
+        for (item in json().values) out.append(oneFileFrom(item))
+        out
+    }
+    fun ok(): bool = valid && error == "" && status >= 200 && status < 300
+    fun header(name: string): string = headers.getString(oneLowerAscii(name))
+    fun json(): Json {
+        val parsed = jsonParse(body)
+        if (parsed.succeeded) parsed.value else jsonNull()
+    }
+}
+
+fun oneResponse(payload: string): OneResponse {
+    val parsed = jsonParse(payload)
+    if (!parsed.succeeded || !parsed.value.isObject()) return OneResponse(0, 0, jsonObject([], []), "", "", OneFile("", "", -1, ""), "invalid completion", false)
+    val v = parsed.value
+    val valid = v.get("requestId").intAvailable() && v.get("status").intAvailable()
+    val headers = if (v.get("headers").isObject()) v.get("headers") else jsonObject([], [])
+    val file = if (v.get("file").isObject()) oneFileFrom(v.get("file")) else OneFile("", "", -1, "")
+    OneResponse(v.get("requestId").asInt(), v.get("status").asInt(), headers, v.getString("body"), v.getString("bodyBase64"), file, v.getString("error"), valid)
+}
+
+interface OneServices {
+    fun send(request: OneRequest): int
+    // Secure storage holds JSON values (strings, numbers, booleans, objects,
+    // arrays; bytes as base64 strings). A read completes with 200 and the
+    // stored JSON as the body, or 404 when the key is absent; see oneStored.
+    fun secureRead(key: string): int
+    fun secureWrite(key: string, value: Json): int
+    fun secureRemove(key: string): int
+    // A one-shot timer: the request completes after `milliseconds`. Repeat by
+    // starting a new timer when it completes (polling, debouncing).
+    fun timer(milliseconds: int): int
+    // Files. pickFiles completes with response.files() (empty if cancelled);
+    // mime types like "image/*" or "application/pdf", empty for any.
+    fun pickFiles(mime: array<string>, multiple: bool): int
+    // Reads up to 256 KB from `offset`; completes with `bodyBase64`.
+    fun readFile(file: OneFile, offset: int, length: int): int
+    fun deleteFile(file: OneFile): int
+    // A photo normalized by the platform for avatars and emoji: kind
+    // "profile" (square JPEG) or "emoji" (small transparent PNG). Completes
+    // with the image as base64 in `body`, or 204 if cancelled.
+    fun pickImage(kind: string): int
+    fun clearImageCache(): void
+    // kind: "toast", "copy", "openUrl" or "haptic".
+    fun effect(kind: string, payload: string): bool
+}
+
+// The value of a secure read. Values written before typed storage existed
+// were plain strings, so a body that isn't JSON reads back as that string.
+fun oneStored(response: OneResponse): Json {
+    if (response.status != 200) return jsonNull()
+    val parsed = jsonParse(response.body)
+    if (parsed.succeeded) parsed.value else jsonString(response.body)
+}
+
+// Services that do nothing, for previews: every request gets id 0.
+class OneNoServices() : OneServices {
+    fun send(request: OneRequest): int = 0
+    fun secureRead(key: string): int = 0
+    fun secureWrite(key: string, value: Json): int = 0
+    fun secureRemove(key: string): int = 0
+    fun timer(milliseconds: int): int = 0
+    fun pickFiles(mime: array<string>, multiple: bool): int = 0
+    fun readFile(file: OneFile, offset: int, length: int): int = 0
+    fun deleteFile(file: OneFile): int = 0
+    fun pickImage(kind: string): int = 0
+    fun clearImageCache(): void { return }
+    fun effect(kind: string, payload: string): bool = false
+}
+
+// Records calls and hands out increasing ids, for tests. Tests deliver
+// completions with `oneResponsePayload`.
+class OneRecordedServices(var next: int, val log: array<string>, val requests: array<OneRequest>) : OneServices {
+    fun record(entry: string): int {
+        next = next + 1
+        log.append("$next $entry")
+        next
+    }
+    fun send(request: OneRequest): int {
+        requests.append(request)
+        record("${request.method} ${request.url} ${if (request.bodyBase64 != "") "<bytes>" else if (request.bodyFile != "") "<file>" else if (request.parts.size > 0) "<multipart>" else request.body}")
+    }
+    fun secureRead(key: string): int = record("SECUREREAD $key")
+    fun secureWrite(key: string, value: Json): int = record("SECUREWRITE $key")
+    fun secureRemove(key: string): int = record("SECUREREMOVE $key")
+    fun timer(milliseconds: int): int = record("TIMER $milliseconds")
+    fun pickFiles(mime: array<string>, multiple: bool): int = record("PICKFILES ${mime.size} $multiple")
+    fun readFile(file: OneFile, offset: int, length: int): int = record("READ ${file.handle} $offset $length")
+    fun deleteFile(file: OneFile): int = record("DELETE ${file.handle}")
+    fun pickImage(kind: string): int = record("PICK $kind")
+    fun clearImageCache(): void {
+        record("IMGCLEAR")
+        return
+    }
+    fun effect(kind: string, payload: string): bool {
+        record("EFFECT $kind $payload")
+        true
+    }
+    fun last(): string = if (log.size == 0) "" else log[log.size - 1]
+    fun lastRequest(): OneRequest = requests[requests.size - 1]
+}
+
+fun oneRecordedServices(): OneRecordedServices = OneRecordedServices(0, [], [])
+
+fun oneResponsePayload(requestId: int, status: int, body: string, error: string): string =
+    jsonStringify(jsonObject(["requestId", "status", "body", "error"], [jsonInteger(requestId), jsonInteger(status), jsonString(body), jsonString(error)]))
+
+fun oneLowerAscii(value: string): string {
+    var out = ""
+    var start = 0
+    var i = 0
+    while (i < value.size) {
+        val b = value[i]
+        if (b >= 65 && b <= 90) {
+            out = "$out${value.slice(start, i)}${"abcdefghijklmnopqrstuvwxyz".slice(b - 65, b - 64)}"
+            start = i + 1
+        }
+        i = i + 1
+    }
+    "$out${value.slice(start, value.size)}"
+}

@@ -1,0 +1,178 @@
+import "../one.ab"
+
+// The standard kit: higher-level components built only from core node kinds.
+// Every part reads a named theme style ("Button", "Button.primary",
+// "Button.primary.label", ...) before the caller's own style, so a theme
+// restyles components and an instance can still override anything.
+
+// The named parts are resolved by the theme doing the resolving (late bound),
+// so a theme scope can restyle kit components inside its subtree.
+fun oneParts(theme: Theme, component: string, variant: string, part: string, extra: Style): Style {
+    val suffix = if (part == "") "" else ".$part"
+    var out = style().set("part", "$component$suffix")
+    if (variant != "") out = out.set("part", "$component.$variant$suffix")
+    out.with(extra)
+}
+
+fun button(ui: Ui, label: string, variant: string, onPress: int, look: Style): Node =
+    pressable(onPress, oneParts(ui.theme, "Button", variant, "", look), [
+        text(label, oneParts(ui.theme, "Button", variant, "label", style()))
+    ]).set("label", label)
+
+fun iconButton(ui: Ui, name: string, label: string, onPress: int, look: Style): Node =
+    pressable(onPress, oneParts(ui.theme, "IconButton", "", "", look), [
+        icon(name, label, oneParts(ui.theme, "IconButton", "", "icon", style()))
+    ]).set("label", label)
+
+fun badge(ui: Ui, value: string, variant: string): Node =
+    row(oneParts(ui.theme, "Badge", variant, "", style()), [text(value, oneParts(ui.theme, "Badge", variant, "label", style()))])
+
+fun chip(ui: Ui, label: string, selected: bool, onPress: int): Node =
+    pressable(onPress, oneParts(ui.theme, "Chip", if (selected) "selected" else "", "", style()), [
+        text(label, oneParts(ui.theme, "Chip", if (selected) "selected" else "", "label", style()))
+    ]).set("selected", if (selected) "true" else "false")
+
+// Initials on a tinted circle, chosen from `avatar-1`..`avatar-6` tokens by
+// seed. A photo, when given, covers the initials.
+fun avatar(ui: Ui, name: string, seed: string, size: int, photo: Node): Node {
+    val tone = "${oneAvatarTone(seed)}"
+    stack(oneParts(ui.theme, "Avatar", "", "", style().size(size).radius(size / 2).background("@avatar-$tone").clip().align("center")), [
+        text(oneInitials(name), oneParts(ui.theme, "Avatar", "", "initials", style().color("@avatar-$tone-ink").fontSize(size * 38 / 100).weight("semibold").lineHeight(size * 38 / 100 + 4))),
+        photo
+    ])
+}
+
+fun oneAvatarTone(seed: string): int {
+    var hash = 7
+    var i = 0
+    while (i < seed.size) {
+        hash = (hash * 31 + seed[i]) % 1000003
+        i = i + 1
+    }
+    hash % 6 + 1
+}
+
+// "Sofia Costa" -> "SC", "ana" -> "A", "maya.t@x" -> "M". UTF-8 aware for the
+// first letter of each word.
+fun oneInitials(name: string): string {
+    var out = ""
+    var count = 0
+    var start = true
+    var i = 0
+    while (i < name.size && count < 2) {
+        val b = name[i]
+        if (b == 32 || b == 46 || b == 95 || b == 45) {
+            start = true
+            i = i + 1
+        } else if (b == 64) {
+            i = name.size
+        } else {
+            val width = if (b >= 240) 4 else if (b >= 224) 3 else if (b >= 192) 2 else 1
+            if (start) {
+                out = "$out${oneUpper(name.slice(i, i + width))}"
+                count = count + 1
+                start = false
+            }
+            i = i + width
+        }
+    }
+    if (out == "") "?" else out
+}
+
+fun oneUpper(letter: string): string {
+    if (letter.size == 1 && letter[0] >= 97 && letter[0] <= 122) return oneAsciiUpper(letter[0])
+    // Common Portuguese lowercase letters with accents (UTF-8, two bytes).
+    when (letter) {
+        "á" -> "Á"
+        "à" -> "À"
+        "â" -> "Â"
+        "ã" -> "Ã"
+        "é" -> "É"
+        "ê" -> "Ê"
+        "í" -> "Í"
+        "ó" -> "Ó"
+        "ô" -> "Ô"
+        "õ" -> "Õ"
+        "ú" -> "Ú"
+        "ç" -> "Ç"
+        else -> letter
+    }
+}
+
+fun oneAsciiUpper(byte: int): string {
+    val letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    letters.slice(byte - 97, byte - 96)
+}
+
+class ListRowParts(val leading: Node, val title: string, val subtitle: string, val meta: string, val trailing: Node)
+
+// A list row: leading visual, a title line with optional meta (time), a
+// subtitle line with an optional trailing node (badge, chevron).
+fun listRow(ui: Ui, parts: ListRowParts, onPress: int, look: Style): Node {
+    val t = ui.theme
+    pressable(onPress, oneParts(t, "ListRow", "", "", look), [
+        row(style().gap(12).fillWidth(), [
+            parts.leading,
+            column(style().grow(1).gap(2), [
+                row(style().gap(8), [
+                    text(parts.title, oneParts(t, "ListRow", "", "title", style().grow(1).maxLines(1))),
+                    if (parts.meta != "") text(parts.meta, oneParts(t, "ListRow", "", "meta", style())) else none()
+                ]),
+                if (parts.subtitle != "") row(style().gap(8), [
+                    text(parts.subtitle, oneParts(t, "ListRow", "", "subtitle", style().grow(1).maxLines(1))),
+                    if (parts.meta != "") parts.trailing else none()
+                ]) else none()
+            ]),
+            if (parts.meta == "") parts.trailing else none()
+        ])
+    ])
+}
+
+fun topBar(ui: Ui, leading: array<Node>, title: Node, trailing: array<Node>): Node {
+    val items: array<Node> = []
+    for (node in leading) items.append(node)
+    items.append(title.styled(style().grow(1)))
+    for (node in trailing) items.append(node)
+    row(oneParts(ui.theme, "TopBar", "", "", style()), items)
+}
+
+class TabItem(val iconName: string, val label: string, val onPress: int)
+
+fun tabBar(ui: Ui, items: array<TabItem>, active: int): Node {
+    val t = ui.theme
+    val cells: array<Node> = []
+    var index = 0
+    for (item in items) {
+        val state = if (index == active) "active" else ""
+        cells.append(pressable(item.onPress, oneParts(t, "Tab", state, "", style().grow(1)), [
+            icon(item.iconName, item.label, oneParts(t, "Tab", state, "icon", style())),
+            text(item.label, oneParts(t, "Tab", state, "label", style()))
+        ]).set("selected", if (index == active) "true" else "false").set("label", item.label))
+        index = index + 1
+    }
+    row(oneParts(t, "TabBar", "", "", style()), cells)
+}
+
+fun searchField(ui: Ui, value: string, placeholder: string, onChange: int): Node =
+    row(oneParts(ui.theme, "SearchField", "", "", style()), [
+        icon("icon_search", "", oneParts(ui.theme, "SearchField", "", "icon", style())),
+        input(value, placeholder, onChange, oneParts(ui.theme, "SearchField", "", "input", style().grow(1)))
+    ])
+
+fun textField(ui: Ui, value: string, placeholder: string, onChange: int, look: Style): Node =
+    input(value, placeholder, onChange, oneParts(ui.theme, "TextField", "", "", look))
+
+fun sectionHeader(ui: Ui, label: string, trailing: Node): Node =
+    row(oneParts(ui.theme, "SectionHeader", "", "", style()), [
+        text(label, oneParts(ui.theme, "SectionHeader", "", "label", style().grow(1))),
+        trailing
+    ])
+
+fun card(ui: Ui, children: array<Node>, look: Style): Node =
+    column(oneParts(ui.theme, "Card", "", "", look), children)
+
+fun emptyState(ui: Ui, title: string, body: string): Node =
+    column(oneParts(ui.theme, "EmptyState", "", "", style()), [
+        text(title, oneParts(ui.theme, "EmptyState", "", "title", style())),
+        if (body != "") text(body, oneParts(ui.theme, "EmptyState", "", "body", style())) else none()
+    ])

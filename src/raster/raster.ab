@@ -1,0 +1,888 @@
+import "abla/bytes"
+import "abla/float"
+import "abla/crypto"
+import "../layout/paint.ab"
+import "inter_glyphs.ab"
+
+// one-raster (SPEC §10, M3): draws a paint list into ARGB pixels, for the
+// targets without a platform renderer (desktop, epaper) and for snapshot
+// tests on the host. Anti-aliased fills use signed-area coverage
+// accumulation, so glyph holes subtract and overlapping strokes merge.
+
+// --- surface ---------------------------------------------------------------------
+
+class OneSurface(val width: int, val height: int, val pixels: array<int>, val clips: array<int>) {
+    fun clipX0(): int = if (clips.size == 0) 0 else clips[clips.size - 4]
+    fun clipY0(): int = if (clips.size == 0) 0 else clips[clips.size - 3]
+    fun clipX1(): int = if (clips.size == 0) width else clips[clips.size - 2]
+    fun clipY1(): int = if (clips.size == 0) height else clips[clips.size - 1]
+    fun pushClip(x: int, y: int, w: int, h: int): void {
+        val x0 = if (x > clipX0()) x else clipX0()
+        val y0 = if (y > clipY0()) y else clipY0()
+        val x1 = if (x + w < clipX1()) x + w else clipX1()
+        val y1 = if (y + h < clipY1()) y + h else clipY1()
+        clips.append(x0)
+        clips.append(y0)
+        clips.append(x1)
+        clips.append(y1)
+        return
+    }
+    fun popClip(): void {
+        if (clips.size >= 4) clips.truncate(clips.size - 4)
+        return
+    }
+    // Blends `color` (0xRRGGBB) at coverage 0..255 over the pixel.
+    fun blend(x: int, y: int, color: int, alpha: int): void {
+        if (alpha <= 0 || x < clipX0() || y < clipY0() || x >= clipX1() || y >= clipY1()) return
+        val i = y * width + x
+        if (alpha >= 255) {
+            pixels[i] = color
+            return
+        }
+        val old = pixels[i]
+        val inv = 255 - alpha
+        val r = (((color / 65536) % 256) * alpha + ((old / 65536) % 256) * inv) / 255
+        val g = (((color / 256) % 256) * alpha + ((old / 256) % 256) * inv) / 255
+        val b = ((color % 256) * alpha + (old % 256) * inv) / 255
+        pixels[i] = r * 65536 + g * 256 + b
+        return
+    }
+}
+
+fun oneSurface(width: int, height: int, background: int): OneSurface = OneSurface(width, height, filledArray(width * height, background), [])
+
+fun oneHex(c: int): int = if (c >= 48 && c <= 57) c - 48 else if (c >= 97 && c <= 102) c - 87 else if (c >= 65 && c <= 70) c - 55 else 0
+
+// "#rrggbb", "#rgb" or "#aarrggbb" -> 0xRRGGBB and alpha 0..255.
+fun oneColorValue(value: string): int {
+    if (value.size == 7 && value[0] == 35) return ((oneHex(value[1]) * 16 + oneHex(value[2])) * 65536) + ((oneHex(value[3]) * 16 + oneHex(value[4])) * 256) + oneHex(value[5]) * 16 + oneHex(value[6])
+    if (value.size == 4 && value[0] == 35) return (oneHex(value[1]) * 17 * 65536) + (oneHex(value[2]) * 17 * 256) + oneHex(value[3]) * 17
+    if (value.size == 9 && value[0] == 35) return ((oneHex(value[3]) * 16 + oneHex(value[4])) * 65536) + ((oneHex(value[5]) * 16 + oneHex(value[6])) * 256) + oneHex(value[7]) * 16 + oneHex(value[8])
+    0
+}
+
+fun oneColorAlpha(value: string): int = if (value.size == 9 && value[0] == 35) oneHex(value[1]) * 16 + oneHex(value[2]) else if (value == "" || value == "transparent") 0 else 255
+
+// --- paths ---------------------------------------------------------------------------
+
+// Closed polygons in pixels; `ends` holds each contour's end index.
+class OnePath(val xs: array<f64>, val ys: array<f64>, val ends: array<int>) {
+    fun moveTo(x: f64, y: f64): void {
+        close()
+        xs.append(x)
+        ys.append(y)
+        return
+    }
+    fun lineTo(x: f64, y: f64): void {
+        xs.append(x)
+        ys.append(y)
+        return
+    }
+    fun close(): void {
+        val start = if (ends.size == 0) 0 else ends[ends.size - 1]
+        if (xs.size > start) ends.append(xs.size)
+        return
+    }
+    fun quadTo(cx: f64, cy: f64, x: f64, y: f64): void {
+        val x0 = xs[xs.size - 1]
+        val y0 = ys[ys.size - 1]
+        var i = 1
+        while (i <= 8) {
+            val t = f64FromInt(i) / 8.0
+            val u = 1.0 - t
+            lineTo(u * u * x0 + 2.0 * u * t * cx + t * t * x, u * u * y0 + 2.0 * u * t * cy + t * t * y)
+            i = i + 1
+        }
+        return
+    }
+    fun cubicTo(c1x: f64, c1y: f64, c2x: f64, c2y: f64, x: f64, y: f64): void {
+        val x0 = xs[xs.size - 1]
+        val y0 = ys[ys.size - 1]
+        var i = 1
+        while (i <= 12) {
+            val t = f64FromInt(i) / 12.0
+            val u = 1.0 - t
+            lineTo(u * u * u * x0 + 3.0 * u * u * t * c1x + 3.0 * u * t * t * c2x + t * t * t * x, u * u * u * y0 + 3.0 * u * u * t * c1y + 3.0 * u * t * t * c2y + t * t * t * y)
+            i = i + 1
+        }
+        return
+    }
+}
+
+fun onePath(): OnePath = OnePath([], [], [])
+
+fun oneRoundRectPath(x: f64, y: f64, w: f64, h: f64, radius: f64, var path: OnePath): void {
+    var r = radius
+    if (r * 2.0 > w) r = w / 2.0
+    if (r * 2.0 > h) r = h / 2.0
+    if (r <= 0.5) {
+        path.moveTo(x, y)
+        path.lineTo(x + w, y)
+        path.lineTo(x + w, y + h)
+        path.lineTo(x, y + h)
+        path.close()
+        return
+    }
+    val k = 0.5523 * r
+    path.moveTo(x + r, y)
+    path.lineTo(x + w - r, y)
+    path.cubicTo(x + w - r + k, y, x + w, y + r - k, x + w, y + r)
+    path.lineTo(x + w, y + h - r)
+    path.cubicTo(x + w, y + h - r + k, x + w - r + k, y + h, x + w - r, y + h)
+    path.lineTo(x + r, y + h)
+    path.cubicTo(x + r - k, y + h, x, y + h - r + k, x, y + h - r)
+    path.lineTo(x, y + r)
+    path.cubicTo(x, y + r - k, x + r - k, y, x + r, y)
+    path.close()
+    return
+}
+
+// Fills a path with signed-area coverage (font-rs). Overlapping contours of
+// the same direction merge; opposite ones subtract (holes).
+fun oneFill(var surface: OneSurface, var path: OnePath, color: int, alpha: int): void {
+    path.close()
+    if (path.xs.size < 3) return
+    var minX = path.xs[0]
+    var maxX = path.xs[0]
+    var minY = path.ys[0]
+    var maxY = path.ys[0]
+    for (v in path.xs) {
+        if (v < minX) minX = v
+        if (v > maxX) maxX = v
+    }
+    for (v in path.ys) {
+        if (v < minY) minY = v
+        if (v > maxY) maxY = v
+    }
+    var bx = f64ToInt(minX) - 1
+    var by = f64ToInt(minY) - 1
+    var bx1 = f64ToInt(maxX) + 2
+    var by1 = f64ToInt(maxY) + 2
+    if (bx < surface.clipX0()) bx = surface.clipX0()
+    if (by < surface.clipY0()) by = surface.clipY0()
+    if (bx1 > surface.clipX1()) bx1 = surface.clipX1()
+    if (by1 > surface.clipY1()) by1 = surface.clipY1()
+    val bw = bx1 - bx
+    val bh = by1 - by
+    if (bw <= 0 || bh <= 0) return
+    val acc: array<f64> = filledArray((bw + 2) * bh, 0.0)
+    var start = 0
+    for (end in path.ends) {
+        var i = start
+        while (i < end) {
+            val j = if (i + 1 < end) i + 1 else start
+            oneAccumulateLine(acc, bw + 2, bh, path.xs[i] - f64FromInt(bx), path.ys[i] - f64FromInt(by), path.xs[j] - f64FromInt(bx), path.ys[j] - f64FromInt(by))
+            i = i + 1
+        }
+        start = end
+    }
+    var y = 0
+    while (y < bh) {
+        var sum = 0.0
+        var x = 0
+        while (x < bw) {
+            sum = sum + acc[y * (bw + 2) + x]
+            var cover = if (sum < 0.0) -sum else sum
+            if (cover > 1.0) cover = 1.0
+            if (cover > 0.002) surface.blend(bx + x, by + y, color, f64ToInt(cover * f64FromInt(alpha) + 0.5))
+            x = x + 1
+        }
+        y = y + 1
+    }
+    return
+}
+
+fun oneFloor(v: f64): int {
+    val i = f64ToInt(v)
+    if (f64FromInt(i) > v) i - 1 else i
+}
+
+// Adds a line's signed area to the accumulation buffer (font-rs draw_line).
+fun oneAccumulateLine(var acc: array<f64>, stride: int, rows: int, x0: f64, y0: f64, x1: f64, y1: f64): void {
+    if (y0 == y1) return
+    val dir = if (y0 < y1) 1.0 else -1.0
+    val ax = if (y0 < y1) x0 else x1
+    val ay = if (y0 < y1) y0 else y1
+    val bxv = if (y0 < y1) x1 else x0
+    val byv = if (y0 < y1) y1 else y0
+    val dxdy = (bxv - ax) / (byv - ay)
+    var x = ax
+    var yStart = oneFloor(ay)
+    if (yStart < 0) {
+        x = x - ay * dxdy
+        yStart = 0
+    }
+    var yEnd = oneFloor(byv) + 1
+    if (yEnd > rows) yEnd = rows
+    if (ay < 0.0) x = ax - ay * dxdy
+    var y = yStart
+    while (y < yEnd) {
+        val linestart = y * stride
+        val top = if (f64FromInt(y) > ay) f64FromInt(y) else ay
+        val bottom = if (f64FromInt(y + 1) < byv) f64FromInt(y + 1) else byv
+        val dy = bottom - top
+        if (dy > 0.0) {
+            val xnext = x + dxdy * dy
+            val d = dy * dir
+            val xa = if (x < xnext) x else xnext
+            val xb = if (x < xnext) xnext else x
+            val x0floor = oneFloor(xa)
+            val x0i = x0floor
+            val x1ceil = oneFloor(xb) + 1
+            if (x1ceil <= x0i + 1) {
+                val xmf = 0.5 * (x + xnext) - f64FromInt(x0floor)
+                oneAccAdd(acc, linestart + x0i, d - d * xmf)
+                oneAccAdd(acc, linestart + x0i + 1, d * xmf)
+            } else {
+                val s = 1.0 / (xb - xa)
+                val x0f = xa - f64FromInt(x0floor)
+                val a0 = 0.5 * s * (1.0 - x0f) * (1.0 - x0f)
+                val x1f = xb - f64FromInt(x1ceil) + 1.0
+                val am = 0.5 * s * x1f * x1f
+                oneAccAdd(acc, linestart + x0i, d * a0)
+                if (x1ceil == x0i + 2) oneAccAdd(acc, linestart + x0i + 1, d * (1.0 - a0 - am))
+                else {
+                    val a1 = s * (1.5 - x0f)
+                    oneAccAdd(acc, linestart + x0i + 1, d * (a1 - a0))
+                    var xi = x0i + 2
+                    while (xi < x1ceil - 1) {
+                        oneAccAdd(acc, linestart + xi, d * s)
+                        xi = xi + 1
+                    }
+                    val a2 = a1 + f64FromInt(x1ceil - x0i - 3) * s
+                    oneAccAdd(acc, linestart + x1ceil - 1, d * (1.0 - a2 - am))
+                }
+                oneAccAdd(acc, linestart + x1ceil, d * am)
+            }
+            x = xnext
+        }
+        y = y + 1
+    }
+    return
+}
+
+fun oneAccAdd(var acc: array<f64>, index: int, value: f64): void {
+    if (index >= 0 && index < acc.size) acc[index] = acc[index] + value
+    return
+}
+
+// A polygon's orientation, to make every stroke piece wind the same way.
+fun oneSignedArea(xs: array<f64>, ys: array<f64>): f64 {
+    var a = 0.0
+    var i = 0
+    while (i < xs.size) {
+        val j = (i + 1) % xs.size
+        a = a + xs[i] * ys[j] - xs[j] * ys[i]
+        i = i + 1
+    }
+    a
+}
+
+fun oneAddPolygon(var path: OnePath, xs: array<f64>, ys: array<f64>): void {
+    val forward = oneSignedArea(xs, ys) >= 0.0
+    var i = 0
+    while (i < xs.size) {
+        val k = if (forward) i else xs.size - 1 - i
+        if (i == 0) path.moveTo(xs[k], ys[k]) else path.lineTo(xs[k], ys[k])
+        i = i + 1
+    }
+    path.close()
+    return
+}
+
+// Strokes polylines with round joins and caps: a quad per segment and a disc
+// per vertex, all winding the same way so they merge.
+fun oneStroke(var surface: OneSurface, var lines: OnePath, width: f64, color: int, alpha: int): void {
+    lines.close()
+    var shape = onePath()
+    val r = width / 2.0
+    var start = 0
+    for (end in lines.ends) {
+        var i = start
+        while (i < end) {
+            val x = lines.xs[i]
+            val y = lines.ys[i]
+            val disc: array<f64> = []
+            val discY: array<f64> = []
+            var k = 0
+            while (k < 12) {
+                val a = 6.2831853 * f64FromInt(k) / 12.0
+                disc.append(x + r * oneCos(a))
+                discY.append(y + r * oneSin(a))
+                k = k + 1
+            }
+            oneAddPolygon(shape, disc, discY)
+            if (i + 1 < end) {
+                val nx = lines.xs[i + 1]
+                val ny = lines.ys[i + 1]
+                val dx = nx - x
+                val dy = ny - y
+                val len = oneSqrt(dx * dx + dy * dy)
+                if (len > 0.0001) {
+                    val px = -dy / len * r
+                    val py = dx / len * r
+                    oneAddPolygon(shape, [x + px, nx + px, nx - px, x - px], [y + py, ny + py, ny - py, y - py])
+                }
+            }
+            i = i + 1
+        }
+        start = end
+    }
+    oneFill(surface, shape, color, alpha)
+    return
+}
+
+fun oneSqrt(v: f64): f64 {
+    if (v <= 0.0) return 0.0
+    var x = if (v > 1.0) v else 1.0
+    var i = 0
+    while (i < 20) {
+        x = 0.5 * (x + v / x)
+        i = i + 1
+    }
+    x
+}
+
+fun oneSin(a: f64): f64 {
+    // Range-reduce to [-pi, pi], then a Taylor series.
+    var x = a
+    while (x > 3.14159265) x = x - 6.2831853
+    while (x < -3.14159265) x = x + 6.2831853
+    val x2 = x * x
+    x * (1.0 - x2 / 6.0 * (1.0 - x2 / 20.0 * (1.0 - x2 / 42.0 * (1.0 - x2 / 72.0 * (1.0 - x2 / 110.0)))))
+}
+
+fun oneCos(a: f64): f64 = oneSin(a + 1.5707963)
+
+// --- glyphs ----------------------------------------------------------------------------
+
+val oneGlyphWords: array<array<int>> = []
+val oneGlyphCodes: Map<int, int> = Map()
+
+fun oneGlyphTable(weight: int): array<int> {
+    if (oneGlyphWords.size == 0) {
+        var i = 0
+        while (i < oneInterCodes.size) {
+            oneGlyphCodes.set(oneInterCodes[i], i)
+            i = i + 1
+        }
+        for (data in [oneGlyphs400, oneGlyphs500, oneGlyphs600, oneGlyphs700]) {
+            val bytes = base64Decode(data)
+            val words: array<int> = []
+            var j = 0
+            while (j + 1 < bytes.size) {
+                var v = bytes[j] + bytes[j + 1] * 256
+                if (v >= 32768) v = v - 65536
+                words.append(v)
+                j = j + 2
+            }
+            oneGlyphWords.append(words)
+        }
+    }
+    oneGlyphWords[weight]
+}
+
+fun oneGlyphOffset(weight: int, index: int): int =
+    if (weight == 0) oneGlyphIndex400[index] else if (weight == 1) oneGlyphIndex500[index] else if (weight == 2) oneGlyphIndex600[index] else oneGlyphIndex700[index]
+
+// Adds the glyph for `code` at pen position (x, baseline) to `path`; returns
+// its advance in pixels.
+fun oneGlyphPath(var path: OnePath, code: int, weight: int, size: f64, x: f64, baseline: f64): f64 {
+    val words = oneGlyphTable(weight)
+    oneGlyphOffset(0, 0)
+    val found = oneGlyphCodes.get(code)
+    val scale = size / f64FromInt(oneGlyphUnitsPerEm)
+    if (found == null) return size * 0.6
+    var p = oneGlyphOffset(weight, found)
+    val advance = f64FromInt(words[p]) * scale
+    val contours = words[p + 1]
+    p = p + 2
+    var c = 0
+    while (c < contours) {
+        val count = words[p]
+        p = p + 1
+        // TrueType quadratic contours: implied on-curve midpoints between
+        // consecutive off-curve points.
+        val px: array<f64> = []
+        val py: array<f64> = []
+        val on: array<bool> = []
+        var k = 0
+        while (k < count) {
+            px.append(x + f64FromInt(words[p]) * scale)
+            py.append(baseline - f64FromInt(words[p + 1]) * scale)
+            on.append(words[p + 2] == 1)
+            p = p + 3
+            k = k + 1
+        }
+        var first = 0
+        while (first < count && !on[first]) first = first + 1
+        var sx = 0.0
+        var sy = 0.0
+        if (first == count) {
+            sx = (px[0] + px[count - 1]) / 2.0
+            sy = (py[0] + py[count - 1]) / 2.0
+            first = 0
+        } else {
+            sx = px[first]
+            sy = py[first]
+        }
+        path.moveTo(sx, sy)
+        var ctrl = false
+        var cx = 0.0
+        var cy = 0.0
+        var n = 1
+        while (n <= count) {
+            val idx = (first + n) % count
+            val x1 = px[idx]
+            val y1 = py[idx]
+            if (on[idx]) {
+                if (ctrl) path.quadTo(cx, cy, x1, y1) else path.lineTo(x1, y1)
+                ctrl = false
+            } else {
+                if (ctrl) {
+                    val mx = (cx + x1) / 2.0
+                    val my = (cy + y1) / 2.0
+                    path.quadTo(cx, cy, mx, my)
+                }
+                cx = x1
+                cy = y1
+                ctrl = true
+            }
+            n = n + 1
+        }
+        if (ctrl) path.quadTo(cx, cy, sx, sy)
+        path.close()
+        c = c + 1
+    }
+    advance
+}
+
+fun oneDrawText(var surface: OneSurface, text: string, x: int, y: int, h: int, size: int, weight: string, color: string): void {
+    var path = onePath()
+    val ascent = f64FromInt(oneInterAscent * size) / 1000.0
+    val descent = f64FromInt(oneInterDescent * size) / 1000.0
+    val baseline = f64FromInt(y) + (f64FromInt(h) - ascent - descent) / 2.0 + ascent
+    var pen = f64FromInt(x)
+    var i = 0
+    val w = oneWeightIndex(weight)
+    while (i < text.size) {
+        val code = oneCodeAt(text, i)
+        pen = pen + oneGlyphPath(path, code, w, f64FromInt(size), pen, baseline)
+        i = i + oneCodeLength(text[i])
+    }
+    oneFill(surface, path, oneColorValue(color), oneColorAlpha(color))
+    return
+}
+
+// --- icons (SVG paths) -----------------------------------------------------------
+
+// Draws an SVG icon (as produced by tools/vector2svg.py) into a box. Stroked
+// paths use their stroke width; filled paths fill. Everything takes `tint`.
+fun oneDrawSvg(var surface: OneSurface, svg: string, x: int, y: int, w: int, h: int, tint: string): void {
+    val box = oneSvgAttr(svg, "viewBox")
+    val parts = oneNumbers(box)
+    if (parts.size < 4) return
+    val sx = f64FromInt(w) / parts[2]
+    val sy = f64FromInt(h) / parts[3]
+    var at = 0
+    while (true) {
+        val next = oneFind(svg, "<path", at)
+        if (next < 0) return
+        val end = oneFind(svg, "/>", next)
+        val element = svg.slice(next, if (end < 0) svg.size else end)
+        at = if (end < 0) svg.size else end
+        var path = onePath()
+        oneSvgPath(oneSvgAttr(element, "d"), path, f64FromInt(x) - parts[0] * sx, f64FromInt(y) - parts[1] * sy, sx, sy)
+        val stroke = oneSvgAttr(element, "stroke")
+        val fill = oneSvgAttr(element, "fill")
+        val color = oneColorValue(tint)
+        if (stroke != "" && stroke != "none") {
+            val widths = oneNumbers(oneSvgAttr(element, "stroke-width"))
+            oneStroke(surface, path, (if (widths.size > 0) widths[0] else 1.0) * sx, color, 255)
+        }
+        if (fill != "none") oneFill(surface, path, color, 255)
+    }
+    return
+}
+
+fun oneFind(text: string, needle: string, from: int): int {
+    var i = from
+    while (i + needle.size <= text.size) {
+        if (text.slice(i, i + needle.size) == needle) return i
+        i = i + 1
+    }
+    -1
+}
+
+fun oneSvgAttr(element: string, name: string): string {
+    val at = oneFind(element, " $name=\"", 0)
+    if (at < 0) return ""
+    val start = at + name.size + 3
+    var end = start
+    while (end < element.size && element[end] != 34) end = end + 1
+    element.slice(start, end)
+}
+
+fun oneNumbers(text: string): array<f64> {
+    val out: array<f64> = []
+    var i = 0
+    while (i < text.size) {
+        val b = text[i]
+        if ((b >= 48 && b <= 57) || b == 45 || b == 46) {
+            var j = i
+            if (text[j] == 45) j = j + 1
+            var seenDot = false
+            while (j < text.size && ((text[j] >= 48 && text[j] <= 57) || (text[j] == 46 && !seenDot))) {
+                if (text[j] == 46) seenDot = true
+                j = j + 1
+            }
+            out.append(oneParseFloat(text.slice(i, j)))
+            i = j
+        } else i = i + 1
+    }
+    out
+}
+
+fun oneParseFloat(text: string): f64 {
+    var negative = false
+    var value = 0.0
+    var scale = 0.0
+    for (b in text) {
+        if (b == 45) negative = true
+        else if (b == 46) scale = 1.0
+        else if (b >= 48 && b <= 57) {
+            if (scale > 0.0) {
+                scale = scale / 10.0
+                value = value + f64FromInt(b - 48) * scale
+            } else value = value * 10.0 + f64FromInt(b - 48)
+        }
+    }
+    if (negative) -value else value
+}
+
+// SVG path data: M L H V C Q A Z (absolute and relative).
+fun oneSvgPath(d: string, var path: OnePath, ox: f64, oy: f64, sx: f64, sy: f64): void {
+    var i = 0
+    var cmd = 77
+    var cx = 0.0
+    var cy = 0.0
+    var startX = 0.0
+    var startY = 0.0
+    val args: array<f64> = []
+    while (i <= d.size) {
+        val b = if (i < d.size) d[i] else 0
+        val letter = (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
+        if (letter || i == d.size) {
+            // Run the previous command with the numbers collected so far.
+            if (args.size > 0 || cmd == 90 || cmd == 122) {
+                val rel = cmd >= 97
+                val c = if (rel) cmd - 32 else cmd
+                var k = 0
+                val n = if (c == 77 || c == 76) 2 else if (c == 72 || c == 86) 1 else if (c == 67) 6 else if (c == 81) 4 else if (c == 65) 7 else 0
+                if (c == 90) {
+                    path.close()
+                    cx = startX
+                    cy = startY
+                }
+                while (n > 0 && k + n <= args.size) {
+                    val bx = if (rel) cx else 0.0
+                    val byv = if (rel) cy else 0.0
+                    if (c == 77 || c == 76) {
+                        val x = bx + args[k]
+                        val y = byv + args[k + 1]
+                        if (c == 77 && k == 0) {
+                            path.moveTo(ox + x * sx, oy + y * sy)
+                            startX = x
+                            startY = y
+                        } else path.lineTo(ox + x * sx, oy + y * sy)
+                        cx = x
+                        cy = y
+                    } else if (c == 72) {
+                        cx = (if (rel) cx else 0.0) + args[k]
+                        path.lineTo(ox + cx * sx, oy + cy * sy)
+                    } else if (c == 86) {
+                        cy = (if (rel) cy else 0.0) + args[k]
+                        path.lineTo(ox + cx * sx, oy + cy * sy)
+                    } else if (c == 67) {
+                        path.cubicTo(ox + (bx + args[k]) * sx, oy + (byv + args[k + 1]) * sy, ox + (bx + args[k + 2]) * sx, oy + (byv + args[k + 3]) * sy, ox + (bx + args[k + 4]) * sx, oy + (byv + args[k + 5]) * sy)
+                        cx = bx + args[k + 4]
+                        cy = byv + args[k + 5]
+                    } else if (c == 81) {
+                        path.quadTo(ox + (bx + args[k]) * sx, oy + (byv + args[k + 1]) * sy, ox + (bx + args[k + 2]) * sx, oy + (byv + args[k + 3]) * sy)
+                        cx = bx + args[k + 2]
+                        cy = byv + args[k + 3]
+                    } else if (c == 65) {
+                        val ex = bx + args[k + 5]
+                        val ey = byv + args[k + 6]
+                        oneSvgArc(path, cx, cy, args[k], args[k + 1], args[k + 3] != 0.0, args[k + 4] != 0.0, ex, ey, ox, oy, sx, sy)
+                        cx = ex
+                        cy = ey
+                    }
+                    k = k + n
+                }
+            }
+            args.clear()
+            if (letter) cmd = b
+            i = i + 1
+        } else if ((b >= 48 && b <= 57) || b == 45 || b == 46) {
+            var j = i
+            if (d[j] == 45) j = j + 1
+            var seenDot = false
+            while (j < d.size && ((d[j] >= 48 && d[j] <= 57) || (d[j] == 46 && !seenDot))) {
+                if (d[j] == 46) seenDot = true
+                j = j + 1
+            }
+            args.append(oneParseFloat(d.slice(i, j)))
+            i = j
+        } else i = i + 1
+    }
+    return
+}
+
+// Endpoint arc (SVG A) flattened to lines; rotation is not supported (icons
+// use axis-aligned arcs).
+fun oneSvgArc(var path: OnePath, x0: f64, y0: f64, rxIn: f64, ryIn: f64, large: bool, sweep: bool, x1: f64, y1: f64, ox: f64, oy: f64, sx: f64, sy: f64): void {
+    var rx = if (rxIn < 0.0) -rxIn else rxIn
+    var ry = if (ryIn < 0.0) -ryIn else ryIn
+    if (rx == 0.0 || ry == 0.0) {
+        path.lineTo(ox + x1 * sx, oy + y1 * sy)
+        return
+    }
+    val dx = (x0 - x1) / 2.0
+    val dy = (y0 - y1) / 2.0
+    var lambda = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry)
+    if (lambda > 1.0) {
+        val s = oneSqrt(lambda)
+        rx = rx * s
+        ry = ry * s
+    }
+    var num = rx * rx * ry * ry - rx * rx * dy * dy - ry * ry * dx * dx
+    if (num < 0.0) num = 0.0
+    var coef = oneSqrt(num / (rx * rx * dy * dy + ry * ry * dx * dx))
+    if (large == sweep) coef = -coef
+    val cxp = coef * rx * dy / ry
+    val cyp = -coef * ry * dx / rx
+    val cx = cxp + (x0 + x1) / 2.0
+    val cy = cyp + (y0 + y1) / 2.0
+    val a0 = oneAtan2((dy - cyp) / ry, (dx - cxp) / rx)
+    var delta = oneAtan2((-dy - cyp) / ry, (-dx - cxp) / rx) - a0
+    if (sweep && delta < 0.0) delta = delta + 6.2831853
+    if (!sweep && delta > 0.0) delta = delta - 6.2831853
+    var i = 1
+    while (i <= 16) {
+        val a = a0 + delta * f64FromInt(i) / 16.0
+        path.lineTo(ox + (cx + rx * oneCos(a)) * sx, oy + (cy + ry * oneSin(a)) * sy)
+        i = i + 1
+    }
+    return
+}
+
+fun oneAtan2(y: f64, x: f64): f64 {
+    if (x == 0.0 && y == 0.0) return 0.0
+    val ax = if (x < 0.0) -x else x
+    val ay = if (y < 0.0) -y else y
+    val a = if (ax > ay) ay / ax else ax / ay
+    val s = a * a
+    var r = ((-0.0464964749 * s + 0.15931422) * s - 0.327622764) * s * a + a
+    if (ay > ax) r = 1.57079637 - r
+    if (x < 0.0) r = 3.14159274 - r
+    if (y < 0.0) -r else r
+}
+
+// --- frames ----------------------------------------------------------------------------
+
+// Icons by name: returns the SVG text (desktop reads files, tests embed them).
+class OneIconSource(val load: (string) -> string)
+
+fun oneRasterFrame(frame: OneFrame, background: string, icons: OneIconSource): OneSurface {
+    var surface = oneSurface(frame.width, frame.height, oneColorValue(background))
+    for (p in frame.paints) {
+        if (p.op == "rect") {
+            var path = onePath()
+            oneRoundRectPath(f64FromInt(p.x), f64FromInt(p.y), f64FromInt(p.w), f64FromInt(p.h), f64FromInt(p.radius), path)
+            oneFill(surface, path, oneColorValue(p.color), oneColorAlpha(p.color))
+        } else if (p.op == "border") {
+            val sides = oneNumbers(p.sides)
+            val color = oneColorValue(p.color)
+            val alpha = oneColorAlpha(if (p.color == "") "#dddddd" else p.color)
+            if (sides.size == 4 && sides[0] == sides[1] && sides[1] == sides[2] && sides[2] == sides[3] && sides[0] > 0.0) {
+                // Outer shape minus inner shape (wound the other way).
+                var path = onePath()
+                oneRoundRectPath(f64FromInt(p.x), f64FromInt(p.y), f64FromInt(p.w), f64FromInt(p.h), f64FromInt(p.radius), path)
+                var inner = onePath()
+                val t = sides[0]
+                oneRoundRectPath(f64FromInt(p.x) + t, f64FromInt(p.y) + t, f64FromInt(p.w) - 2.0 * t, f64FromInt(p.h) - 2.0 * t, f64FromInt(p.radius) - t, inner)
+                inner.close()
+                var start = 0
+                for (end in inner.ends) {
+                    var k = end - 1
+                    path.moveTo(inner.xs[k], inner.ys[k])
+                    k = k - 1
+                    while (k >= start) {
+                        path.lineTo(inner.xs[k], inner.ys[k])
+                        k = k - 1
+                    }
+                    start = end
+                }
+                oneFill(surface, path, color, alpha)
+            } else if (sides.size == 4) {
+                if (sides[0] > 0.0) oneFillRect(surface, p.x, p.y, p.w, f64ToInt(sides[0]), color, alpha)
+                if (sides[2] > 0.0) oneFillRect(surface, p.x, p.y + p.h - f64ToInt(sides[2]), p.w, f64ToInt(sides[2]), color, alpha)
+                if (sides[3] > 0.0) oneFillRect(surface, p.x, p.y, f64ToInt(sides[3]), p.h, color, alpha)
+                if (sides[1] > 0.0) oneFillRect(surface, p.x + p.w - f64ToInt(sides[1]), p.y, f64ToInt(sides[1]), p.h, color, alpha)
+            }
+        } else if (p.op == "text") oneDrawText(surface, p.text, p.x, p.y, p.h, p.size, p.weight, if (p.color == "") "#111111" else p.color)
+        else if (p.op == "icon") {
+            val svg = icons.load(p.text)
+            if (svg != "") oneDrawSvg(surface, svg, p.x, p.y, p.w, p.h, if (p.color == "") "#111111" else p.color)
+        } else if (p.op == "image") {
+            val svg = if (p.text.size > 0 && p.text[0] != 47 && p.text[0] != 46 && !oneStarts(p.text, "http")) icons.load(p.text) else ""
+            if (svg != "") oneDrawSvgColors(surface, svg, p.x, p.y, p.w, p.h)
+        } else if (p.op == "clip") surface.pushClip(p.x, p.y, p.w, p.h)
+        else if (p.op == "unclip") surface.popClip()
+    }
+    surface
+}
+
+fun oneStarts(text: string, prefix: string): bool = text.size >= prefix.size && text.slice(0, prefix.size) == prefix
+
+// SVG images in their own colours (logos): fill and stroke colours from the file.
+fun oneDrawSvgColors(var surface: OneSurface, svg: string, x: int, y: int, w: int, h: int): void {
+    val parts = oneNumbers(oneSvgAttr(svg, "viewBox"))
+    if (parts.size < 4) return
+    val s = if (f64FromInt(w) / parts[2] < f64FromInt(h) / parts[3]) f64FromInt(w) / parts[2] else f64FromInt(h) / parts[3]
+    val ox = f64FromInt(x) + (f64FromInt(w) - parts[2] * s) / 2.0 - parts[0] * s
+    val oy = f64FromInt(y) + (f64FromInt(h) - parts[3] * s) / 2.0 - parts[1] * s
+    var at = 0
+    while (true) {
+        val next = oneFind(svg, "<path", at)
+        if (next < 0) return
+        val end = oneFind(svg, "/>", next)
+        val element = svg.slice(next, if (end < 0) svg.size else end)
+        at = if (end < 0) svg.size else end
+        // Group transforms (rotate) aren't supported; marks use plain paths.
+        var path = onePath()
+        oneSvgPath(oneSvgAttr(element, "d"), path, ox, oy, s, s)
+        val stroke = oneSvgAttr(element, "stroke")
+        val fill = oneSvgAttr(element, "fill")
+        if (stroke != "" && stroke != "none") {
+            val widths = oneNumbers(oneSvgAttr(element, "stroke-width"))
+            oneStroke(surface, path, (if (widths.size > 0) widths[0] else 1.0) * s, oneColorValue(stroke), 255)
+        }
+        if (fill != "" && fill != "none") oneFill(surface, path, oneColorValue(fill), 255)
+    }
+    return
+}
+
+fun oneFillRect(var surface: OneSurface, x: int, y: int, w: int, h: int, color: int, alpha: int): void {
+    var j = y
+    while (j < y + h) {
+        var i = x
+        while (i < x + w) {
+            surface.blend(i, j, color, alpha)
+            i = i + 1
+        }
+        j = j + 1
+    }
+    return
+}
+
+// --- PNG -----------------------------------------------------------------------------------
+
+val oneCrcTable: array<int> = []
+
+fun oneCrc(data: ByteBuffer, from: int, to: int): int {
+    if (oneCrcTable.size == 0) {
+        var n = 0
+        while (n < 256) {
+            var c = n
+            var k = 0
+            while (k < 8) {
+                c = if (c % 2 == 1) 3988292384 ^ (c / 2) else c / 2
+                k = k + 1
+            }
+            oneCrcTable.append(c)
+            n = n + 1
+        }
+    }
+    var crc = 4294967295
+    var i = from
+    while (i < to) {
+        crc = oneCrcTable[(crc ^ data.byteAt(i)) % 256] ^ (crc / 256)
+        i = i + 1
+    }
+    crc ^ 4294967295
+}
+
+fun oneBe32(var out: ByteBuffer, value: int): void {
+    out.appendByteValue((value / 16777216) % 256)
+    out.appendByteValue((value / 65536) % 256)
+    out.appendByteValue((value / 256) % 256)
+    out.appendByteValue(value % 256)
+    return
+}
+
+fun onePngChunk(var out: ByteBuffer, kind: string, var data: ByteBuffer): void {
+    oneBe32(out, data.size())
+    var chunk = byteBuffer()
+    chunk.appendText(kind)
+    chunk.appendBuffer(data)
+    out.appendBuffer(chunk)
+    oneBe32(out, oneCrc(chunk, 0, chunk.size()))
+    return
+}
+
+// An uncompressed (stored deflate) RGB PNG; for snapshots and previews.
+fun oneSurfacePng(surface: OneSurface): string {
+    var out = byteBuffer()
+    for (b in [137, 80, 78, 71, 13, 10, 26, 10]) out.appendByteValue(b)
+    var header = byteBuffer()
+    oneBe32(header, surface.width)
+    oneBe32(header, surface.height)
+    for (b in [8, 2, 0, 0, 0]) header.appendByteValue(b)
+    onePngChunk(out, "IHDR", header)
+    var raw = byteBuffer()
+    var y = 0
+    while (y < surface.height) {
+        raw.appendByteValue(0)
+        var x = 0
+        while (x < surface.width) {
+            val c = surface.pixels[y * surface.width + x]
+            raw.appendByteValue((c / 65536) % 256)
+            raw.appendByteValue((c / 256) % 256)
+            raw.appendByteValue(c % 256)
+            x = x + 1
+        }
+        y = y + 1
+    }
+    var z = byteBuffer()
+    z.appendByteValue(120)
+    z.appendByteValue(1)
+    var a = 1
+    var b = 0
+    var offset = 0
+    val total = raw.size()
+    while (offset < total || offset == 0) {
+        val size = if (total - offset > 65535) 65535 else total - offset
+        z.appendByteValue(if (offset + size >= total) 1 else 0)
+        z.appendByteValue(size % 256)
+        z.appendByteValue(size / 256)
+        z.appendByteValue((65535 - size) % 256)
+        z.appendByteValue((65535 - size) / 256)
+        var i = 0
+        while (i < size) {
+            val v = raw.byteAt(offset + i)
+            z.appendByteValue(v)
+            a = (a + v) % 65521
+            b = (b + a) % 65521
+            i = i + 1
+        }
+        offset = offset + size
+        if (total == 0) offset = 1
+    }
+    oneBe32(z, b * 65536 + a)
+    onePngChunk(out, "IDAT", z)
+    var empty = byteBuffer()
+    onePngChunk(out, "IEND", empty)
+    out.toText()
+}

@@ -1,0 +1,70 @@
+import "abla/test"
+import "abla/fs"
+import "abla/sys/linux"
+import "../../src/one_kit.ab"
+import "../../src/raster/raster.ab"
+import "../../examples/gallery/gallery.ab"
+
+fun pixel(s: OneSurface, x: int, y: int): int = s.pixels[y * s.width + x]
+fun red(c: int): int = (c / 65536) % 256
+
+fun main: int {
+    expectEqual(oneColorValue("#193c30"), 1653808, "hex colours")
+    expectEqual(oneColorValue("#fff"), 16777215, "short hex")
+    expectEqual(oneColorAlpha("#80ffffff"), 128, "alpha hex")
+
+    var s = oneSurface(40, 40, 16777215)
+    var square = onePath()
+    oneRoundRectPath(10.0, 10.0, 20.0, 20.0, 0.0, square)
+    oneFill(s, square, 0, 255)
+    expectEqual(pixel(s, 15, 15), 0, "filled inside")
+    expectEqual(pixel(s, 5, 5), 16777215, "untouched outside")
+    var round = onePath()
+    oneRoundRectPath(0.0, 0.0, 40.0, 40.0, 20.0, round)
+    var s2 = oneSurface(40, 40, 16777215)
+    oneFill(s2, round, 0, 255)
+    expectEqual(pixel(s2, 1, 1), 16777215, "rounded corner stays empty")
+    val edge = red(pixel(s2, 20, 0))
+    expect(edge > 0 && edge < 255, "anti-aliased edge ($edge)")
+    var s3 = oneSurface(40, 40, 16777215)
+    s3.pushClip(0, 0, 20, 40)
+    var full = onePath()
+    oneRoundRectPath(0.0, 0.0, 40.0, 40.0, 0.0, full)
+    oneFill(s3, full, 0, 255)
+    s3.popClip()
+    expectEqual(pixel(s3, 10, 10), 0, "inside the clip")
+    expectEqual(pixel(s3, 30, 10), 16777215, "clipped out")
+
+    // A glyph with a hole: "o" covers its ring, not its centre.
+    var g = oneSurface(60, 60, 16777215)
+    oneDrawText(g, "o", 10, 5, 50, 48, "regular", "#000000")
+    var dark = 0
+    var i = 0
+    while (i < g.pixels.size) {
+        if (red(g.pixels[i]) < 128) dark = dark + 1
+        i = i + 1
+    }
+    expect(dark > 100, "glyph ink ($dark)")
+    val centre = red(pixel(g, 10 + 14, 5 + 30))
+    expect(centre > 200, "the counter of o is a hole ($centre)")
+
+    // Icon strokes from an SVG.
+    var ic = oneSurface(24, 24, 16777215)
+    oneDrawSvg(ic, "<svg viewBox=\"0 0 24 24\"><path d=\"M4,12 L20,12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/></svg>", 0, 0, 24, 24, "#000000")
+    expect(red(pixel(ic, 12, 12)) < 60, "stroke drawn")
+    expect(red(pixel(ic, 12, 4)) > 240, "stroke has its width only")
+
+    // The whole gallery, for visual comparison with the other backends.
+    val t = oneDefaultTheme()
+    var app = Gallery()
+    var ui = oneUi("desktop", t)
+    val frame = onePaintFrame(oneLayout(app.render(ui), t, "desktop", 390, 844, Map()), 390, 844)
+    val icons = OneIconSource({ name -> linuxReadFile("build/gallery/icons/$name.svg", 65536) })
+    val surface = oneRasterFrame(frame, "#ffffff", icons)
+    val png = oneSurfacePng(surface)
+    expect(png.size > 390 * 844 * 3, "PNG holds the image")
+    expectEqual(png.slice(1, 4), "PNG", "PNG signature")
+    Path("build/ui").createDirectories()
+    Path("build/ui/raster-gallery.png").writeText(png)
+    testsPassed()
+}

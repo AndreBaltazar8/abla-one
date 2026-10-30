@@ -1,0 +1,6 @@
+import "abla/wasm/build"
+
+// Builds the gallery's Wasm module: examples/gallery/build/client/gallery.wasm.
+val built = #wasmBuildModule("abla-one-gallery-client", "client.ab", "build/client/gallery.wasm", false, false)
+
+fun main: int = if (built) 0 else 1

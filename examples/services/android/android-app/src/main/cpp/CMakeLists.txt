@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(abla_one_services C)
+
+add_subdirectory(
+    "${CMAKE_CURRENT_LIST_DIR}/../../../../../../../../abla-mobile/runtime/native"
+    "${CMAKE_CURRENT_BINARY_DIR}/abla-mobile-native"
+)
+
+abla_mobile_add_android_application(abla_app
+    APPLICATION_OBJECT_ROOT "${ABLA_APP_OBJECT_ROOT}"
+    ABLA_COMPILER_ROOT "${ABLA_COMPILER_ROOT}"
+)
+

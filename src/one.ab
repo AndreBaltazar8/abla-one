@@ -1,0 +1,8 @@
+// Abla One core: state, styles, themes, nodes and the render context.
+// Import one backend from src/backends/ in a target's entry file.
+import "core/state.ab"
+import "core/style.ab"
+import "core/theme.ab"
+import "core/node.ab"
+import "core/ui.ab"
+import "core/services.ab"

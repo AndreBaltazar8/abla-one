@@ -1,0 +1,480 @@
+import "../one.ab"
+import "inter_metrics.ab"
+
+// one-layout (SPEC §7, M3): lays out a node tree in logical pixels for the
+// backends that draw themselves (web-canvas, desktop, epaper). Containers
+// follow the same flex rules the DOM and Compose backends get from their
+// platforms; text is measured with Inter's advance widths, the font those
+// backends draw with.
+
+// --- text metrics -------------------------------------------------------------
+
+val oneAdvanceMaps: array<Map<int, int>> = []
+
+fun oneWeightIndex(weight: string): int =
+    if (weight == "bold" || weight == "700") 3 else if (weight == "semibold" || weight == "600") 2 else if (weight == "medium" || weight == "500") 1 else 0
+
+fun oneWeightNumber(weight: string): int = 400 + oneWeightIndex(weight) * 100
+
+fun oneAdvances(weight: string): Map<int, int> {
+    if (oneAdvanceMaps.size == 0) {
+        for (table in [oneInterWidths400, oneInterWidths500, oneInterWidths600, oneInterWidths700]) {
+            val map: Map<int, int> = Map()
+            var i = 0
+            while (i < oneInterCodes.size) {
+                map.set(oneInterCodes[i], table[i])
+                i = i + 1
+            }
+            oneAdvanceMaps.append(map)
+        }
+    }
+    oneAdvanceMaps[oneWeightIndex(weight)]
+}
+
+// UTF-8 decoding: the code point at `i` and its byte length.
+fun oneCodeAt(text: string, i: int): int {
+    val b = text[i]
+    if (b < 128) return b
+    if (b >= 240 && i + 3 < text.size) return ((b - 240) * 262144) + ((text[i + 1] - 128) * 4096) + ((text[i + 2] - 128) * 64) + (text[i + 3] - 128)
+    if (b >= 224 && i + 2 < text.size) return ((b - 224) * 4096) + ((text[i + 1] - 128) * 64) + (text[i + 2] - 128)
+    if (b >= 192 && i + 1 < text.size) return ((b - 192) * 64) + (text[i + 1] - 128)
+    b
+}
+
+fun oneCodeLength(b: int): int = if (b >= 240) 4 else if (b >= 224) 3 else if (b >= 192) 2 else 1
+
+// Width of text in 1/1000 px (kept exact while summing).
+fun oneTextMilli(text: string, size: int, weight: string): int {
+    val advances = oneAdvances(weight)
+    var total = 0
+    var i = 0
+    while (i < text.size) {
+        val code = oneCodeAt(text, i)
+        val found = advances.get(code)
+        // Characters outside the table (emoji, CJK) are about one em wide.
+        val advance = if (found != null) found else if (code > 0x2000) 1000 else 560
+        total = total + advance * size
+        i = i + oneCodeLength(text[i])
+    }
+    total
+}
+
+fun oneTextWidth(text: string, size: int, weight: string): int = (oneTextMilli(text, size, weight) + 999) / 1000
+
+// Breaks text into lines no wider than `width`. Words longer than a line are
+// split. With `maxLines`, the last kept line ends with an ellipsis.
+fun oneWrap(text: string, size: int, weight: string, width: int, maxLines: int): array<string> {
+    val lines: array<string> = []
+    var line = ""
+    var word = ""
+    var i = 0
+    while (i <= text.size) {
+        val atEnd = i == text.size
+        val b = if (atEnd) 32 else text[i]
+        if (b == 10 || b == 32 || atEnd) {
+            if (word != "") {
+                val candidate = if (line == "") word else "$line $word"
+                if (oneTextWidth(candidate, size, weight) <= width || line == "") {
+                    if (line == "" && oneTextWidth(word, size, weight) > width) {
+                        // Split a long word by characters.
+                        var piece = ""
+                        var j = 0
+                        while (j < word.size) {
+                            val n = oneCodeLength(word[j])
+                            val next = "$piece${word.slice(j, j + n)}"
+                            if (piece != "" && oneTextWidth(next, size, weight) > width) {
+                                lines.append(piece)
+                                piece = word.slice(j, j + n)
+                            } else piece = next
+                            j = j + n
+                        }
+                        line = piece
+                    } else line = candidate
+                } else {
+                    lines.append(line)
+                    line = word
+                }
+                word = ""
+            }
+            if (b == 10) {
+                lines.append(line)
+                line = ""
+            }
+            i = i + 1
+        } else {
+            val n = oneCodeLength(b)
+            word = "$word${text.slice(i, i + n)}"
+            i = i + n
+        }
+    }
+    if (line != "" || lines.size == 0) lines.append(line)
+    if (maxLines > 0 && lines.size > maxLines) {
+        val kept: array<string> = []
+        var k = 0
+        while (k < maxLines) {
+            kept.append(lines[k])
+            k = k + 1
+        }
+        kept[maxLines - 1] = oneEllipsize(kept[maxLines - 1], size, weight, width)
+        return kept
+    }
+    if (maxLines == 1 && oneTextWidth(lines[0], size, weight) > width) lines[0] = oneEllipsize(lines[0], size, weight, width)
+    lines
+}
+
+fun oneEllipsize(line: string, size: int, weight: string, width: int): string {
+    var kept = line
+    while (kept.size > 0 && oneTextWidth("$kept…", size, weight) > width) {
+        // Drop the last character (UTF-8 aware).
+        var end = kept.size - 1
+        while (end > 0 && kept[end] >= 128 && kept[end] < 192) end = end - 1
+        kept = kept.slice(0, end)
+    }
+    while (kept.size > 0 && kept[kept.size - 1] == 32) kept = kept.slice(0, kept.size - 1)
+    "$kept…"
+}
+
+// --- boxes ---------------------------------------------------------------------
+
+// A laid-out node. x/y are relative to the parent box; w/h include padding.
+class OneBox(
+    val node: Node,
+    val r: Resolved,
+    var x: int,
+    var y: int,
+    var w: int,
+    var h: int,
+    val children: array<OneBox>,
+    val lines: array<string>,
+    var contentH: int,
+    var scrollY: int
+)
+
+class OneLayoutContext(val theme: Theme, val target: string, val scroll: Map<string, int>)
+
+fun onePad(r: Resolved, side: string): int {
+    val own = r.get("padding$side")
+    if (own != "") oneParseInt(own, 0) else r.int("padding", 0)
+}
+
+fun oneClamp(value: int, r: Resolved, axis: string): int {
+    var v = value
+    val minimum = r.int("min$axis", -1)
+    val maximum = r.int("max$axis", -1)
+    if (maximum >= 0 && v > maximum) v = maximum
+    if (minimum >= 0 && v < minimum) v = minimum
+    if (v < 0) 0 else v
+}
+
+fun oneLineHeight(r: Resolved): int {
+    val size = r.int("size", 15)
+    r.int("lineHeight", size * 14 / 10)
+}
+
+fun oneIsColumnKind(kind: string): bool = kind == "column" || kind == "pressable" || kind == "scroll" || kind == "feed" || kind == "link"
+
+// Lays out `root` to fill width × height.
+fun oneLayout(root: Node, theme: Theme, target: string, width: int, height: int, scroll: Map<string, int>): OneBox {
+    oneViewportWidth = width
+    val ctx = OneLayoutContext(theme, target, scroll)
+    oneMeasure(ctx, root, oneResolveNode(ctx, root), width, height, width, height, "r")
+}
+
+fun oneResolveNode(ctx: OneLayoutContext, node: Node): Resolved = oneResolve(ctx.theme, node.kind, node.style, ctx.target)
+
+// Measures and lays out `node`. `fixedW`/`fixedH` (-1 when free) are sizes
+// the parent decided (stretch, fill, grow); availW/availH bound hugging.
+fun oneMeasure(ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, fixedW: int, fixedH: int, path: string): OneBox {
+    val kind = node.kind
+    val pl = onePad(r, "Left")
+    val pr = onePad(r, "Right")
+    val pt = onePad(r, "Top")
+    val pb = onePad(r, "Bottom")
+    val widthProp = r.get("width")
+    val heightProp = r.get("height")
+    var w = if (fixedW >= 0) fixedW else if (widthProp != "" && widthProp != "fill" && widthProp != "hug") oneParseInt(widthProp, 0) else if (widthProp == "fill") availW else -1
+    var h = if (fixedH >= 0) fixedH else if (heightProp != "" && heightProp != "fill" && heightProp != "hug") oneParseInt(heightProp, 0) else -1
+    val children: array<OneBox> = []
+    val lines: array<string> = []
+    var contentH = 0
+
+    if (kind == "text" || kind == "rich") {
+        val size = r.int("size", 15)
+        val weight = r.get("weight")
+        val text = if (kind == "text") node.attr("text") else oneRichPlain(node.attr("runs"))
+        val room = (if (w >= 0) w else availW) - pl - pr
+        for (line in oneWrap(text, size, weight, if (room < 1) 1 else room, r.int("maxLines", 0))) lines.append(line)
+        var widest = 0
+        for (line in lines) {
+            val lw = oneTextWidth(line, size, weight)
+            if (lw > widest) widest = lw
+        }
+        if (w < 0) w = widest + pl + pr
+        if (h < 0) h = lines.size * oneLineHeight(r) + pt + pb
+    } else if (kind == "icon" || kind == "image") {
+        val size = r.int("size", if (kind == "icon") 24 else 40)
+        if (w < 0) w = size
+        if (h < 0) h = size
+    } else if (kind == "input") {
+        val size = r.int("size", 16)
+        if (w < 0) w = availW
+        if (h < 0) {
+            var rows = 1
+            if (node.attr("multiline") == "true") {
+                val value = node.attr("value")
+                rows = oneWrap(if (value == "") node.attr("placeholder") else value, size, r.get("weight"), w - pl - pr, r.int("maxLines", 5)).size
+            }
+            h = oneClamp(rows * oneLineHeight(r) + pt + pb, r, "Height")
+        }
+    } else if (kind == "divider") {
+        if (w < 0) w = availW
+        if (h < 0) h = 1
+    } else if (kind == "spacer") {
+        val amount = oneParseInt(node.attr("size"), 0)
+        if (w < 0) w = amount
+        if (h < 0) h = amount
+    } else if (kind == "row") {
+        val box = oneMeasureRow(ctx, node, r, availW, availH, w, h, pl, pr, pt, pb, path)
+        return box
+    } else if (kind == "stack") {
+        val innerW = (if (w >= 0) w else availW) - pl - pr
+        val innerH = (if (h >= 0) h else availH) - pt - pb
+        var maxW = 0
+        var maxH = 0
+        var index = 0
+        for (child in node.children) {
+            val cr = oneResolveNode(ctx, child)
+            val box = oneMeasure(ctx, child, cr, innerW, innerH, -1, -1, oneChildPath(path, child, index))
+            if (box.w > maxW) maxW = box.w
+            if (box.h > maxH) maxH = box.h
+            children.append(box)
+            index = index + 1
+        }
+        if (w < 0) w = maxW + pl + pr
+        if (h < 0) h = maxH + pt + pb
+        val align = r.get("align")
+        var c = 0
+        while (c < children.size) {
+            children[c].x = pl + (if (align == "center") (w - pl - pr - children[c].w) / 2 else if (align == "end") w - pr - children[c].w else 0)
+            children[c].y = pt + (if (align == "center") (h - pt - pb - children[c].h) / 2 else if (align == "end") h - pb - children[c].h else 0)
+            c = c + 1
+        }
+    } else {
+        // column, pressable, scroll, feed, native and the root: a column.
+        val box = oneMeasureColumn(ctx, node, r, availW, availH, w, h, pl, pr, pt, pb, path)
+        return box
+    }
+    w = oneClamp(w, r, "Width")
+    h = oneClamp(h, r, "Height")
+    OneBox(node, r, 0, 0, w, h, children, lines, contentH, 0)
+}
+
+fun oneChildPath(path: string, child: Node, index: int): string = if (child.key != "") "$path/k:${child.key}" else "$path/$index"
+
+fun oneGrowOf(r: Resolved, axisFill: bool): int {
+    val grow = r.int("grow", 0)
+    if (grow > 0) grow else if (axisFill) 1 else 0
+}
+
+fun oneMeasureColumn(ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, givenW: int, givenH: int, pl: int, pr: int, pt: int, pb: int, path: string): OneBox {
+    val kind = node.kind
+    val scrolls = kind == "scroll" || kind == "feed"
+    var w = givenW
+    var h = givenH
+    if (scrolls && h < 0) h = availH
+    val gap = r.int("gap", 0)
+    val align = r.get("align")
+    val stretch = align == "" || align == "stretch"
+    val innerW = (if (w >= 0) w else availW) - pl - pr
+    val innerAvailH = (if (h >= 0) h else availH) - pt - pb
+    val resolved: array<Resolved> = []
+    for (child in node.children) resolved.append(oneResolveNode(ctx, child))
+    // First pass: everything that doesn't grow.
+    val boxes: array<OneBox> = []
+    var used = 0
+    var totalGrow = 0
+    var index = 0
+    while (index < node.children.size) {
+        val child = node.children[index]
+        val cr = resolved[index]
+        val grow = if (scrolls) 0 else oneGrowOf(cr, cr.get("height") == "fill")
+        val fixedW = if (cr.get("width") == "fill" || (stretch && cr.get("width") == "" && child.kind != "icon" && child.kind != "image" && child.kind != "spacer" && w >= 0)) innerW else -1
+        val box = oneMeasure(ctx, child, cr, innerW, if (scrolls) 1000000 else innerAvailH, fixedW, -1, oneChildPath(path, child, index))
+        if (grow > 0) totalGrow = totalGrow + grow else used = used + box.h
+        boxes.append(box)
+        index = index + 1
+    }
+    val gaps = if (node.children.size > 1) gap * (node.children.size - 1) else 0
+    // Second pass: growers share what's left of a definite height.
+    if (totalGrow > 0 && h >= 0) {
+        var remaining = h - pt - pb - used - gaps
+        if (remaining < 0) remaining = 0
+        index = 0
+        while (index < boxes.size) {
+            val cr = resolved[index]
+            val grow = oneGrowOf(cr, cr.get("height") == "fill")
+            if (grow > 0) {
+                val child = node.children[index]
+                val fixedW = if (boxes[index].w == innerW || cr.get("width") == "fill") innerW else -1
+                boxes[index] = oneMeasure(ctx, child, cr, innerW, remaining * grow / totalGrow, fixedW, remaining * grow / totalGrow, oneChildPath(path, child, index))
+            }
+            index = index + 1
+        }
+    }
+    var contentH = gaps
+    var widest = 0
+    for (box in boxes) {
+        contentH = contentH + box.h
+        if (box.w > widest) widest = box.w
+    }
+    if (w < 0) {
+        w = oneClamp(widest + pl + pr, r, "Width")
+        // A hugging column stretches its children to its own width afterwards.
+        if (stretch) {
+            index = 0
+            while (index < boxes.size) {
+                val child = node.children[index]
+                if (boxes[index].w < w - pl - pr && resolved[index].get("width") == "" && child.kind != "icon" && child.kind != "image" && child.kind != "spacer") {
+                    boxes[index] = oneMeasure(ctx, child, resolved[index], w - pl - pr, innerAvailH, w - pl - pr, boxes[index].h, oneChildPath(path, child, index))
+                }
+                index = index + 1
+            }
+        }
+    }
+    if (h < 0) h = oneClamp(contentH + pt + pb, r, "Height")
+    // Main axis placement.
+    val justify = r.get("justify")
+    val free = h - pt - pb - contentH
+    var cursor = pt
+    var between = 0
+    if (!scrolls && free > 0) {
+        if (justify == "center") cursor = pt + free / 2
+        else if (justify == "end") cursor = pt + free
+        else if (justify == "between" && boxes.size > 1) between = free / (boxes.size - 1)
+    }
+    index = 0
+    while (index < boxes.size) {
+        val self = resolved[index].get("alignSelf")
+        val a = if (self != "") self else align
+        boxes[index].y = cursor
+        boxes[index].x = pl + (if (a == "center") (w - pl - pr - boxes[index].w) / 2 else if (a == "end") w - pr - boxes[index].w else 0)
+        cursor = cursor + boxes[index].h + gap + between
+        index = index + 1
+    }
+    val outer = OneBox(node, r, 0, 0, w, h, boxes, [], contentH + pt + pb, 0)
+    if (scrolls) {
+        val key = path
+        val saved = ctx.scroll.get(key)
+        val maxScroll = if (outer.contentH > h) outer.contentH - h else 0
+        // Feeds open at the bottom (chat) unless scrolled; scroll areas at the top.
+        var offset = if (saved != null) saved else if (kind == "feed" && node.attr("anchor") != "top") maxScroll else 0
+        if (offset > maxScroll) offset = maxScroll
+        if (offset < 0) offset = 0
+        outer.scrollY = offset
+    }
+    outer
+}
+
+fun oneMeasureRow(ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, givenW: int, givenH: int, pl: int, pr: int, pt: int, pb: int, path: string): OneBox {
+    var w = givenW
+    var h = givenH
+    val gap = r.int("gap", 0)
+    val innerW = (if (w >= 0) w else availW) - pl - pr
+    val innerH = (if (h >= 0) h else availH) - pt - pb
+    val resolved: array<Resolved> = []
+    for (child in node.children) resolved.append(oneResolveNode(ctx, child))
+    val boxes: array<OneBox> = []
+    var used = 0
+    var totalGrow = 0
+    var index = 0
+    while (index < node.children.size) {
+        val cr = resolved[index]
+        val grow = oneGrowOf(cr, cr.get("width") == "fill")
+        if (grow > 0) totalGrow = totalGrow + grow
+        index = index + 1
+    }
+    val gaps = if (node.children.size > 1) gap * (node.children.size - 1) else 0
+    index = 0
+    while (index < node.children.size) {
+        val child = node.children[index]
+        val cr = resolved[index]
+        val grow = oneGrowOf(cr, cr.get("width") == "fill")
+        if (grow == 0) {
+            val box = oneMeasure(ctx, child, cr, innerW - used - gaps, innerH, -1, if (cr.get("height") == "fill" && h >= 0) innerH else -1, oneChildPath(path, child, index))
+            used = used + box.w
+            boxes.append(box)
+        } else boxes.append(OneBox(child, cr, 0, 0, 0, 0, [], [], 0, 0))
+        index = index + 1
+    }
+    var remaining = innerW - used - gaps
+    if (remaining < 0) remaining = 0
+    index = 0
+    while (index < node.children.size) {
+        val cr = resolved[index]
+        val grow = oneGrowOf(cr, cr.get("width") == "fill")
+        if (grow > 0) {
+            val child = node.children[index]
+            val share = if (totalGrow > 0) remaining * grow / totalGrow else 0
+            boxes[index] = oneMeasure(ctx, child, cr, share, innerH, share, if (cr.get("height") == "fill" && h >= 0) innerH else -1, oneChildPath(path, child, index))
+        }
+        index = index + 1
+    }
+    var contentW = gaps
+    var tallest = 0
+    for (box in boxes) {
+        contentW = contentW + box.w
+        if (box.h > tallest) tallest = box.h
+    }
+    if (w < 0) w = oneClamp(if (totalGrow > 0) innerW + pl + pr else contentW + pl + pr, r, "Width")
+    if (h < 0) h = oneClamp(tallest + pt + pb, r, "Height")
+    // Stretched children take the row's height.
+    val align = r.get("align")
+    val justify = r.get("justify")
+    val free = w - pl - pr - contentW
+    var cursor = pl
+    var between = 0
+    if (free > 0 && totalGrow == 0) {
+        if (justify == "center") cursor = pl + free / 2
+        else if (justify == "end") cursor = pl + free
+        else if (justify == "between" && boxes.size > 1) between = free / (boxes.size - 1)
+    }
+    index = 0
+    while (index < boxes.size) {
+        val self = resolved[index].get("alignSelf")
+        val a = if (self != "") self else if (align == "") "center" else align
+        if (a == "stretch" && boxes[index].h < h - pt - pb) {
+            boxes[index] = oneMeasure(ctx, node.children[index], resolved[index], boxes[index].w, h - pt - pb, boxes[index].w, h - pt - pb, oneChildPath(path, node.children[index], index))
+        }
+        boxes[index].x = cursor
+        boxes[index].y = pt + (if (a == "center") (h - pt - pb - boxes[index].h) / 2 else if (a == "end") h - pb - boxes[index].h else 0)
+        cursor = cursor + boxes[index].w + gap + between
+        index = index + 1
+    }
+    OneBox(node, r, 0, 0, w, h, boxes, [], h, 0)
+}
+
+// The plain text of rich runs (mentions and emoji as written).
+fun oneRichPlain(runs: string): string {
+    var out = ""
+    var i = 0
+    // Minimal scan of [{"kind":..,"text":"..."}]: collect "text" values.
+    while (i + 8 < runs.size) {
+        if (runs.slice(i, i + 8) == "\"text\":\"") {
+            var j = i + 8
+            var value = ""
+            while (j < runs.size && runs[j] != 34) {
+                if (runs[j] == 92 && j + 1 < runs.size) {
+                    value = "$value${runs.slice(j + 1, j + 2)}"
+                    j = j + 2
+                } else {
+                    value = "$value${runs.slice(j, j + 1)}"
+                    j = j + 1
+                }
+            }
+            out = "$out$value"
+            i = j
+        }
+        i = i + 1
+    }
+    out
+}

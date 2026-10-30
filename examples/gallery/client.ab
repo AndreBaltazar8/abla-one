@@ -1,0 +1,15 @@
+import "gallery.ab"
+import "../../src/backends/web_client.ab"
+
+// The gallery's Wasm entry: the same app, run in the browser. Built by
+// client_build.ab; the page (client_page.ab) is server-rendered and then
+// hydrated by web/host.js with this module instead of a WebSocket.
+
+@export("one_alloc")
+trusted fun alloc(length: u32): u32 = oneClientAlloc(length)
+
+@export("one_message")
+trusted fun message(pointer: u32, length: u32): int =
+    oneClientRespond(pointer, length, { session -> galleryClientApp() }, oneDefaultTheme(), "icons")
+
+fun galleryClientApp(): OneApp = Gallery()

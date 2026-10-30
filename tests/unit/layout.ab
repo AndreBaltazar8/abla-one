@@ -1,0 +1,86 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/layout/paint.ab"
+
+fun main: int {
+    // Text metrics: Inter "n" is 0.584 em? Use relations rather than constants.
+    val w15 = oneTextWidth("Olá", 15, "regular")
+    expect(w15 > 15 && w15 < 40, "text width is plausible ($w15)")
+    expect(oneTextWidth("Olá", 30, "regular") >= 2 * w15 - 1, "width scales with size")
+    expect(oneTextWidth("Olá", 15, "bold") > w15, "bold is wider")
+    expectEqual(oneTextWidth("", 15, "regular"), 0, "empty text")
+    val wrapped = oneWrap("Bom dia equipa a primeira versão está pronta", 15, "regular", 120, 0)
+    expect(wrapped.size >= 3, "wrapping makes several lines")
+    for (line in wrapped) expect(oneTextWidth(line, 15, "regular") <= 120, "each line fits ($line)")
+    val clipped = oneWrap("Bom dia equipa a primeira versão está pronta", 15, "regular", 120, 1)
+    expectEqual(clipped.size, 1, "maxLines 1")
+    expect(clipped[0].size > 3 && clipped[0].slice(clipped[0].size - 3, clipped[0].size) == "…", "ellipsis")
+    expect(oneTextWidth(clipped[0], 15, "regular") <= 120, "ellipsized line fits")
+    expectEqual(oneWrap("a\nb", 15, "regular", 300, 0).size, 2, "explicit newlines")
+    expect(oneWrap("supercalifragilisticexpialidocious", 15, "regular", 60, 0).size >= 3, "long words split")
+
+    val t = oneDefaultTheme()
+    val tree = column(style().padding(16).gap(8), [
+        text("Título", style().text("title")),
+        row(style().gap(12), [icon("bell", "", style().size(24)), text("cresce", style().grow(1)), text("fim", style())]),
+        column(style().height(100).justify("between"), [text("a", style()), text("b", style())]),
+        spacer(10),
+        row(style().height(40).justify("center"), [text("meio", style())])
+    ])
+    val root = oneLayout(tree, t, "web-canvas", 390, 844, Map())
+    expectEqual(root.w, 390, "root fills the viewport width")
+    expectEqual(root.h, 844, "root fills the viewport height")
+    val title = root.children[0]
+    expectEqual(title.x, 16, "padding left")
+    expectEqual(title.y, 16, "padding top")
+    expectEqual(title.w, 358, "stretched to the inner width")
+    expectEqual(title.h, 22, "title preset line height")
+    val bar = root.children[1]
+    expectEqual(bar.y, 16 + 22 + 8, "gap after the first child")
+    expectEqual(bar.children[0].w, 24, "icon size")
+    val grower = bar.children[1]
+    val end = bar.children[2]
+    expectEqual(grower.x, 24 + 12, "after the icon and gap")
+    expectEqual(end.x + end.w, 358, "the last child ends at the row's edge (grow took the rest)")
+    expectEqual(bar.children[0].y, (bar.h - 24) / 2, "row centers vertically")
+    val between = root.children[2]
+    expectEqual(between.h, 100, "fixed height")
+    expectEqual(between.children[1].y + between.children[1].h, 100, "justify between pushes the last child to the end")
+    expectEqual(root.children[3].h, 10, "spacer")
+    val centered = root.children[4].children[0]
+    expectEqual(centered.x, (358 - centered.w) / 2, "justify center")
+
+    // A feed opens at the bottom and reports what is fully visible.
+    var ui = oneUi("web-canvas", t)
+    val items: array<Node> = []
+    var i = 1
+    while (i <= 30) {
+        items.append(text("Mensagem $i", style().height(40)).keyed("m$i").setInt("item", i))
+        i = i + 1
+    }
+    val chat = column(style(), [feed(style().grow(1), items, "bottom", 0, ui.change { v -> }), pressable(ui.press { }, style().height(50), [text("Enviar", style())])])
+    val laidOut = oneLayout(chat, t, "web-canvas", 390, 400, Map())
+    val f = laidOut.children[0]
+    expectEqual(f.h, 350, "feed takes the space above the bar")
+    expectEqual(f.contentH, 1200, "feed content height")
+    expectEqual(f.scrollY, 850, "feed anchored at the bottom")
+    val frame = onePaintFrame(laidOut, 390, 400)
+    var texts = 0
+    for (p in frame.paints) if (p.op == "text") texts = texts + 1
+    expect(texts < 15, "rows scrolled out of view are not painted ($texts)")
+    expectEqual(frame.visible.size, 1, "visible item report")
+    expectEqual(frame.visible[0].item, 30, "the last row is visible")
+    var presses = 0
+    var scrolls = 0
+    for (h in frame.hits) {
+        if (h.kind == "press") presses = presses + 1
+        if (h.kind == "scroll") scrolls = scrolls + 1
+    }
+    expectEqual(presses, 1, "press hit region")
+    expectEqual(scrolls, 1, "scroll hit region")
+    val scrolled: Map<string, int> = Map()
+    scrolled.set("r/0", 0)
+    expectEqual(oneLayout(chat, t, "web-canvas", 390, 400, scrolled).children[0].scrollY, 0, "saved scroll offsets apply")
+    expect(oneFrameJson(frame).size > 100, "frame encodes to JSON")
+    testsPassed()
+}

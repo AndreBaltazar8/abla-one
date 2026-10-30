@@ -1,0 +1,90 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/dsl/one.ab"
+import "../../src/backends/test.ab"
+
+class Person(val name: string, val seed: string)
+
+fun Greeting(var ui: Ui, name: string, emphasis: bool): Node = $one
+    <Text text="title" weight={if (emphasis) "bold" else "regular"}>Olá, {name}!</Text>
+
+class Demo(
+    var count: int by State(0),
+    var query: string by State(""),
+    var log: string by State(""),
+    var open: bool by State(false)
+) : OneApp {
+    fun people(): array<Person> = [Person("Sofia Costa", "u1"), Person("André Silva", "u2")]
+    fun note(entry: string): void {
+        log = "$log$entry;"
+        return
+    }
+    fun render(var ui: Ui): Node = $one
+        <Column padding=16 gap=8 background=@surface android:radius=14 web:hover:background=@surface-alt key="root">
+          <Pressable onPress={ count += 1; note("press") } paddingX=16 height=48 pressed:background="#000000" label="Add">
+            <Text text="label" color=@ink maxLines=1>Count {count} of {people().size}</Text>
+          </Pressable>
+          <Input value={query} placeholder="Pesquisar" onChange={ query = value } keyboard="email" grow=1 />
+          <Button variant="secondary" onPress={ open = !open }>Toggle</Button>
+          <If cond={open}>
+            <Text>Aberto</Text>
+          </If>
+          <Else>
+            <Text>Fechado</Text>
+          </Else>
+          <For each={people()} as="person">
+            <Row gap=12 key={person.seed}>
+              <Avatar name={person.name} seed={person.seed} diameter=32 />
+              <Text>{person.name}</Text>
+            </Row>
+          </For>
+          <Greeting name="Sofia" emphasis={count > 0} />
+          {divider(style())}
+        </Column>
+    fun receive(kind: string, value: string): void { return }
+}
+
+fun main: int {
+    val t = oneDefaultTheme()
+    var app = Demo()
+    var ui = oneUi("android", t)
+    val root = app.render(ui)
+    expectEqual(root.kind, "column", "root element")
+    expectEqual(root.key, "root", "key attribute")
+    val r = oneResolve(t, "column", root.style, "android")
+    expectEqual(r.get("padding"), "16", "numeric style attribute")
+    expectEqual(r.get("background"), "#ffffff", "token value")
+    expectEqual(r.get("radius"), "14", "target-scoped attribute")
+    expect(!r.has("hover:background"), "web-only state not on android")
+    expectEqual(oneResolve(t, "column", root.style, "web-document").get("hover:background"), "#f3f4f5", "target + state scope")
+    val press = root.children[0]
+    expectEqual(press.kind, "pressable", "pressable")
+    expectEqual(press.attr("label"), "Add", "label is a node attribute")
+    expectEqual(oneResolve(t, "pressable", press.style, "android").get("paddingLeft"), "16", "shorthand expands")
+    expectEqual(oneResolve(t, "pressable", press.style, "android").get("pressed:background"), "#000000", "state scope")
+    expectEqual(press.children[0].attr("text"), "Count 0 of 2", "text interpolation")
+    val field = root.children[1]
+    expectEqual(field.attr("placeholder"), "Pesquisar", "input placeholder")
+    expectEqual(field.attr("keyboard"), "email", "input attribute")
+    expectEqual(root.children[3].attr("text"), "Fechado", "Else branch")
+    expectEqual(root.children[4].kind, "row", "For splices rows into the parent")
+    expectEqual(root.children[4].key, "u1", "For children keep keys")
+    expectEqual(root.children[5].children[1].attr("text"), "André Silva", "loop variable")
+    expectEqual(root.children[6].attr("text"), "Olá, Sofia!", "user component")
+    expectEqual(root.children[7].kind, "divider", "{expression} child")
+    expectEqual(root.children.size, 8, "fragments flattened")
+
+    expect(oneDispatch(app, "android", t, oneParseInt(press.attr("onPress"), 0), ""), "press handler runs")
+    expectEqual(app.count, 1, "handler statements run")
+    expectEqual(app.log, "press;", "handlers call methods")
+    expect(oneDispatch(app, "android", t, oneParseInt(field.attr("onChange"), 0), "ana"), "change handler")
+    expectEqual(app.query, "ana", "onChange receives value")
+    var ui2 = oneUi("android", t)
+    val again = app.render(ui2)
+    expect(oneDispatch(app, "android", t, onePressFor(again, "Toggle"), ""), "button handler")
+    var ui3 = oneUi("android", t)
+    val third = app.render(ui3)
+    expectEqual(third.children[3].attr("text"), "Aberto", "If branch after state change")
+    expectEqual(oneResolve(t, "text", third.children[6].style, "android").get("weight"), "bold", "expression attribute")
+    testsPassed()
+}

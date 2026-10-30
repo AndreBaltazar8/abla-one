@@ -1,0 +1,11 @@
+import "abla/build"
+import "services.ab"
+import "echo_url.ab"
+import "../../src/backends/android.ab"
+
+// tests/ui/android_services.py writes echo_url.ab with the echo server address.
+fun servicesApplication(): int {
+    var app = ServicesDemo(OneAndroidServices(), echoUrl())
+    oneAndroidRun(app, oneDefaultTheme(), "#FFFFFF")
+}
+val exported = #exportFunction("servicesApplication", "abla_mobile_run")

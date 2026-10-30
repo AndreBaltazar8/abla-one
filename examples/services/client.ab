@@ -1,0 +1,13 @@
+import "services.ab"
+import "../../src/backends/web_client.ab"
+
+// The services demo in Wasm client mode: requests are the page's fetches to
+// its own origin (tests/ui/echo.py serves both), storage is localStorage.
+@export("one_alloc")
+trusted fun alloc(length: u32): u32 = oneClientAlloc(length)
+
+@export("one_message")
+trusted fun message(pointer: u32, length: u32): int =
+    oneClientRespond(pointer, length, { session -> servicesClientApp(session) }, oneDefaultTheme(), "icons")
+
+fun servicesClientApp(session: string): OneApp = ServicesDemo(oneLiveServices(session), ".")

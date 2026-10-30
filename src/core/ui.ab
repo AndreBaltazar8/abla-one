@@ -1,0 +1,189 @@
+import "theme.ab"
+import "node.ab"
+
+val oneChangeBase = 1000000
+
+// The render context. Event ids are handed out in render order. Handlers are
+// never stored: to deliver an event the run loop renders again in dispatch
+// mode, and the handler whose id matches runs right there. That lets handlers
+// be ordinary FnMut closures that call any method of the app, which the
+// language doesn't allow to be kept in arrays. Ids match the tree on screen
+// because the run loop only dispatches events from the current revision.
+class Ui(
+    val target: string,
+    val theme: Theme,
+    // The viewport width in logical pixels, 0 when unknown (render for a phone).
+    val width: int,
+    val dispatchId: int,
+    val dispatchValue: string,
+    var presses: int,
+    var changes: int,
+    var handled: bool
+) {
+    fun press(var handler: FnMut() -> void): int {
+        presses = presses + 1
+        if (!handled && presses == dispatchId) {
+            handled = true
+            handler()
+        }
+        presses
+    }
+    fun change(var handler: FnMut(string) -> void): int {
+        changes = changes + 1
+        val id = oneChangeBase + changes
+        if (!handled && id == dispatchId) {
+            handled = true
+            handler(dispatchValue)
+        }
+        id
+    }
+    // Fine-grained invalidation: `build` runs only when `deps` (a summary of
+    // what the subtree reads, such as "${message.id}|${message.edited}")
+    // differs from the last render, or when the event being delivered
+    // belongs to the subtree. Otherwise the previous subtree is reused and its
+    // event ids are skipped over, so ids stay those of a full render. On the
+    // web, a reused subtree also reuses its HTML. `key` names the subtree
+    // among the app's memos (a message id, "header").
+    fun memo(key: string, deps: string, var build: FnMut() -> Node): Node {
+        val found = oneMemoFind(key)
+        if (found >= 0) {
+            val entry = oneMemoEntries[found]
+            val same = entry.deps == deps && entry.pressStart == presses && entry.changeStart == changes && entry.target == target && entry.width == width
+            val inside = (dispatchId > presses && dispatchId <= presses + entry.pressCount) ||
+                (dispatchId > oneChangeBase + changes && dispatchId <= oneChangeBase + changes + entry.changeCount)
+            if (same && !(inside && !handled)) {
+                presses = presses + entry.pressCount
+                changes = changes + entry.changeCount
+                return entry.node
+            }
+        }
+        val pressStart = presses
+        val changeStart = changes
+        val built = build().set("memo", "$key|${oneMemoBuilds}")
+        oneMemoBuilds = oneMemoBuilds + 1
+        // Only what a plain render produced is kept: a dispatch render runs a
+        // handler part-way through and may mix old and new state.
+        if (dispatchId == 0) oneMemoStore(key, OneMemo(deps, target, width, pressStart, changeStart, presses - pressStart, changes - changeStart, built))
+        built
+    }
+    fun named(name: string): Style = theme.named(name)
+    // A component's own style for one of its parts, which the app's theme can
+    // extend or override by defining "<component>.<part>".
+    fun part(component: string, part: string, defaults: Style): Style =
+        defaults.set("part", if (part == "") component else "$component.$part")
+}
+
+fun oneUi(target: string, theme: Theme): Ui = Ui(target, theme, 0, 0, "", 0, 0, false)
+fun oneUiSized(target: string, theme: Theme, width: int): Ui {
+    oneViewportWidth = width
+    Ui(target, theme, width, 0, "", 0, 0, false)
+}
+
+// Memos of the current scope (`oneMemoScope`: a live session's id, or "" in
+// apps with one tree). Each entry remembers the event ids its subtree took.
+class OneMemo(val deps: string, val target: string, val width: int, val pressStart: int, val changeStart: int, val pressCount: int, val changeCount: int, val node: Node)
+
+var oneMemoScope = ""
+var oneMemoBuilds = 0
+val oneMemoKeys: array<string> = []
+val oneMemoEntries: array<OneMemo> = []
+
+fun oneMemoFind(key: string): int {
+    val full = "$oneMemoScope::$key"
+    var i = 0
+    while (i < oneMemoKeys.size) {
+        if (oneMemoKeys[i] == full) return i
+        i = i + 1
+    }
+    -1
+}
+
+fun oneMemoStore(key: string, entry: OneMemo): void {
+    val found = oneMemoFind(key)
+    if (found >= 0) {
+        oneMemoEntries[found] = entry
+        return
+    }
+    // Bounded: the oldest entries go first.
+    if (oneMemoKeys.size >= 4096) oneMemoForget("")
+    oneMemoKeys.append("$oneMemoScope::$key")
+    oneMemoEntries.append(entry)
+    return
+}
+
+// Drops a scope's memos (an ended session); "" drops the oldest half.
+fun oneMemoForget(scope: string): void {
+    val keys: array<string> = []
+    val entries: array<OneMemo> = []
+    var i = 0
+    while (i < oneMemoKeys.size) {
+        val keep = if (scope == "") i >= oneMemoKeys.size / 2 else !oneMemoKeys[i].startsWith("$scope::")
+        if (keep) {
+            keys.append(oneMemoKeys[i])
+            entries.append(oneMemoEntries[i])
+        }
+        i = i + 1
+    }
+    oneMemoKeys.clear()
+    oneMemoEntries.clear()
+    for (k in keys) oneMemoKeys.append(k)
+    for (e in entries) oneMemoEntries.append(e)
+    return
+}
+
+// What every Abla One application implements. `receive` gets platform
+// completions (HTTP responses, opened links, visibility, picked files).
+interface OneApp {
+    fun render(var ui: Ui): Node
+    fun receive(kind: string, value: string): void
+}
+
+// Delivers one event by rendering in dispatch mode. Returns whether a handler
+// with that id was found. The returned tree is discarded by callers.
+fun oneDispatch(var app: OneApp, target: string, theme: Theme, event: int, value: string, width: int = 0): bool {
+    if (event <= 0) return false
+    var ui = Ui(target, theme, width, event, value, 0, 0, false)
+    app.render(ui)
+    ui.handled
+}
+
+// Where each event id of a rendered tree lives: "<key path>#<event>", with a
+// node's key at each level, or for unkeyed nodes their kind and position
+// among siblings of that kind (so inserting a button doesn't move an input). An event that arrives from a slightly
+// older tree is translated to the id at the same place in the current tree,
+// so a tap that races a re-render (a poll, a completion) is not lost. Keyed
+// list rows keep their place when other rows come and go.
+class OneEventMap(val byId: Map<int, string>, val byPlace: Map<string, int>) {
+    fun translate(older: OneEventMap, id: int): int {
+        val place = older.byId.get(id)
+        if (place == null) return 0
+        val current = byPlace.get(place)
+        if (current != null) current else 0
+    }
+}
+
+fun oneEventMap(root: Node): OneEventMap {
+    var map = OneEventMap(Map(), Map())
+    oneCollectEvents(root, "r", map)
+    map
+}
+
+fun oneCollectEvents(node: Node, place: string, var map: OneEventMap): void {
+    for (item in node.attrs) {
+        if (item.name == "onPress" || item.name == "onChange" || item.name == "onSubmit" || item.name == "onVisible") {
+            val id = oneParseInt(item.value, 0)
+            if (id > 0) {
+                map.byId.set(id, "$place#${item.name}")
+                map.byPlace.set("$place#${item.name}", id)
+            }
+        }
+    }
+    val seen: Map<string, int> = Map()
+    for (child in node.children) {
+        val count = seen.get(child.kind)
+        val n = if (count != null) count else 0
+        seen.set(child.kind, n + 1)
+        oneCollectEvents(child, "$place/${if (child.key != "") "k:${child.key}" else "${child.kind}$n"}", map)
+    }
+    return
+}

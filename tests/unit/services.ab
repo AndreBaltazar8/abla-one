@@ -1,0 +1,64 @@
+import "abla/test"
+import "abla/json"
+import "../../src/one.ab"
+
+fun main: int {
+    val r = oneRequest("PUT", "https://api.example/items/1").header("Authorization", "Bearer x").header("authorization", "Bearer y").json(jsonObject(["a"], [jsonInteger(1)])).timeout(5000)
+    expectEqual(r.headers.size, 2, "same header name replaces (case-insensitive), plus content type")
+    expectEqual(r.headers[0].value, "Bearer y", "latest header value")
+    expectEqual(r.headers[1].value, "application/json; charset=utf-8", "json content type")
+    expectEqual(r.body, "{\"a\":1}", "json body")
+    val env = jsonParse(r.envelope()).value
+    expectEqual(env.getString("method"), "PUT", "envelope method")
+    expectEqual(env.get("headers").getString("authorization"), "Bearer y", "envelope headers")
+    expectEqual(env.get("timeoutMs").asInt(), 5000, "envelope timeout")
+    expectEqual(env.getString("body"), "{\"a\":1}", "envelope text body")
+    val b = oneRequest("POST", "https://x/upload").bytes("AAEC", "image/png").binary()
+    val benv = jsonParse(b.envelope()).value
+    expectEqual(benv.getString("bodyBase64"), "AAEC", "byte body is base64")
+    expect(!benv.has("body"), "byte body replaces text body")
+    expectEqual(jsonStringify(benv.get("binary")), "true", "binary response requested")
+    expectEqual(r.method, "PUT", "builders return copies")
+
+    val response = oneResponse("{\"requestId\":3,\"status\":201,\"body\":\"{\\\"id\\\":9}\",\"error\":\"\",\"headers\":{\"content-type\":\"application/json\"}}")
+    expect(response.ok(), "2xx is ok")
+    expectEqual(response.header("Content-Type"), "application/json", "header lookup is case-insensitive")
+    expectEqual(response.json().get("id").asInt(), 9, "json body")
+    expect(!oneResponse(oneResponsePayload(1, 0, "", "offline")).ok(), "transport error")
+    expect(!oneResponse("nope").valid, "invalid payload")
+
+    expectEqual(oneStored(oneResponse(oneResponsePayload(1, 200, "{\"theme\":\"dark\"}", ""))).getString("theme"), "dark", "stored object")
+    expectEqual(oneStored(oneResponse(oneResponsePayload(1, 200, "42", ""))).asInt(), 42, "stored number")
+    expectEqual(jsonStringify(oneStored(oneResponse(oneResponsePayload(1, 200, "true", "")))), "true", "stored boolean")
+    expectEqual(oneStored(oneResponse(oneResponsePayload(1, 200, "pt-PT", ""))).asString(), "pt-PT", "legacy plain string")
+    expect(oneStored(oneResponse(oneResponsePayload(1, 404, "", ""))).isNull(), "missing key")
+
+    val photo = OneFile("file-1", "foto.jpg", 2400000, "image/jpeg")
+    val upload = oneRequest("POST", "https://x/files").file(photo)
+    expectEqual(jsonParse(upload.envelope()).value.getString("bodyFile"), "file-1", "file body by handle")
+    val form = oneRequest("POST", "https://x/form").multipart([oneTextPart("title", "Fatura"), oneFilePart("document", photo), oneBytesPart("thumb", "AAEC", "t.png", "image/png")])
+    val parts = jsonParse(form.envelope()).value.get("multipart")
+    expectEqual(parts.values.size, 3, "multipart parts")
+    expectEqual(parts.values[0].getString("value"), "Fatura", "text part")
+    expectEqual(parts.values[1].getString("file"), "file-1", "file part")
+    expectEqual(parts.values[1].getString("filename"), "foto.jpg", "file part keeps its name")
+    expectEqual(parts.values[2].getString("base64"), "AAEC", "bytes part")
+    expectEqual(jsonStringify(jsonParse(oneRequest("GET", "https://x/big.zip").saveToFile().envelope()).value.get("saveToFile")), "true", "save to file")
+    val saved = oneResponse("{\"requestId\":4,\"status\":200,\"body\":\"\",\"error\":\"\",\"file\":{\"handle\":\"file-9\",\"name\":\"big.zip\",\"size\":52428800,\"mime\":\"application/zip\"}}")
+    expect(saved.hasFile(), "saved response carries a file")
+    expectEqual(saved.file.size, 52428800, "file size")
+    val picked = oneResponse(oneResponsePayload(5, 200, "[{\"handle\":\"file-2\",\"name\":\"a.pdf\",\"size\":10,\"mime\":\"application/pdf\"}]", ""))
+    expectEqual(picked.files().size, 1, "picked files")
+    expectEqual(picked.files()[0].mime, "application/pdf", "picked file type")
+
+    var s = oneRecordedServices()
+    expectEqual(s.send(r), 1, "first id")
+    expectEqual(s.lastRequest().url, "https://api.example/items/1", "requests are kept")
+    expectEqual(s.secureWrite("prefs", jsonObject([], [])), 2, "ids increase")
+    expectEqual(s.timer(4000), 3, "timer")
+    expectEqual(s.last(), "3 TIMER 4000", "calls are recorded")
+    expectEqual(oneLowerAscii("Content-Type"), "content-type", "ascii lowercase")
+    var none = OneNoServices()
+    expectEqual(none.send(r), 0, "no services")
+    testsPassed()
+}

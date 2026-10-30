@@ -1,0 +1,3 @@
+name = "abla-one"
+version = "0.0.1"
+entry = "src/one.ab"

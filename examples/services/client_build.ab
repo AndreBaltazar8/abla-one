@@ -1,0 +1,6 @@
+import "abla/wasm/build"
+
+// Builds the services demo's Wasm module: build/client/services.wasm.
+val built = #wasmBuildModule("abla-one-services-client", "client.ab", "build/client/services.wasm", false, false)
+
+fun main: int = if (built) 0 else 1

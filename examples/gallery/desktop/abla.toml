@@ -1,0 +1,4 @@
+name = "abla-one-gallery-desktop"
+version = "0.0.1"
+entry = "main.ab"
+nativeLibraries = ["vulkan", "X11", "EGL", "GL"]

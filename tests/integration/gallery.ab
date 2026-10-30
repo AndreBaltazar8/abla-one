@@ -1,0 +1,52 @@
+import "abla/test"
+import "../../examples/gallery/gallery.ab"
+import "../../src/backends/test.ab"
+
+// Drives the shared gallery app the way a backend would: render, find a control,
+// dispatch its event, render again.
+class Session(var app: Gallery, val theme: Theme) {
+    fun render(): Node {
+        var ui = oneUi("test", theme)
+        app.render(ui)
+    }
+    fun press(needle: string): bool {
+        val id = onePressFor(render(), needle)
+        if (id == 0) return false
+        oneDispatch(app, "test", theme, id, "")
+    }
+    fun type(placeholder: string, value: string): bool {
+        val field = oneFind(render(), placeholder)
+        oneDispatch(app, "test", theme, oneParseInt(field.attr("onChange"), 0), value)
+    }
+    fun shows(value: string): bool = oneFind(render(), value).kind != "none"
+}
+
+fun main: int {
+    val t = oneDefaultTheme()
+    var s = Session(Gallery(), t)
+    expect(s.shows("Adicionar (0)"), "starts at zero")
+    expect(s.press("Adicionar (0)"), "press add")
+    expect(s.press("Adicionar (1)"), "press add again")
+    expect(s.shows("Adicionar (2)"), "count rendered")
+    expect(s.press("Secundário"), "press secondary")
+    expect(s.shows("Adicionar (1)"), "secondary decrements")
+    expect(s.press("Eliminar"), "press danger")
+    expect(s.shows("Adicionar (0)"), "danger resets")
+
+    expect(s.press("Diretas"), "press chip")
+    expectEqual(s.app.filter, 2, "chip sets filter")
+
+    expect(s.press("Pessoas"), "switch tab")
+    expect(s.shows("Sofia Costa") && s.shows("Tiago Mendes"), "people listed")
+    expect(s.press("Componentes"), "back to components")
+    expect(s.type("Pesquisar pessoas", "ma"), "type a query")
+    expect(s.press("Pessoas"), "people again")
+    expect(s.shows("Maya Townsend") && !s.shows("Sofia Costa"), "query filters people")
+    expect(s.press("Maya Townsend"), "open a person")
+    expectEqual(s.app.opened, "Maya Townsend", "row press captured the right person")
+    expect(s.type("Pesquisar pessoas", "zzz") == false, "search isn't on the people tab")
+    s.app.query = "zzz"
+    expect(s.shows("Ninguém encontrado"), "empty state")
+    expect(s.press("Avisos"), "icon button by label")
+    testsPassed()
+}

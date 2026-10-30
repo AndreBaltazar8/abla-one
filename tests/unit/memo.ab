@@ -1,0 +1,93 @@
+import "abla/test"
+import "../../src/one.ab"
+import "../../src/backends/web_document.ab"
+
+// Fine-grained invalidation with `ui.memo`: unchanged subtrees aren't built
+// again (nor written again as HTML), event ids stay those of a full render,
+// and an event inside a reused subtree still reaches its handler.
+
+class Row(val id: string, var title: string, var likes: int)
+
+class Board(val rows: array<Row>, var builds: int, var header: int, var liked: string) : OneApp {
+    fun render(var ui: Ui): Node {
+        val out: array<Node> = [pressable(ui.press { header = header + 1 }, style(), [text("Header $header", style())])]
+        var i = 0
+        while (i < rows.size) {
+            val index = i
+            out.append(ui.memo("row:${rows[i].id}", "${rows[i].title}|${rows[i].likes}") {
+                builds = builds + 1
+                row(style(), [
+                    text(rows[index].title, style()),
+                    pressable(ui.press {
+                        rows[index].likes = rows[index].likes + 1
+                        liked = rows[index].id
+                    }, style(), [text("${rows[index].likes}", style())])
+                ])
+            })
+            i = i + 1
+        }
+        column(style(), out)
+    }
+    fun receive(kind: string, value: string): void {
+        return
+    }
+}
+
+fun has(text: string, needle: string): bool = text.contains(needle)
+
+fun main: int {
+    val t = theme()
+    var app = Board([Row("a", "Alpha", 0), Row("b", "Beta", 0), Row("c", "Gamma", 0)], 0, 0, "")
+    oneMemoScope = "memo-test"
+    var css = oneCss()
+    var ui = oneUi("web-document", t)
+    val first = app.render(ui)
+    expectEqual(app.builds, 3, "first render builds every row")
+    val firstHtml = oneWebRenderInto(first, t, css, "/i")
+    val firstMap = oneEventMap(first)
+
+    var ui2 = oneUi("web-document", t)
+    val second = app.render(ui2)
+    expectEqual(app.builds, 3, "an unchanged render builds no row")
+    expectEqual(oneWebRenderInto(second, t, css, "/i"), firstHtml, "and writes the same HTML from the cache")
+    expectEqual(ui2.presses, ui.presses, "skipped rows still count their event ids")
+
+    // Press "like" in row b: the id is the same as in a full render.
+    val likeB = firstMap.byPlace.get("r/k:row:b/pressable0#onPress")
+    val fallback = oneParseInt(second.children[2].children[1].attr("onPress"), 0)
+    val id = if (likeB != null) likeB else fallback
+    expect(oneDispatch(app, "web-document", t, id, ""), "the event inside a reused row is delivered")
+    expectEqual(app.liked, "b", "to the right row")
+    expectEqual(app.rows[1].likes, 1, "which changed")
+
+    var ui3 = oneUi("web-document", t)
+    val third = app.render(ui3)
+    expect(app.builds <= 5, "only the changed row is rebuilt (builds: ${app.builds})")
+    val thirdHtml = oneWebRenderInto(third, t, css, "/i")
+    expect(has(thirdHtml, ">1<") && has(thirdHtml, ">Alpha<") && has(thirdHtml, ">Gamma<"), "the page shows the change and keeps the others")
+
+    // The header's press id comes before the rows; it still works.
+    expect(oneDispatch(app, "web-document", t, oneParseInt(third.children[0].attr("onPress"), 0), ""), "press before the memos")
+    expectEqual(app.header, 1, "header handler ran")
+
+    // A changed title rebuilds that row.
+    app.rows[2].title = "Delta"
+    val before = app.builds
+    var ui4 = oneUi("web-document", t)
+    val fourth = app.render(ui4)
+    expectEqual(app.builds, before + 1, "a changed dependency rebuilds exactly that row")
+    expect(has(oneWebRenderInto(fourth, t, css, "/i"), ">Delta<"), "with its new content")
+
+    // Scopes are separate (live sessions), and can be dropped.
+    oneMemoScope = "other"
+    val other = app.builds
+    var ui5 = oneUi("web-document", t)
+    app.render(ui5)
+    expectEqual(app.builds, other + 3, "another scope starts empty")
+    oneMemoForget("other")
+    oneMemoScope = "other"
+    var ui6 = oneUi("web-document", t)
+    app.render(ui6)
+    expectEqual(app.builds, other + 6, "a forgotten scope builds again")
+    testsPassed()
+}

@@ -1,0 +1,102 @@
+import "abla/json"
+import "../../../abla-mobile/src/mobile.ab"
+import "../../../abla-mobile/src/platform.ab"
+import "../one.ab"
+import "android_tree.ab"
+
+// The `android` target: the run loop on top of abla-mobile. Encoding lives in
+// android_tree.ab so it can be tested off-device.
+
+// Platform completions arrive on one channel. Results of requests carry a
+// `requestId` and are delivered as kind "result"; other notifications carry
+// their own `kind` ("visibility", "openUrl", ...).
+fun oneAndroidPlatformKind(value: string): string {
+    val parsed = jsonParse(value)
+    if (!parsed.succeeded || !parsed.value.isObject()) return "unknown"
+    if (parsed.value.get("requestId").intAvailable()) return "result"
+    val kind = parsed.value.getString("kind")
+    if (kind != "") kind else "unknown"
+}
+
+// Request completions (HTTP, storage, timers, pickers) arrive as event -2;
+// system notifications (visibility, opened links) as 2147483647.
+val oneCompletionEvent = -2
+val onePlatformEvent = 2147483647
+
+// Runs an app until the process ends: render, publish, wait, dispatch. UI
+// events are delivered by a dispatch render (see Ui). An event from one of the
+// last few trees is translated to the current tree's id at the same place
+// (oneEventMap); older ones are dropped. Platform completions always reach
+// `receive`. `background` paints behind the system bars.
+fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
+    mobileConfigureRuntime(268435456)
+    var revision = 0
+    var running = true
+    val recent: array<OneEventMap> = []
+    while (running) {
+        var ui = oneUi("android", theme)
+        val root = app.render(ui)
+        revision = revision + 1
+        mobilePublishTree(mobileEncodeStyledTree(revision, "", false, oneAndroidNode(root, theme, "root"), false, background))
+        recent.append(oneEventMap(root))
+        if (recent.size > 8) {
+            val kept: array<OneEventMap> = []
+            var i = recent.size - 8
+            while (i < recent.size) {
+                kept.append(recent[i])
+                i = i + 1
+            }
+            recent.clear()
+            for (item in kept) recent.append(item)
+        }
+        mobileRuntimeSafepoint()
+        val event = mobileWaitEvent()
+        val eventRevision = mobileEventRevision()
+        val payload = mobileEventPayload()
+        if (event == 0) running = false
+        else if (event == oneCompletionEvent) app.receive("result", payload)
+        else if (event == onePlatformEvent) app.receive(oneAndroidPlatformKind(payload), payload)
+        else if (event > 0) {
+            val age = revision - eventRevision
+            if (age == 0) oneDispatch(app, "android", theme, event, payload)
+            else if (age > 0 && age < recent.size) {
+                val current = recent[recent.size - 1]
+                val translated = current.translate(recent[recent.size - 1 - age], event)
+                if (translated > 0) oneDispatch(app, "android", theme, translated, payload)
+            }
+        }
+    }
+    0
+}
+
+// Services on the abla-mobile host. Completions arrive on the platform
+// channel. Requests use the host's general SEND request: in-memory bodies up
+// to 8 MB, files and multipart parts streamed from the platform at any size,
+// responses up to 384 KB in memory or any size with saveToFile. Secure values
+// are stored as JSON text in the Android Keystore-backed store.
+class OneAndroidServices() : OneServices {
+    fun send(request: OneRequest): int = mobileHttpRequest("SEND", request.url, request.envelope())
+    fun secureRead(key: string): int = mobileSecureGet(key)
+    fun secureWrite(key: string, value: Json): int = mobileSecureSet(key, jsonStringify(value))
+    fun secureRemove(key: string): int = mobileSecureDelete(key)
+    fun timer(milliseconds: int): int = mobileDelay(milliseconds)
+    fun pickFiles(mime: array<string>, multiple: bool): int {
+        val types: array<Json> = []
+        for (item in mime) types.append(jsonString(item))
+        mobileHttpRequest("PICKFILE", jsonStringify(jsonObject(["mime", "multiple"], [jsonArray(types), jsonBoolean(multiple)])), "")
+    }
+    fun readFile(file: OneFile, offset: int, length: int): int =
+        mobileHttpRequest("FILEREAD", file.handle, jsonStringify(jsonObject(["offset", "length"], [jsonInteger(offset), jsonInteger(length)])))
+    fun deleteFile(file: OneFile): int = mobileHttpRequest("FILEDEL", file.handle, "")
+    fun pickImage(kind: string): int = if (kind == "emoji") mobileHttpRequest("PICKEMJ", "local", "") else mobilePickProfileImage()
+    fun clearImageCache(): void {
+        mobileHttpRequest("IMGCLEAR", "local", "")
+        return
+    }
+    fun effect(kind: string, payload: string): bool =
+        if (kind == "toast") mobileToast(payload)
+        else if (kind == "copy") mobileCopyText(payload)
+        else if (kind == "openUrl") mobileOpenUrl(payload)
+        else if (kind == "haptic") mobileHaptic()
+        else false
+}

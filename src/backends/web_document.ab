@@ -1,0 +1,441 @@
+import "abla/json"
+import "abla/text"
+import "../one.ab"
+
+// The `web-document` target, server-side rendering (M1). Each resolved
+// declaration becomes one atomic class (`.o12{gap:8px}`), deduplicated across
+// the page. Interaction states map to pseudo-classes. Every node carries a
+// `data-one` key so the M2 thin host can hydrate the markup instead of
+// replacing it. Event ids are written as data attributes for the same host.
+
+// Also keeps the HTML of memo subtrees (`ui.memo`), by build and place: a
+// subtree that wasn't rebuilt isn't written again either.
+class OneCss(val classes: Map<string, string>, val rules: array<string>, val media: array<string>, val mediaOrder: array<int>, var mediaSent: int, val html: Map<string, string>) {
+    fun use(state: string, declaration: string): string {
+        val id = "$state|$declaration"
+        val found = classes.get(id)
+        if (found != null) return found
+        val name = "o${rules.size}"
+        classes.set(id, name)
+        if (oneViewportState(state)) {
+            // Media rules double the class so they beat the base rule
+            // whatever order the two were registered in.
+            val width = oneParseInt(state.slice(3, state.size), 0)
+            rules.append("")
+            media.append("@media(${if (state.startsWith("max")) "max" else "min"}-width:${width}px){.$name.$name{$declaration}}")
+            mediaOrder.append(if (state.startsWith("max")) 10000 - width else 20000 + width)
+        } else rules.append(".$name${oneCssSelector(state)}{$declaration}")
+        name
+    }
+    fun text(): string {
+        mediaSent = 0
+        since(0)
+    }
+    // Rules added after the first `count`; a live session sends only these.
+    // Media rules are ordered (wider `max` first, so narrower ones win), so
+    // when one is new the whole ordered block follows.
+    fun since(count: int): string {
+        var out = ""
+        var i = count
+        while (i < rules.size) {
+            if (rules[i] != "") out = "$out${rules[i]}\n"
+            i = i + 1
+        }
+        if (media.size > mediaSent) {
+            mediaSent = media.size
+            val order: array<int> = []
+            for (m in mediaOrder) if (!oneHasInt(order, m)) order.append(m)
+            oneSortInts(order)
+            for (key in order) {
+                var j = 0
+                while (j < media.size) {
+                    if (mediaOrder[j] == key) out = "$out${media[j]}\n"
+                    j = j + 1
+                }
+            }
+        }
+        out
+    }
+}
+
+fun oneHasInt(values: array<int>, value: int): bool {
+    for (v in values) if (v == value) return true
+    false
+}
+
+fun oneSortInts(var values: array<int>): void {
+    var i = 1
+    while (i < values.size) {
+        var j = i
+        while (j > 0 && values[j - 1] > values[j]) {
+            val t = values[j]
+            values[j] = values[j - 1]
+            values[j - 1] = t
+            j = j - 1
+        }
+        i = i + 1
+    }
+    return
+}
+
+fun oneCss(): OneCss = OneCss(Map(), [], [], [], 0, Map())
+
+fun oneCssSelector(state: string): string =
+    if (state == "hover") ":hover"
+    else if (state == "pressed") ":active"
+    else if (state == "focus") ":focus-visible,.__f:focus-within"
+    else if (state == "disabled") "[aria-disabled=true]"
+    else if (state == "selected") "[aria-selected=true]"
+    else if (state == "checked") "[aria-checked=true]"
+    else ""
+
+val oneWebStates = ["", "hover", "pressed", "focus", "disabled", "selected", "checked"]
+
+// Fixed base rules: a reset and per-kind defaults. Everything else is atomic.
+fun oneWebBaseCss(): string =
+    ".one,.one *{box-sizing:border-box;margin:0;padding:0;min-width:0}\n" +
+    ".one{display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}\n" +
+    ".k-column,.k-pressable,.k-scroll,.k-feed,.k-link{display:flex;flex-direction:column}\n" +
+    ".k-link{color:inherit;text-decoration:none}\n" +
+    ":where(.one) :where(h1,h2,h3,h4,p,ul,li,strong,small,em){font:inherit;list-style:none}\n" +
+    ".k-row{display:flex;flex-direction:row;align-items:center}\n" +
+    ".k-stack{display:grid}.k-stack>*{grid-area:1/1}\n" +
+    ".k-scroll,.k-feed{overflow-y:auto;min-height:0}\n" +
+    ".k-text,.k-rich{display:block;overflow-wrap:anywhere}\n" +
+    ".k-pressable{appearance:none;border:0;background:none;font:inherit;color:inherit;text-align:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}\n" +
+    ".k-input{font:inherit;border:0;outline:0;background:transparent;color:inherit;width:100%;resize:none}\n" +
+    ".k-icon{display:inline-block;flex-shrink:0;background-color:currentColor;-webkit-mask:var(--i) center/contain no-repeat;mask:var(--i) center/contain no-repeat}\n" +
+    ".k-image{display:block;flex-shrink:0;object-fit:cover}\n" +
+    ".k-divider{flex-shrink:0;align-self:stretch;height:1px}\n" +
+    ".k-spacer{flex-shrink:0}\n"
+
+class OneHtml(val html: string, val css: string)
+
+// `iconBase` is where `<name>.svg` icons are served from.
+fun oneWebRender(root: Node, theme: Theme, iconBase: string): OneHtml {
+    var css = oneCss()
+    val html = oneWebNode(root, theme, css, iconBase, "0", "column")
+    OneHtml(html, "${oneWebBaseCss()}${css.text()}")
+}
+
+// Renders into an existing class registry, so repeated renders of one page
+// reuse class names and only new rules need to reach the browser.
+fun oneWebRenderInto(root: Node, theme: Theme, var css: OneCss, iconBase: string): string =
+    oneWebNode(root, theme, css, iconBase, "0", "column")
+
+fun oneWebDocument(title: string, lang: string, root: Node, theme: Theme, iconBase: string, background: string): string {
+    val page = oneWebRender(root, theme, iconBase)
+    "<!doctype html><html lang=\"${oneHtmlEscape(oneWebPageLang(root, lang))}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(oneWebPageTitle(root, title))}</title>${oneWebPageMeta(root)}<style>html,body{margin:0;height:100%;background:$background}body>.one{min-height:100%}\n${page.css}</style></head><body>${page.html}</body></html>"
+}
+
+// A server-rendered page whose app then runs in the browser (Wasm client
+// mode): web/host.js at `hostUrl` loads the module at `wasmUrl`, which
+// renders the same tree and takes over without replacing the markup.
+fun oneWebClientDocument(title: string, lang: string, root: Node, theme: Theme, iconBase: string, background: string, hostUrl: string, wasmUrl: string): string {
+    val page = oneWebRender(root, theme, iconBase)
+    val fill = if (root.attr("page.flow") == "document") "min-height:100%" else "height:100%"
+    val boot = jsonStringify(jsonObject(["s", "r", "icons", "wasm"], [jsonString(""), jsonInteger(1), jsonString(iconBase), jsonString(wasmUrl)]))
+    "<!doctype html><html lang=\"${oneHtmlEscape(oneWebPageLang(root, lang))}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(oneWebPageTitle(root, title))}</title>${oneWebPageMeta(root)}" +
+        "<style>html,body{margin:0;height:100%;background:$background}#one-root{$fill}#one-root>.one{$fill}\n${oneWebBaseCss()}</style><style id=\"one-css\">${page.css.slice(oneWebBaseCss().size, page.css.size)}</style>" +
+        "<script>window.__one=$boot</script><script src=\"${oneHtmlEscape(hostUrl)}\" defer></script></head><body><div id=\"one-root\">${page.html}</div></body></html>"
+}
+
+// What a `page(...)` root says about its document.
+fun oneWebPageTitle(root: Node, fallback: string): string = if (root.attr("page.title") != "") root.attr("page.title") else fallback
+fun oneWebPageLang(root: Node, fallback: string): string = if (root.attr("page.lang") != "") root.attr("page.lang") else fallback
+fun oneWebPageMeta(root: Node): string {
+    var out = ""
+    for (item in root.attrs) {
+        if (item.name.startsWith("meta:")) {
+            val name = item.name.slice(5, item.name.size)
+            val key = if (name.startsWith("og:")) "property" else "name"
+            out = "$out<meta $key=\"${oneHtmlEscape(name)}\" content=\"${oneHtmlEscape(item.value)}\">"
+        }
+    }
+    out
+}
+
+fun oneWebNode(node: Node, outer: Theme, var css: OneCss, iconBase: string, path: string, parentKind: string): string {
+    val memo = node.attr("memo")
+    if (memo != "") {
+        val id = "$memo@$path@$parentKind"
+        val cached = css.html.get(id)
+        if (cached != null) return cached
+        if (css.html.size > 4096) css.html.clear()
+        val written = oneWebNodeFresh(node, outer, css, iconBase, path, parentKind)
+        css.html.set(id, written)
+        return written
+    }
+    oneWebNodeFresh(node, outer, css, iconBase, path, parentKind)
+}
+
+fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string, path: string, parentKind: string): string {
+    val theme = if (node.attr("theme") != "") outer.scoped(node.attr("theme")) else outer
+    if (node.kind == "native") return oneWebNative(node, theme, css, iconBase, path, parentKind)
+    val resolved = oneResolve(theme, node.kind, node.style, "web-document")
+    var classes = "k-${node.kind}"
+    if (path == "0") classes = "one $classes"
+    for (state in oneWebStates) {
+        for (declaration in oneWebDeclarations(node, resolved, state, parentKind)) classes = "$classes ${css.use(state, declaration)}"
+    }
+    for (state in oneWebViewports(resolved)) {
+        for (declaration in oneWebDeclarations(node, resolved, state, parentKind)) classes = "$classes ${css.use(state, declaration)}"
+    }
+    val own = if (node.key != "") node.key else path
+    val key = oneHtmlEscape(own)
+    var inner = ""
+    var index = 0
+    for (child in node.children) {
+        inner = "$inner${oneWebNode(child, theme, css, iconBase, "$own.$index", node.kind)}"
+        index = index + 1
+    }
+    val common = "class=\"$classes\" data-one=\"$key\""
+    val disabled = if (node.attr("enabled") == "false") " aria-disabled=\"true\"" else ""
+    val selected = (if (node.attr("selected") == "true") " aria-selected=\"true\"" else "") +
+        (if (node.attr("item") != "") " data-one-item=\"${node.attr("item")}\"" else "") +
+        (if (node.attr("id") != "") " id=\"${oneHtmlEscape(node.attr("id"))}\"" else "") +
+        (if (node.attr("expanded") != "") " aria-expanded=\"${node.attr("expanded")}\"" else "") +
+        (if (node.attr("ariaLabel") != "") " aria-label=\"${oneHtmlEscape(node.attr("ariaLabel"))}\"" else "") +
+        (if (node.attr("hidden") == "true") " aria-hidden=\"true\"" else "")
+    // `tag` picks the element for documents: headings, sections, lists.
+    // A <p> can only hold text: the parser would split one around a <div>.
+    val tag = if (node.attr("tag") == "p" && node.kind != "text" && node.kind != "rich" && !oneWebPhrasing(node)) "" else oneWebTag(node.attr("tag"))
+    when (node.kind) {
+        "text" -> "<${if (tag != "") tag else "span"} $common$selected>${oneHtmlEscape(node.attr("text"))}</${if (tag != "") tag else "span"}>"
+        "link" -> "<a $common href=\"${oneHtmlEscape(node.attr("href"))}\"${if (node.attr("onPress") != "") " data-one-press=\"${node.attr("onPress")}\"" else ""}$selected${if (node.attr("external") == "true") " target=\"_blank\" rel=\"noopener\"" else ""}>$inner</a>"
+        "rich" -> "<span $common>${oneWebRuns(node.attr("runs"))}</span>"
+        "icon" -> "<span $common role=\"img\" aria-label=\"${oneHtmlEscape(node.attr("label"))}\" style=\"--i:url('${oneHtmlEscape(iconBase)}/${oneHtmlEscape(node.attr("name"))}.svg')\"></span>"
+        "image" -> "<img $common src=\"${oneHtmlEscape(oneWebImageSource(node, iconBase))}\" alt=\"${oneHtmlEscape(node.attr("label"))}\">"
+        "pressable" -> "<button type=\"button\" $common data-one-press=\"${node.attr("onPress")}\"$disabled$selected${oneWebLabel(node)}>$inner</button>"
+        "input" -> oneWebInput(node, common)
+        "divider" -> "<div $common role=\"separator\"></div>"
+        "spacer" -> "<div $common aria-hidden=\"true\"></div>"
+        "feed" -> "<div $common data-one-feed=\"${oneHtmlEscape(node.attr("anchor"))}\" data-one-visible=\"${node.attr("onVisible")}\">$inner</div>"
+        else -> "<${if (tag != "") tag else "div"} $common$selected>$inner</${if (tag != "") tag else "div"}>"
+    }
+}
+
+fun oneWebTag(tag: string): string =
+    if (tag == "h1" || tag == "h2" || tag == "h3" || tag == "h4" || tag == "p" || tag == "section" || tag == "header" ||
+        tag == "footer" || tag == "nav" || tag == "main" || tag == "article" || tag == "aside" || tag == "ul" || tag == "li" ||
+        tag == "strong" || tag == "small" || tag == "em") tag else ""
+
+fun oneWebPhrasing(node: Node): bool {
+    for (child in node.children) if (child.kind != "text" && child.kind != "rich" && child.kind != "icon" && child.kind != "image" && child.kind != "link") return false
+    true
+}
+
+// Viewport states used by a node, from its resolved keys.
+fun oneWebViewports(r: Resolved): array<string> {
+    val out: array<string> = []
+    for (name in r.props.keys()) {
+        var colon = 0
+        while (colon < name.size && name[colon] != 58) colon = colon + 1
+        if (colon < name.size) {
+            val state = name.slice(0, colon)
+            if (oneViewportState(state)) {
+                var seen = false
+                for (o in out) if (o == state) seen = true
+                if (!seen) out.append(state)
+            }
+        }
+    }
+    out
+}
+
+fun oneWebLabel(node: Node): string = if (node.has("label")) " aria-label=\"${oneHtmlEscape(node.attr("label"))}\"" else ""
+
+fun oneWebImageSource(node: Node, iconBase: string): string {
+    val src = node.attr("src")
+    // Authorized images can't be fetched by a plain <img>; SSR shows the fallback.
+    if (node.attr("authorization") != "" && node.attr("fallback") != "") return "$iconBase/${node.attr("fallback")}.svg"
+    if (src.startsWith("http") || src.startsWith("/") || src.startsWith("./") || src.startsWith("../") || src.startsWith("data:")) src else "$iconBase/$src.svg"
+}
+
+fun oneWebInput(node: Node, common: string): string {
+    val type = if (node.attr("secure") == "true") "password" else if (node.attr("keyboard") == "email") "email" else if (node.attr("keyboard") == "number") "text\" inputmode=\"numeric" else "text"
+    val events = "data-one-change=\"${node.attr("onChange")}\"${if (node.attr("onSubmit") != "") " data-one-submit=\"${node.attr("onSubmit")}\"" else ""}"
+    val placeholder = oneHtmlEscape(node.attr("placeholder"))
+    if (node.attr("multiline") == "true")
+        "<textarea $common $events rows=\"1\" placeholder=\"$placeholder\" aria-label=\"$placeholder\">${oneHtmlEscape(node.attr("value"))}</textarea>"
+    else
+        "<input $common $events type=\"$type\" value=\"${oneHtmlEscape(node.attr("value"))}\" placeholder=\"$placeholder\" aria-label=\"$placeholder\">"
+}
+
+fun oneWebNative(node: Node, theme: Theme, var css: OneCss, iconBase: string, path: string, parentKind: string): string {
+    val target = node.attr("target")
+    val fallback = node.children[node.children.size - 1]
+    if (target == "web" || target == "web-document") {
+        val props = jsonParse(node.attr("props"))
+        if (props.succeeded) return props.value.getString("html")
+    }
+    oneWebNode(fallback, theme, css, iconBase, path, parentKind)
+}
+
+fun oneWebRuns(runs: string): string {
+    val parsed = jsonParse(runs)
+    if (!parsed.succeeded) return ""
+    var out = ""
+    for (run in parsed.value.values) {
+        val kind = run.getString("kind")
+        val value = oneHtmlEscape(run.getString("text"))
+        out = if (kind == "mention") "$out<strong class=\"one-mention\">$value</strong>"
+            else if (kind == "link") "$out<a href=\"${oneHtmlEscape(run.getString("src"))}\">$value</a>"
+            else if (kind == "emoji" && run.getString("src") != "") "$out<img class=\"one-emoji\" src=\"${oneHtmlEscape(run.getString("src"))}\" alt=\"$value\" width=\"20\" height=\"20\">"
+            else "$out$value"
+    }
+    out
+}
+
+fun oneWebDeclarations(node: Node, r: Resolved, state: string, parentKind: string): array<string> {
+    val out: array<string> = []
+    val p = if (state == "") "" else "$state:"
+    val parentRow = parentKind == "row"
+    var paddingDone = false
+    for (name in r.props.keys()) {
+        var prop = name
+        if (state == "") {
+            if (oneStateKey(name)) continue
+        } else {
+            if (!name.startsWith(p)) continue
+            prop = name.slice(p.size, name.size)
+        }
+        // Shorthands and longhands would race in atomic CSS, so padding is
+        // always written as four sides and borders carry their colour.
+        if (prop == "padding" || prop.startsWith("padding")) {
+            if (!paddingDone) {
+                paddingDone = true
+                for (side in ["Top", "Right", "Bottom", "Left"]) {
+                    val own = r.get("${p}padding$side")
+                    val all = r.get("${p}padding")
+                    val value = if (own != "") own else all
+                    if (value != "") out.append("padding-${oneLower(side)}:${value}px")
+                }
+            }
+            continue
+        }
+        if (prop == "borderColor" && (r.has("${p}border") || r.has("${p}borderTop") || r.has("${p}borderBottom") || r.has("${p}borderLeft") || r.has("${p}borderRight") ||
+            r.has("border") || r.has("borderTop") || r.has("borderBottom") || r.has("borderLeft") || r.has("borderRight"))) {
+            if (state != "") out.append("border-color:${r.get(name)}")
+            continue
+        }
+        val v = r.get(name)
+        val color = if (r.get("${p}borderColor") != "") r.get("${p}borderColor") else if (r.get("borderColor") != "") r.get("borderColor") else "currentColor"
+        val decl = if (prop == "border" || prop == "borderTop" || prop == "borderBottom" || prop == "borderLeft" || prop == "borderRight")
+            "${if (prop == "border") "border" else if (prop == "borderTop") "border-top" else if (prop == "borderBottom") "border-bottom" else if (prop == "borderLeft") "border-left" else "border-right"}:${v}px solid $color"
+            else if (prop == "align" && node.kind == "stack") "place-items:${oneFlexValue(v)}"
+            else oneWebDeclaration(node.kind, prop, v, parentRow)
+        if (decl != "") out.append(decl)
+    }
+    out
+}
+
+fun oneLower(side: string): string = if (side == "Top") "top" else if (side == "Right") "right" else if (side == "Bottom") "bottom" else "left"
+
+fun oneWebDeclaration(kind: string, prop: string, v: string, parentRow: bool): string {
+    when (prop) {
+        "gap" -> "gap:${v}px"
+        "padding" -> "padding:${v}px"
+        "paddingTop" -> "padding-top:${v}px"
+        "paddingBottom" -> "padding-bottom:${v}px"
+        "paddingLeft" -> "padding-left:${v}px"
+        "paddingRight" -> "padding-right:${v}px"
+        "align" -> "align-items:${oneFlexValue(v)}"
+        "justify" -> "justify-content:${oneFlexValue(v)}"
+        "alignSelf" -> "align-self:${oneFlexValue(v)}"
+        "width" -> if (v == "fill") (if (parentRow) "flex:1 1 0" else "align-self:stretch") else if (v == "hug") "" else "width:${v}px;flex-shrink:0"
+        "height" -> if (v == "fill") (if (parentRow) "align-self:stretch" else "flex:1 1 0;min-height:0") else if (v == "hug") "" else "height:${v}px;flex-shrink:0"
+        "minWidth" -> "min-width:${v}px"
+        "maxWidth" -> "max-width:${v}px;width:100%"
+        "minHeight" -> "min-height:${v}px"
+        "maxHeight" -> "max-height:${v}px"
+        "grow" -> "flex:$v 1 0"
+        "safeTop" -> if (v == "true") "padding-top:env(safe-area-inset-top)" else ""
+        "safeBottom" -> if (v == "true") "padding-bottom:env(safe-area-inset-bottom)" else ""
+        "background" -> if (kind == "icon") "" else "background:$v"
+        "radius" -> "border-radius:${v}px"
+        "border" -> "border:${v}px solid"
+        "borderTop" -> "border-top:${v}px solid"
+        "borderBottom" -> "border-bottom:${v}px solid"
+        "borderColor" -> "border-color:$v"
+        "opacity" -> "opacity:${oneWebPercent(v)}"
+        "clip" -> if (v == "true") "overflow:hidden" else ""
+        "elevation" -> "box-shadow:0 ${v}px ${oneParseInt(v, 0) * 3}px rgba(0,0,0,.12)"
+        "color" -> "color:$v"
+        "tint" -> "color:$v"
+        "font" -> "font-family:${oneWebFont(v)}"
+        "size" -> if (kind == "icon" || kind == "image") "width:${v}px;height:${v}px" else "font-size:${oneWebLength(v)}"
+        "weight" -> "font-weight:${oneWebWeight(v)}"
+        "lineHeight" -> "line-height:${oneWebLength(v)}"
+        "tracking" -> if (oneParseInt(v, 1000000) == 1000000) "letter-spacing:$v" else "letter-spacing:${oneWebHundredths(v)}px"
+        "textAlign" -> "text-align:$v"
+        "italic" -> if (v == "true") "font-style:italic" else ""
+        "maxLines" -> if (v == "1") "white-space:nowrap;overflow:hidden;text-overflow:ellipsis" else "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:$v;overflow:hidden"
+        "fit" -> "object-fit:${if (v == "fit") "contain" else "cover"}"
+        "placeholderColor" -> ""
+        "caretColor" -> "caret-color:$v"
+        else -> if (prop.startsWith("css:")) "${prop.slice(4, prop.size)}:$v" else if (oneContains(prop, 45) || oneWebPassthrough(prop)) "$prop:$v" else ""
+    }
+}
+
+// "pressed:background" is a state key; "css:scroll-snap-type" is not.
+fun oneStateKey(name: string): bool {
+    for (state in oneWebStates) if (state != "" && name.startsWith("$state:")) return true
+    var colon = 0
+    while (colon < name.size && name[colon] != 58) colon = colon + 1
+    colon < name.size && oneViewportState(name.slice(0, colon))
+}
+
+fun oneWebFont(v: string): string =
+    if (v == "sans" || v == "system") "system-ui,-apple-system,\"Segoe UI\",Roboto,\"Helvetica Neue\",Arial,sans-serif"
+    else if (v == "serif") "Georgia,\"Times New Roman\",serif"
+    else if (v == "mono") "ui-monospace,\"SF Mono\",Menlo,Consolas,monospace"
+    else v
+
+fun oneWebPassthrough(prop: string): bool =
+    prop == "cursor" || prop == "transition" || prop == "transform" || prop == "filter" || prop == "outline" ||
+    prop == "overflow" || prop == "position" || prop == "inset" || prop == "top" || prop == "left" ||
+    prop == "right" || prop == "bottom" || prop == "animation" || prop == "contain"
+
+// Whole numbers are logical pixels; anything else (`1.75`, `inherit`,
+// `clamp(…)`) is written as is.
+fun oneWebLength(v: string): string = if (oneParseInt(v, -1) >= 0) "${v}px" else v
+
+fun oneFlexValue(v: string): string = if (v == "start") "flex-start" else if (v == "end") "flex-end" else if (v == "between") "space-between" else v
+fun oneWebWeight(v: string): string = if (v == "bold") "700" else if (v == "semibold") "600" else if (v == "medium") "500" else if (v == "regular" || v == "normal") "400" else v
+fun oneWebPercent(v: string): string {
+    val n = oneParseInt(v, 100)
+    if (n >= 100) "1" else if (n < 10) ".0$n" else ".$n"
+}
+fun oneWebHundredths(v: string): string {
+    val n = oneParseInt(v, 0)
+    val sign = if (n < 0) "-" else ""
+    val a = if (n < 0) -n else n
+    val frac = a % 100
+    "$sign${a / 100}.${if (frac < 10) "0$frac" else "$frac"}"
+}
+
+fun oneContains(value: string, byte: int): bool {
+    var i = 0
+    while (i < value.size) {
+        if (value[i] == byte) return true
+        i = i + 1
+    }
+    false
+}
+
+fun oneHtmlEscape(value: string): string {
+    var out = ""
+    var start = 0
+    var i = 0
+    while (i < value.size) {
+        val b = value[i]
+        val rep = if (b == 38) "&amp;" else if (b == 60) "&lt;" else if (b == 62) "&gt;" else if (b == 34) "&quot;" else if (b == 39) "&#39;" else ""
+        if (rep != "") {
+            out = "$out${value.slice(start, i)}$rep"
+            start = i + 1
+        }
+        i = i + 1
+    }
+    "$out${value.slice(start, value.size)}"
+}

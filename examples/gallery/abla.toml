@@ -1,0 +1,4 @@
+name = "abla-one-gallery"
+version = "0.0.1"
+entry = "android.ab"
+compileCapabilities = ["filesystem.write"]

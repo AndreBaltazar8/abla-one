@@ -1,0 +1,88 @@
+import "abla/json"
+import "../../src/one_kit.ab"
+
+// Exercises every platform service against an echo server (tests/ui/echo.py).
+// Each button runs one operation; the log shows what came back.
+
+class ServicesDemo(
+    val services: OneServices,
+    val base: string,
+    var log: string by State(""),
+    var pending: int by State(0),
+    var operation: string by State(""),
+    var picked: Json by State(jsonArray([])),
+    var saved: Json by State(jsonNull()),
+    var ticks: int by State(0)
+) : OneApp {
+    fun write(line: string): void {
+        log = "$line\n$log"
+        return
+    }
+    fun run(name: string, id: int): void {
+        operation = name
+        pending = id
+        if (id == 0) write("$name: not started")
+        return
+    }
+    fun file(): OneFile = oneFileFrom(picked.values[0])
+
+    fun render(var ui: Ui): Node = column(style().fill().background("@surface"), [
+        topBar(ui, [], text("Serviços", style().text("title")), []),
+        scroll(style().grow(1).padding(16).gap(8), [
+            button(ui, "JSON PUT", "secondary", ui.press { run("json", services.send(oneRequest("PUT", "$base/echo").header("X-Abla", "one").json(jsonObject(["n"], [jsonInteger(7)])))) }, style()),
+            button(ui, "Bytes POST", "secondary", ui.press { run("bytes", services.send(oneRequest("POST", "$base/echo").bytes("AAECAwQ=", "application/octet-stream"))) }, style()),
+            button(ui, "Large body", "secondary", ui.press { run("large", services.send(oneRequest("POST", "$base/echo").text(oneRepeat("abcdefghij", 50000), "text/plain"))) }, style()),
+            button(ui, "Pick file", "secondary", ui.press { run("pick", services.pickFiles([], false)) }, style()),
+            button(ui, "Upload file", "secondary", ui.press { if (picked.values.size > 0) run("upload", services.send(oneRequest("POST", "$base/echo").file(file()))) }, style()),
+            button(ui, "Multipart", "secondary", ui.press { if (picked.values.size > 0) run("multipart", services.send(oneRequest("POST", "$base/echo").multipart([oneTextPart("title", "Fatura"), oneFilePart("document", file())]))) }, style()),
+            button(ui, "Download to file", "secondary", ui.press { run("download", services.send(oneRequest("GET", "$base/big").saveToFile())) }, style()),
+            button(ui, "Read saved file", "secondary", ui.press { if (!saved.isNull()) run("read", services.readFile(oneFileFrom(saved), 1000000, 16)) }, style()),
+            button(ui, "Secure write", "secondary", ui.press { run("store", services.secureWrite("demo", jsonObject(["count", "on"], [jsonInteger(3), jsonBoolean(true)]))) }, style()),
+            button(ui, "Secure read", "secondary", ui.press { run("load", services.secureRead("demo")) }, style()),
+            button(ui, "Timer", "secondary", ui.press { run("timer", services.timer(300)) }, style()),
+            text(log, style().text("caption").color("@muted")).set("label", "log")
+        ])
+    ])
+
+    fun receive(kind: string, value: string): void {
+        if (kind != "result") return
+        val r = oneResponse(value)
+        if (r.requestId != pending) return
+        pending = 0
+        val name = operation
+        if (r.error != "") write("$name: error ${r.error}")
+        else if (name == "pick") {
+            picked = r.json()
+            write("pick: ${r.files().size} ${if (r.files().size > 0) "${r.files()[0].name} ${r.files()[0].size}" else ""}")
+        } else if (name == "download") {
+            saved = jsonObject(["handle", "name", "size", "mime"], [jsonString(r.file.handle), jsonString(r.file.name), jsonInteger(r.file.size), jsonString(r.file.mime)])
+            write("download: ${r.status} ${r.file.name} ${r.file.size} ${r.file.mime}")
+        } else if (name == "read") write("read: ${r.status} ${r.bodyBase64}")
+        else if (name == "load") write("load: ${r.status} count=${oneStored(r).get("count").asInt()}")
+        else if (name == "store" || name == "timer") write("$name: ${r.status}")
+        else write("$name: ${r.status} ${r.body}")
+        return
+    }
+}
+
+fun oneRepeat(value: string, times: int): string {
+    val parts: array<string> = []
+    var i = 0
+    while (i < times) {
+        parts.append(value)
+        i = i + 1
+    }
+    var out = ""
+    var chunk = ""
+    var n = 0
+    for (part in parts) {
+        chunk = "$chunk$part"
+        n = n + 1
+        if (n == 100) {
+            out = "$out$chunk"
+            chunk = ""
+            n = 0
+        }
+    }
+    "$out$chunk"
+}

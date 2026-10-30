@@ -1,0 +1,191 @@
+import "abla/json"
+import "abla/crypto"
+import "abla/process/time"
+import "abla/unsafe/memory"
+import "web_session.ab"
+
+// Wasm client mode (SPEC §1, M3): the app runs in the browser. The page's
+// thin host (web/host.js) talks to this module instead of a WebSocket, with
+// the same messages; requests become fetches the host makes, secure storage
+// is the browser's localStorage, and timers are the host's.
+//
+// An app's Wasm entry exports two functions, with its own app and theme:
+//
+//   @export("one_alloc")
+//   trusted fun alloc(length: u32): u32 = oneClientAlloc(length)
+//   @export("one_message")
+//   trusted fun message(pointer: u32, length: u32): int =
+//       oneClientRespond(pointer, length, { session -> Gallery() }, oneDefaultTheme(), "icons")
+//
+// `one_message` takes one page message as JSON and returns the messages for
+// the page as a JSON array (address << 32 | length, valid until the next call):
+//   page → app: hello {r, w, h, storage}, event, viewport, scroll,
+//               result {payload}, upload {id, kind, name, mime, base64, last,
+//               picked}, tick
+//   app → page: patch, frame, pick, fetch {id, request}, store {storage},
+//               wait {ms}
+
+val oneClientSessions: array<OneLiveSession> = []
+val oneClientOutput: array<string> = []
+
+trusted fun oneClientAlloc(length: int): int {
+    if (length < 0 || length > 67108864) return 0
+    val pointer = __ablaRuntimeAllocate(length + 1)
+    ablaRuntimeStoreU8(pointer + length, 0)
+    pointer
+}
+
+trusted fun oneClientRespond(pointer: int, length: int, create: (string) -> OneApp, theme: Theme, iconBase: string): int {
+    val input = if (pointer > 0 && length >= 0) adoptNativeString(pointer, length) else ""
+    val output = oneClientMessage(input, create, theme, iconBase)
+    // Kept alive until the next call, while the host reads it.
+    oneClientOutput.clear()
+    oneClientOutput.append(output)
+    (nativeCStringAddress(oneClientOutput[0]) << 32) | output.size
+}
+
+// Handles one page message and settles the session. Plain Abla, so tests
+// drive it natively.
+fun oneClientMessage(input: string, create: (string) -> OneApp, theme: Theme, iconBase: string): string {
+    // The page is the module's only peer; files and saved responses arrive
+    // as large base64 strings, so the limits are JSON.parse's.
+    val parsed = jsonParse(input, jsonPermissiveLimits)
+    if (!parsed.succeeded || !parsed.value.isObject()) return "[]"
+    val m = parsed.value
+    val kind = m.getString("t")
+    if (oneClientSessions.size == 0) {
+        if (kind != "hello") return "[]"
+        val queueIndex = oneLiveQueueIndex("client")
+        val storage = m.get("storage")
+        if (storage.isObject()) for (key in storage.keys) oneLiveQueueList[queueIndex].storage.set(key, storage.getString(key))
+        val app = create("client")
+        oneClientSessions.append(oneSession("client", app, oneLiveQueueList[queueIndex]))
+        oneLiveQueueList[queueIndex].cookiesChanged = false
+    }
+    if (kind == "result") oneLiveQueueList[oneLiveQueueIndex("client")].complete(if (m.get("save").asBoolean()) oneClientSaved(m.getString("payload")) else m.getString("payload"))
+    else if (kind == "upload") oneClientUpload(m)
+    else oneSessionMessage(oneClientSessions[0], theme, m)
+    val out: array<string> = []
+    var rounds = 0
+    while (rounds < 16 && oneClientPump(out)) rounds = rounds + 1
+    for (message in oneLiveQueueList[oneLiveQueueIndex("client")].takeOutbox()) out.append(message)
+    if (oneLiveQueueList[oneLiveQueueIndex("client")].cookiesChanged) {
+        oneLiveQueueList[oneLiveQueueIndex("client")].cookiesChanged = false
+        val stored = oneLiveQueueList[oneLiveQueueIndex("client")].storage
+        val names: array<string> = []
+        val values: array<Json> = []
+        for (key in stored.keys()) {
+            val value = stored.get(key)
+            if (value != null) {
+                names.append(key)
+                values.append(jsonString(value))
+            }
+        }
+        out.append(jsonStringify(jsonObject(["t", "storage"], [jsonString("store"), jsonObject(names, values)])))
+    }
+    val patch = oneSessionUpdate(oneClientSessions[0], theme, iconBase)
+    if (patch != "") out.append(patch)
+    val wait = oneLiveQueueList[oneLiveQueueIndex("client")].nextTimer(monotonicMilliseconds())
+    if (oneLiveQueueList[oneLiveQueueIndex("client")].timers.size > 0) out.append("{\"t\":\"wait\",\"ms\":$wait}")
+    var text = "["
+    var first = true
+    for (message in out) {
+        text = if (first) "$text$message" else "$text,$message"
+        first = false
+    }
+    "$text]"
+}
+
+// One round of platform work: due timers and completions reach the app;
+// requests go to the page as fetches.
+fun oneClientPump(var out: array<string>): bool {
+    val index = oneLiveQueueIndex("client")
+    oneLiveQueueList[index].fireTimers(monotonicMilliseconds())
+    for (item in oneLiveQueueList[index].takeRequests()) out.append(jsonStringify(jsonObject(["t", "id", "request"], [jsonString("fetch"), jsonInteger(item.id), oneClientRequestJson(item.request)])))
+    val completions = oneLiveQueueList[index].takeCompletions()
+    for (payload in completions) oneClientSessions[0].receive("result", payload)
+    completions.size > 0
+}
+
+// The request as the page's fetch needs it. File and multipart bodies are
+// assembled here, from the files the module holds, and sent as bytes.
+fun oneClientRequestJson(r: OneRequest): Json {
+    val index = oneLiveQueueIndex("client")
+    val headers: array<Json> = []
+    for (h in r.headers) headers.append(jsonArray([jsonString(h.name), jsonString(h.value)]))
+    var bodyBase64 = r.bodyBase64
+    var body = r.body
+    if (r.bodyFile != "") {
+        val bytes = oneLiveQueueList[index].fileBytes.get(r.bodyFile)
+        bodyBase64 = base64Encode(if (bytes != null) bytes else "")
+        body = ""
+    }
+    if (r.parts.size > 0) {
+        val boundary = "abla-one-${oneLiveQueueList[index].allocate()}-${monotonicMilliseconds()}"
+        var out = ""
+        for (part in r.parts) {
+            var content = part.value
+            if (part.base64 != "") content = base64Decode(part.base64)
+            if (part.file != "") {
+                val bytes = oneLiveQueueList[index].fileBytes.get(part.file)
+                content = if (bytes != null) bytes else ""
+            }
+            out = "$out--$boundary\r\nContent-Disposition: form-data; name=\"${part.name}\"${if (part.filename != "") "; filename=\"${part.filename}\"" else ""}\r\n${if (part.contentType != "") "Content-Type: ${part.contentType}\r\n" else ""}\r\n$content\r\n"
+        }
+        bodyBase64 = base64Encode("$out--$boundary--\r\n")
+        body = ""
+        headers.append(jsonArray([jsonString("Content-Type"), jsonString("multipart/form-data; boundary=$boundary")]))
+    }
+    jsonObject(["method", "url", "headers", "body", "bodyBase64", "timeoutMs", "binary", "save"],
+        [jsonString(r.method), jsonString(r.url), jsonArray(headers), jsonString(body), jsonString(bodyBase64), jsonInteger(r.timeoutMs), jsonBoolean(r.binaryResponse), jsonBoolean(r.saveResponse)])
+}
+
+// A response saved to a file: the module keeps the bytes under a handle and
+// the app gets the file, as on the other targets.
+fun oneClientSaved(payload: string): string {
+    val parsed = jsonParse(payload, jsonPermissiveLimits)
+    if (!parsed.succeeded) return payload
+    val v = parsed.value
+    val index = oneLiveQueueIndex("client")
+    val bytes = base64Decode(v.getString("bodyBase64"))
+    val handle = "file-${oneLiveQueueList[index].allocate()}"
+    var name = v.getString("name")
+    if (name == "") name = "download"
+    val mime = if (v.get("headers").isObject() && v.get("headers").getString("content-type") != "") v.get("headers").getString("content-type") else "application/octet-stream"
+    val file = jsonObject(["handle", "name", "size", "mime"], [jsonString(handle), jsonString(name), jsonInteger(bytes.size), jsonString(mime)])
+    oneLiveQueueList[index].addFile(handle, bytes, jsonStringify(file))
+    jsonStringify(jsonObject(["requestId", "status", "body", "error", "headers", "file"], [v.get("requestId"), v.get("status"), jsonString(""), jsonString(v.getString("error")), v.get("headers"), file]))
+}
+
+// Files picked in the page, as the server's /one/upload receives them.
+fun oneClientUpload(m: Json): void {
+    val index = oneLiveQueueIndex("client")
+    val id = m.get("id").asInt()
+    val kind = m.getString("kind")
+    if (kind == "cancel") {
+        oneLiveQueueList[index].complete(oneResponsePayload(id, 204, if (m.getString("files") == "1") "[]" else "", ""))
+        return
+    }
+    val bytes = base64Decode(m.getString("base64"))
+    if (kind == "profile" || kind == "emoji") {
+        // The host already normalized the image; its body is the base64.
+        oneLiveQueueList[index].complete(oneResponsePayload(id, 200, m.getString("base64"), ""))
+        return
+    }
+    val handle = "file-${oneLiveQueueList[index].allocate()}"
+    val info = jsonObject(["handle", "name", "size", "mime"], [jsonString(handle), jsonString(m.getString("name")), jsonInteger(bytes.size), jsonString(if (m.getString("mime") != "") m.getString("mime") else "application/octet-stream")])
+    oneLiveQueueList[index].addFile(handle, bytes, jsonStringify(info))
+    oneClientUploads.append(handle)
+    if (m.get("last").asBoolean()) {
+        val files: array<Json> = []
+        for (h in oneClientUploads) {
+            val stored = oneLiveQueueList[index].fileInfo.get(h)
+            if (stored != null) files.append(jsonParse(stored).value)
+        }
+        oneClientUploads.clear()
+        oneLiveQueueList[index].complete(oneResponsePayload(id, 200, jsonStringify(jsonArray(files)), ""))
+    }
+    return
+}
+
+val oneClientUploads: array<string> = []

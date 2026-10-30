@@ -1,0 +1,72 @@
+import "abla/test"
+import "../../src/one.ab"
+import "../../src/backends/web_document.ab"
+import "../../src/layout/layout.ab"
+
+// Viewport conditions (`upTo`, `from`, `max760:` in `$one`): native targets
+// apply them for the render width; the web document writes media queries.
+fun has(text: string, needle: string): bool = text.contains(needle)
+
+fun main: int {
+    val t = theme()
+    val look = style().gap(20).upTo(1100, style().gap(12)).upTo(760, style().gap(6)).from(1500, style().gap(32))
+    expect(oneViewportState("max760") && oneViewportState("min1500"), "viewport state names")
+    expect(!oneViewportState("hover") && !oneViewportState("max") && !oneViewportState("minimal"), "other names aren't viewports")
+
+    oneViewportWidth = 1200
+    expectEqual(oneResolve(t, "column", look, "android").get("gap"), "20", "between breakpoints the base wins")
+    oneViewportWidth = 1000
+    expectEqual(oneResolve(t, "column", look, "android").get("gap"), "12", "up to 1100")
+    oneViewportWidth = 400
+    expectEqual(oneResolve(t, "column", look, "desktop").get("gap"), "6", "narrower condition written later wins")
+    oneViewportWidth = 1600
+    expectEqual(oneResolve(t, "column", look, "web-canvas").get("gap"), "32", "from 1500")
+    var ui = oneUiSized("desktop", t, 700)
+    expectEqual(oneViewportWidth, 700, "oneUiSized sets the render width")
+    val box = oneLayout(column(look, [text("a", style()), text("b", style())]), t, "desktop", 700, 400, Map())
+    expect(box.children[1].y - box.children[0].y - box.children[0].h == 6, "layout uses the narrow gap")
+
+    val web = oneResolve(t, "column", look, "web-document")
+    expectEqual(web.get("gap"), "20", "web keeps the base")
+    expectEqual(web.get("max760:gap"), "6", "and the condition as a state key")
+    val page = oneWebRender(column(look, [link("#plataforma", style().gap(4), [text("Plataforma", style())]).set("ariaLabel", "Ir"), text("Título", style()).set("tag", "h1").set("id", "topo")]), t, "/icons")
+    expect(has(page.css, "{gap:20px}"), "base rule")
+    expect(has(page.css, "@media(max-width:760px){.o"), "max media rule")
+    expect(has(page.css, "@media(min-width:1500px){.o"), "min media rule")
+    val wide = page.css.indexOf("@media(max-width:1100px)")
+    val narrow = page.css.indexOf("@media(max-width:760px)")
+    expect(wide >= 0 && narrow > wide, "wider max rules come first so narrower ones win")
+    expect(has(page.html, "<a class=\"k-link"), "links are anchors")
+    expect(has(page.html, "href=\"#plataforma\"") && has(page.html, "aria-label=\"Ir\""), "href and accessible label")
+    expect(has(page.html, "<h1 class=\"k-text") && has(page.html, "id=\"topo\"") && has(page.html, ">Título</h1>"), "semantic tag and id")
+
+    // Live sessions get only new rules, then the ordered media block again.
+    var css = oneCss()
+    oneWebRenderInto(column(style().gap(1), []), t, css, "/icons")
+    val first = css.text()
+    val sent = css.rules.size
+    oneWebRenderInto(column(style().gap(2).upTo(600, style().gap(3)), []), t, css, "/icons")
+    val more = css.since(sent)
+    expect(!has(more, "{gap:1px}") && has(more, "{gap:2px}") && has(more, "@media(max-width:600px)"), "increment carries new rules and media")
+    expectEqual(css.since(css.rules.size), "", "nothing new, nothing sent")
+    expect(has(first, "{gap:1px}"), "first text")
+
+    // Document-style values and pages.
+    val doc = oneWebRender(column(style(), [
+        text("a", style().set("size", "inherit").set("lineHeight", "1.75").set("tracking", "inherit")),
+        text("b", style().set("lineHeight", "20").tracking(-150)),
+        row(style(), [column(style(), [])]).set("tag", "p"),
+        column(style(), [text("x", style()), link("#y", style(), [text("y", style())])]).set("tag", "p")
+    ]), t, "/icons")
+    expect(has(doc.css, "{font-size:inherit}") && has(doc.css, "{line-height:1.75}") && has(doc.css, "{letter-spacing:inherit}"), "CSS values pass through")
+    expect(has(doc.css, "{line-height:20px}") && has(doc.css, "{letter-spacing:-1.50px}"), "whole numbers stay pixels")
+    expect(has(doc.html, "<div class=\"k-row"), "a <p> holding blocks falls back to a div")
+    expect(has(doc.html, "<p class=\"k-column"), "a <p> of text and links stays a <p>")
+    val meta: Map<string, string> = Map()
+    meta.set("description", "Hello")
+    meta.set("og:image", "og.png")
+    val whole = oneWebDocument("Fallback", "en", page("Title", "pt-PT", meta, column(style(), [])), t, "/icons", "#fff")
+    expect(has(whole, "<title>Title</title>") && has(whole, "lang=\"pt-PT\""), "page title and language")
+    expect(has(whole, "<meta name=\"description\" content=\"Hello\">") && has(whole, "<meta property=\"og:image\" content=\"og.png\">"), "page meta tags")
+    testsPassed()
+}

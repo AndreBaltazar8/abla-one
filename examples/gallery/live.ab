@@ -1,0 +1,32 @@
+import "abla/http"
+import "abla/net"
+import "abla/sys/linux"
+import "gallery.ab"
+import "../../src/backends/web_live.ab"
+
+// The gallery as a live web app: server-rendered first paint, then the page
+// talks to its session over WebSocket. Run from the abla-one root after
+// `make gallery-web` (for the icons): ./build/gallery-live, then open :8950.
+fun icons(request: HttpRequest): HttpResponse {
+    val name = request.parameter("name")
+    var valid = name.size > 4 && name.size < 64
+    for (byte in name) if (!((byte >= 97 && byte <= 122) || byte == 95 || byte == 46)) valid = false
+    if (!valid) return httpText("not found", 404)
+    HttpResponse(200, [HttpHeader("Content-Type", "image/svg+xml")], linuxReadFile("build/gallery/icons/$name", 65536))
+}
+
+fun galleryApp(request: HttpRequest, session: string): OneApp = Gallery()
+
+fun main: int {
+    val router = httpRouter()
+    router.get("/icons/:name", icons)
+    var server = oneLiveServer(
+        Ipv4SocketAddress("127.0.0.1", 8950),
+        { request -> router.dispatch(request) },
+        { request -> request.path == "/" },
+        galleryApp,
+        oneDefaultTheme(),
+        OneLiveOptions("Abla One", "pt-PT", "#ffffff", "/icons", "src/backends/web/host.js", "")
+    )
+    server.run()
+}

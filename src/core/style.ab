@@ -1,0 +1,111 @@
+// Styles are ordered lists of entries. Each entry may be scoped to a target
+// (or target family) and to an interaction state; the last matching write wins.
+// Named builders are shorthands for `set`, which accepts any property, so a
+// backend-specific property never needs a library change.
+
+class StyleEntry(val target: string, val state: string, val property: string, val value: string)
+
+class Style(val entries: array<StyleEntry>) {
+    fun set(property: string, value: string): Style {
+        val out = oneCopyEntries(entries)
+        out.append(StyleEntry("", "", property, value))
+        Style(out)
+    }
+    fun setInt(property: string, value: int): Style = set(property, "$value")
+
+    // Combining and scoping.
+    fun with(other: Style): Style {
+        val out = oneCopyEntries(entries)
+        for (entry in other.entries) out.append(entry)
+        Style(out)
+    }
+    fun on(target: string, other: Style): Style {
+        val out = oneCopyEntries(entries)
+        for (entry in other.entries) out.append(StyleEntry(if (entry.target == "") target else entry.target, entry.state, entry.property, entry.value))
+        Style(out)
+    }
+    fun inState(state: string, other: Style): Style {
+        val out = oneCopyEntries(entries)
+        for (entry in other.entries) out.append(StyleEntry(entry.target, if (entry.state == "") state else entry.state, entry.property, entry.value))
+        Style(out)
+    }
+    fun pressed(other: Style): Style = inState("pressed", other)
+    fun hover(other: Style): Style = inState("hover", other)
+    fun focus(other: Style): Style = inState("focus", other)
+    fun disabled(other: Style): Style = inState("disabled", other)
+    fun selected(other: Style): Style = inState("selected", other)
+    // Viewport conditions: `upTo(760, …)` up to 760 logical pixels wide,
+    // `from(1500, …)` from 1500 up. Later entries win, as everywhere.
+    fun upTo(width: int, other: Style): Style = inState("max$width", other)
+    fun from(width: int, other: Style): Style = inState("min$width", other)
+
+    // Layout.
+    fun gap(value: int): Style = setInt("gap", value)
+    fun padding(value: int): Style = setInt("padding", value)
+    fun paddingX(value: int): Style = setInt("paddingLeft", value).setInt("paddingRight", value)
+    fun paddingY(value: int): Style = setInt("paddingTop", value).setInt("paddingBottom", value)
+    fun paddingTop(value: int): Style = setInt("paddingTop", value)
+    fun paddingBottom(value: int): Style = setInt("paddingBottom", value)
+    fun paddingLeft(value: int): Style = setInt("paddingLeft", value)
+    fun paddingRight(value: int): Style = setInt("paddingRight", value)
+    fun align(value: string): Style = set("align", value)
+    fun justify(value: string): Style = set("justify", value)
+    fun alignSelf(value: string): Style = set("alignSelf", value)
+    fun width(value: int): Style = setInt("width", value)
+    fun height(value: int): Style = setInt("height", value)
+    fun size(value: int): Style = setInt("width", value).setInt("height", value)
+    fun fillWidth(): Style = set("width", "fill")
+    fun fillHeight(): Style = set("height", "fill")
+    fun fill(): Style = set("width", "fill").set("height", "fill")
+    fun minWidth(value: int): Style = setInt("minWidth", value)
+    fun maxWidth(value: int): Style = setInt("maxWidth", value)
+    fun minHeight(value: int): Style = setInt("minHeight", value)
+    fun maxHeight(value: int): Style = setInt("maxHeight", value)
+    fun grow(value: int): Style = setInt("grow", value)
+    fun safeTop(): Style = set("safeTop", "true")
+    fun safeBottom(): Style = set("safeBottom", "true")
+
+    // Box.
+    fun background(value: string): Style = set("background", value)
+    fun radius(value: int): Style = setInt("radius", value)
+    fun border(width: int, color: string): Style = setInt("border", width).set("borderColor", color)
+    fun borderColor(value: string): Style = set("borderColor", value)
+    fun borderBottom(width: int, color: string): Style = setInt("borderBottom", width).set("borderColor", color)
+    fun borderTop(width: int, color: string): Style = setInt("borderTop", width).set("borderColor", color)
+    fun borderLeft(width: int, color: string): Style = setInt("borderLeft", width).set("borderColor", color)
+    fun borderRight(width: int, color: string): Style = setInt("borderRight", width).set("borderColor", color)
+    fun opacity(percent: int): Style = setInt("opacity", percent)
+    fun clip(): Style = set("clip", "true")
+
+    // Text.
+    fun text(preset: string): Style = set("text", preset)
+    fun color(value: string): Style = set("color", value)
+    fun fontSize(value: int): Style = setInt("size", value)
+    fun weight(value: string): Style = set("weight", value)
+    fun lineHeight(value: int): Style = setInt("lineHeight", value)
+    fun tracking(hundredths: int): Style = setInt("tracking", hundredths)
+    fun textAlign(value: string): Style = set("textAlign", value)
+    fun maxLines(value: int): Style = setInt("maxLines", value)
+
+    // Images and icons.
+    fun tint(value: string): Style = set("tint", value)
+    fun fit(value: string): Style = set("fit", value)
+}
+
+fun style(): Style = Style([])
+
+fun oneCopyEntries(entries: array<StyleEntry>): array<StyleEntry> {
+    val out: array<StyleEntry> = []
+    for (entry in entries) out.append(entry)
+    out
+}
+
+// Target families: a backend applies entries for its family first, then its
+// own name. `web` covers both web targets and `mobile` covers android and ios.
+fun oneTargetFamily(target: string): string =
+    if (target == "web-document" || target == "web-canvas") "web"
+    else if (target == "android" || target == "ios") "mobile"
+    else target
+
+fun oneTargetMatches(scope: string, target: string): bool =
+    scope == "" || scope == target || scope == oneTargetFamily(target)

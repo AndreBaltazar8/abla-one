@@ -1,0 +1,245 @@
+import "abla/compiler/parser"
+import "runtime.ab"
+
+// `$theme`: a theme as a small CSS-like block (SPEC §8.4).
+//
+//   val novakind = $theme from={oneDefaultTheme()} {
+//     tokens { brand: #193c30; muted: #5f6e66; epaper { brand: #000000; } }
+//     text { title: 17/22 semibold -0.2; caption: 12/16; }
+//     kind text { color: @ink; }
+//     Button.primary {
+//       background: @brand; radius: 12;
+//       pressed { background: #10291f; }
+//       web { cursor: pointer; transition: "background .12s"; }
+//       web:hover { background: #204a3b; }
+//     }
+//   }
+//
+// Inside a style block, a nested block is a target (android, web, epaper, …),
+// a state (pressed, hover, focus, …) or both (`web:hover`). Text presets take
+// `size/lineHeight weight tracking` (tracking in px). Component styles extend
+// what the base theme defines; presets replace it.
+
+class OneThemeDraft(
+    val tokenNames: array<string>,
+    val tokenValues: array<string>,
+    val styleNames: array<string>,
+    val styles: array<SyntaxExpression>,
+    val scopeNames: array<string>,
+    val scopes: array<SyntaxExpression>
+)
+
+compile fun oneThemeWord(cursor: ParserCursor): string {
+    parserRawSkipWhitespace(cursor)
+    val word = parserRawTakeUntil(cursor, " \t\r\n:;{}")
+    word
+}
+
+compile fun oneThemeValue(cursor: ParserCursor): string {
+    parserRawSkipWhitespace(cursor)
+    if (parserRawConsume(cursor, "\"")) {
+        val quoted = parserRawTakeUntil(cursor, "\"")
+        parserRawExpect(cursor, "\"")
+        parserRawSkipWhitespace(cursor)
+        parserRawConsume(cursor, ";")
+        return quoted
+    }
+    var value = parserRawTakeUntil(cursor, ";}")
+    parserRawConsume(cursor, ";")
+    while (value.size > 0 && (value[value.size - 1] == 32 || value[value.size - 1] == 10 || value[value.size - 1] == 9 || value[value.size - 1] == 13)) value = value.slice(0, value.size - 1)
+    value
+}
+
+compile fun oneThemeIsState(name: string): bool =
+    name == "pressed" || name == "hover" || name == "focus" || name == "disabled" || name == "selected" || name == "checked"
+
+// Properties of one style block, with nested scopes.
+compile fun oneThemeStyle(cursor: ParserCursor, base: SyntaxExpression, target: string, state: string): SyntaxExpression {
+    var result = base
+    parserRawSkipWhitespace(cursor)
+    parserRawExpect(cursor, "{")
+    while (true) {
+        parserRawSkipWhitespace(cursor)
+        if (parserRawConsume(cursor, "}")) return result
+        if (parserRawEnd(cursor)) {
+            parserFail(cursor, "unterminated style block")
+            return result
+        }
+        var name = oneThemeWord(cursor)
+        parserRawSkipWhitespace(cursor)
+        // web:hover { ... } reads as a name with a colon before a block.
+        if (parserRawAt(cursor, ":") ) {
+            parserRawConsume(cursor, ":")
+            parserRawSkipWhitespace(cursor)
+            if (parserRawAt(cursor, "{")) {
+                result = oneThemeScoped(cursor, result, name, target, state)
+                continue
+            }
+            if (parserRawAt(cursor, "\"")) {
+                result = syntaxCall("oneStyleSet", [result, syntaxString(target), syntaxString(state), syntaxString(name), syntaxString(oneThemeValue(cursor))])
+                continue
+            }
+            val second = parserRawTakeUntil(cursor, " \t\r\n;{}")
+            parserRawSkipWhitespace(cursor)
+            if (parserRawAt(cursor, "{")) {
+                result = oneThemeStyle(cursor, result, name, second)
+                continue
+            }
+            // name: value (the value began right after the colon)
+            var rest = oneThemeValue(cursor)
+            val value = if (rest == "") second else "$second $rest"
+            result = syntaxCall("oneStyleSet", [result, syntaxString(target), syntaxString(state), syntaxString(name), syntaxString(value)])
+            continue
+        }
+        if (parserRawAt(cursor, "{")) result = oneThemeScoped(cursor, result, name, target, state)
+        else parserFail(cursor, "expected `$name: value;` or `$name { ... }`")
+    }
+    result
+}
+
+compile fun oneThemeScoped(cursor: ParserCursor, base: SyntaxExpression, name: string, target: string, state: string): SyntaxExpression =
+    if (oneThemeIsState(name)) oneThemeStyle(cursor, base, target, name) else oneThemeStyle(cursor, base, name, state)
+
+// `17/22 semibold -0.2` -> size, lineHeight, weight, tracking (hundredths).
+compile fun oneThemePreset(cursor: ParserCursor, spec: string): SyntaxExpression {
+    var result = syntaxCall("style", [])
+    val words: array<string> = []
+    var word = ""
+    for (b in spec) {
+        if (b == 32) {
+            if (word != "") words.append(word)
+            word = ""
+        } else word = "$word${byteEncode(b)}"
+    }
+    if (word != "") words.append(word)
+    for (w in words) {
+        var slash = -1
+        var i = 0
+        while (i < w.size) {
+            if (w[i] == 47) slash = i
+            i = i + 1
+        }
+        if (slash > 0) {
+            result = syntaxCall("oneStyleSet", [result, syntaxString(""), syntaxString(""), syntaxString("size"), syntaxString(w.slice(0, slash))])
+            result = syntaxCall("oneStyleSet", [result, syntaxString(""), syntaxString(""), syntaxString("lineHeight"), syntaxString(w.slice(slash + 1, w.size))])
+        } else if ((w[0] >= 48 && w[0] <= 57) || w[0] == 45 || w[0] == 46) {
+            result = syntaxCall("oneStyleSet", [result, syntaxString(""), syntaxString(""), syntaxString("tracking"), syntaxString(oneThemeHundredths(w))])
+        } else result = syntaxCall("oneStyleSet", [result, syntaxString(""), syntaxString(""), syntaxString("weight"), syntaxString(w)])
+    }
+    result
+}
+
+// "-0.2" -> "-20", "0.05" -> "5", "1" -> "100".
+compile fun oneThemeHundredths(value: string): string {
+    var negative = value.size > 0 && value[0] == 45
+    var whole = 0
+    var frac = 0
+    var digits = 0
+    var after = false
+    var i = if (negative) 1 else 0
+    while (i < value.size) {
+        val b = value[i]
+        if (b == 46) after = true
+        else if (b >= 48 && b <= 57) {
+            if (after) {
+                if (digits < 2) {
+                    frac = frac * 10 + b - 48
+                    digits = digits + 1
+                }
+            } else whole = whole * 10 + b - 48
+        }
+        i = i + 1
+    }
+    if (digits == 1) frac = frac * 10
+    val n = whole * 100 + frac
+    if (negative) "-$n" else "$n"
+}
+
+compile fun oneThemeTokens(cursor: ParserCursor, var draft: OneThemeDraft, scope: string): void {
+    parserRawSkipWhitespace(cursor)
+    parserRawExpect(cursor, "{")
+    while (true) {
+        parserRawSkipWhitespace(cursor)
+        if (parserRawConsume(cursor, "}")) return
+        val name = oneThemeWord(cursor)
+        parserRawSkipWhitespace(cursor)
+        if (parserRawAt(cursor, "{")) oneThemeTokens(cursor, draft, name)
+        else {
+            parserRawExpect(cursor, ":")
+            draft.tokenNames.append(if (scope == "") name else "$scope:$name")
+            draft.tokenValues.append(oneThemeValue(cursor))
+        }
+    }
+    return
+}
+
+// The body of a theme or scope block: tokens, text, kind, scope and component styles.
+compile fun oneThemeBody(cursor: ParserCursor, base: SyntaxExpression): SyntaxExpression {
+    var draft = OneThemeDraft([], [], [], [], [], [])
+    parserRawSkipWhitespace(cursor)
+    parserRawExpect(cursor, "{")
+    while (true) {
+        parserRawSkipWhitespace(cursor)
+        if (parserRawConsume(cursor, "}")) break
+        if (parserRawEnd(cursor)) {
+            parserFail(cursor, "unterminated \$theme")
+            break
+        }
+        val name = oneThemeWord(cursor)
+        if (name == "tokens") oneThemeTokens(cursor, draft, "")
+        else if (name == "scope") {
+            draft.scopeNames.append(oneThemeWord(cursor))
+            draft.scopes.append(oneThemeBody(cursor, syntaxCall("theme", [])))
+        } else if (name == "text") {
+            parserRawSkipWhitespace(cursor)
+            parserRawExpect(cursor, "{")
+            while (true) {
+                parserRawSkipWhitespace(cursor)
+                if (parserRawConsume(cursor, "}")) break
+                val preset = oneThemeWord(cursor)
+                parserRawSkipWhitespace(cursor)
+                draft.styleNames.append("text:$preset")
+                if (parserRawAt(cursor, "{")) draft.styles.append(oneThemeStyle(cursor, syntaxCall("style", []), "", ""))
+                else {
+                    parserRawExpect(cursor, ":")
+                    draft.styles.append(oneThemePreset(cursor, oneThemeValue(cursor)))
+                }
+            }
+        } else if (name == "kind") {
+            val kind = oneThemeWord(cursor)
+            draft.styleNames.append("kind:$kind")
+            draft.styles.append(oneThemeStyle(cursor, syntaxCall("style", []), "", ""))
+        } else {
+            draft.styleNames.append(name)
+            draft.styles.append(oneThemeStyle(cursor, syntaxCall("style", []), "", ""))
+        }
+    }
+    val names: array<SyntaxExpression> = []
+    for (n in draft.tokenNames) names.append(syntaxString(n))
+    val values: array<SyntaxExpression> = []
+    for (v in draft.tokenValues) values.append(syntaxString(v))
+    val styleNames: array<SyntaxExpression> = []
+    for (n in draft.styleNames) styleNames.append(syntaxString(n))
+    val scopeNames: array<SyntaxExpression> = []
+    for (n in draft.scopeNames) scopeNames.append(syntaxString(n))
+    syntaxCall("oneThemeBuild", [base, syntaxArray(names), syntaxArray(values), syntaxArray(styleNames), syntaxArray(draft.styles), syntaxArray(scopeNames), syntaxArray(draft.scopes)])
+}
+
+// `$theme { ... }` starts from an empty theme; `from={expr}` starts from a
+// copy of another (usually oneDefaultTheme()).
+compile fun oneThemeParse(cursor: ParserCursor): SyntaxExpression {
+    parserRawSkipWhitespace(cursor)
+    var base = syntaxCall("theme", [])
+    if (parserRawConsume(cursor, "from")) {
+        parserRawSkipWhitespace(cursor)
+        parserRawExpect(cursor, "=")
+        parserRawSkipWhitespace(cursor)
+        parserRawExpect(cursor, "{")
+        base = syntaxCall("oneThemeCopy", [parserParseAblaExpression(cursor)])
+        parserRawSkipWhitespace(cursor)
+        parserRawExpect(cursor, "}")
+    }
+    oneThemeBody(cursor, base)
+}
+
+#compilerRegisterSubparser("theme", oneThemeParse)

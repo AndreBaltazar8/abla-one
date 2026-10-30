@@ -1,0 +1,617 @@
+import "abla/http"
+import "abla/net"
+import "abla/json"
+import "abla/crypto"
+import "abla/bytes"
+import "abla/websocket"
+import "abla/process/time"
+import "abla/sys/linux/random"
+import "abla/sys/linux/process"
+import "../one.ab"
+import "web_document.ab"
+import "web_session.ab"
+import "../layout/paint.ab"
+
+// Live web (SPEC §10, web-document M2): apps run on the server, one session
+// per browser tab. The first request is rendered on the server (SSR) and the
+// page then connects to /one/live over WebSocket. Browser events go to the
+// session, which re-renders; the server sends the new markup and only the CSS
+// rules the page hasn't seen, and the thin host (web/host.js) patches the DOM
+// by `data-one` keys. Other HTTP requests go to the application's handler, in
+// the same epoll loop and process.
+//
+// Services in a session: requests to the same origin (a path such as
+// /api/mobile) are dispatched in process after the current event; timers run
+// in the loop; secure storage is the session's memory. `effect("subscribe",
+// topic)` subscribes the session to `oneLiveBroadcast(topic, payload)`, which
+// reaches it as `receive("push", payload)`: the server pushes changes instead
+// of waiting for a poll.
+
+class OneLiveSlot(
+    var descriptor: int,
+    var input: string,
+    var output: string,
+    var outputOffset: int,
+    var upgraded: bool,
+    var session: string,
+    var closing: bool
+)
+
+class OneLiveOptions(
+    val title: string,
+    val lang: string,
+    val background: string,
+    val iconBase: string,
+    // Path of web/host.js on disk, served at /one/host.js.
+    val hostScript: string,
+    // Extra markup for the document head (fonts, favicons, meta tags).
+    val head: string
+)
+
+// Seeds a new session's secure storage from the page request, and maps stored
+// values back to cookies. Storage is the app's; cookies let a later page load
+// (or another server process) continue where the session left off, for
+// example after the session rotated its tokens. An empty value means the key
+// was removed.
+class OneLiveStorage(
+    val seed: (HttpRequest) -> Map<string, string>,
+    val cookies: (HttpRequest, string, string) -> array<string>
+)
+
+fun oneLiveNoStorage(): OneLiveStorage = OneLiveStorage({ request -> Map<string, string>() }, { request, key, value -> array<string>() })
+
+resource class OneLiveServer(
+    val handler: (HttpRequest) -> HttpResponse,
+    // Which requests are live pages (SSR + session) instead of handler requests.
+    val isPage: (HttpRequest) -> bool,
+    // Creates the app for a new session from the page request (cookies,
+    // query) and the session id; give the app `oneLiveServices(session)`.
+    val factory: (HttpRequest, string) -> OneApp,
+    val theme: Theme,
+    val options: OneLiveOptions,
+    val storage: OneLiveStorage,
+    val listener: TcpListener,
+    val poller: SocketPoller,
+    val slots: array<OneLiveSlot>,
+    val sessions: array<OneLiveSession>,
+    var stopped: bool
+) {
+    fun drop(): void {
+        for (slot in slots) if (slot.descriptor >= 0) linuxTcpCloseDescriptor(slot.descriptor)
+        poller.close()
+        listener.close()
+        stopped = true
+        return
+    }
+}
+
+// Topics and payloads broadcast during this loop iteration, delivered to
+// subscribed sessions before the next render.
+val oneLiveBroadcasts: array<string> = []
+
+fun oneLiveBroadcast(topic: string, payload: string): void {
+    oneLiveBroadcasts.append(topic)
+    oneLiveBroadcasts.append(payload)
+    return
+}
+
+fun oneLiveServer(
+    address: Ipv4SocketAddress,
+    handler: (HttpRequest) -> HttpResponse,
+    isPage: (HttpRequest) -> bool,
+    factory: (HttpRequest, string) -> OneApp,
+    theme: Theme,
+    options: OneLiveOptions,
+    storage: OneLiveStorage = oneLiveNoStorage()
+): OneLiveServer {
+    val listener = tcpListenAddress(address, 1024)
+    listener.setNonblocking()
+    val poller = socketPoller()
+    if (listener.descriptor >= 0 && poller.descriptor >= 0) poller.watchDescriptor(listener.descriptor)
+    OneLiveServer(handler, isPage, factory, theme, options, storage, move(listener), move(poller), [], [], false)
+}
+
+fun oneLiveSessionId(): string = hexEncode(secureRandomBytes(16).bytes)
+
+fun OneLiveServer.findSession(id: string): int {
+    var i = 0
+    while (i < sessions.size) {
+        if (sessions[i].id == id) return i
+        i = i + 1
+    }
+    -1
+}
+
+fun OneLiveServer.findSlot(descriptor: int): int {
+    var i = 0
+    while (i < slots.size) {
+        if (slots[i].descriptor == descriptor) return i
+        i = i + 1
+    }
+    -1
+}
+
+fun OneLiveServer.queue(slot: int, bytes: string): void {
+    if (slot < 0 || slots[slot].descriptor < 0) return
+    if (slots[slot].output.size + bytes.size > 8388608) {
+        closeSlot(slot)
+        return
+    }
+    slots[slot].output = "${slots[slot].output}$bytes"
+    poller.modifyDescriptor(slots[slot].descriptor, true, true)
+    return
+}
+
+fun OneLiveServer.closeSlot(slot: int): void {
+    if (slot < 0 || slots[slot].descriptor < 0) return
+    poller.unwatchDescriptor(slots[slot].descriptor)
+    linuxTcpCloseDescriptor(slots[slot].descriptor)
+    val session = findSession(slots[slot].session)
+    if (session >= 0 && sessions[session].slot == slot) sessions[session].slot = -1
+    slots[slot].descriptor = -1
+    slots[slot].input = ""
+    slots[slot].output = ""
+    slots[slot].outputOffset = 0
+    slots[slot].upgraded = false
+    slots[slot].session = ""
+    slots[slot].closing = false
+    return
+}
+
+fun OneLiveServer.accept(): void {
+    var accepting = true
+    while (accepting) {
+        val connection = listener.accept()
+        if (connection.descriptor < 0) accepting = false
+        else {
+            connection.setNonblocking()
+            val descriptor = connection.descriptor
+            connection.descriptor = -1
+            var slot = -1
+            var i = 0
+            while (slot < 0 && i < slots.size) {
+                if (slots[i].descriptor < 0) slot = i
+                i = i + 1
+            }
+            if (slot < 0) slots.append(OneLiveSlot(descriptor, "", "", 0, false, "", false))
+            else {
+                slots[slot].descriptor = descriptor
+                slots[slot].input = ""
+            }
+            poller.watchDescriptor(descriptor)
+        }
+    }
+    return
+}
+
+fun oneLiveContentLength(request: HttpRequest): int = oneParseInt(request.header("content-length"), 0)
+
+fun OneLiveServer.read(slot: int): void {
+    val connection = TcpConnection(slots[slot].descriptor)
+    val incoming = connection.readResult(65536)
+    connection.descriptor = -1
+    if (incoming.hasData()) {
+        slots[slot].input = "${slots[slot].input}${incoming.bytes}"
+        if (slots[slot].upgraded) frames(slot) else http(slot)
+    } else if (incoming.reachedEof() || (incoming.failed() && incoming.errorCode != 11)) closeSlot(slot)
+    return
+}
+
+fun OneLiveServer.write(slot: int): void {
+    if (slots[slot].outputOffset >= slots[slot].output.size) return
+    val connection = TcpConnection(slots[slot].descriptor)
+    val written = connection.writeResult(slots[slot].output.slice(slots[slot].outputOffset, slots[slot].output.size))
+    connection.descriptor = -1
+    slots[slot].outputOffset = slots[slot].outputOffset + written.written
+    if (written.failed() && written.errorCode != 11) closeSlot(slot)
+    else if (slots[slot].outputOffset >= slots[slot].output.size) {
+        slots[slot].output = ""
+        slots[slot].outputOffset = 0
+        if (slots[slot].closing) closeSlot(slot)
+        else poller.modifyDescriptor(slots[slot].descriptor, true, false)
+    }
+    return
+}
+
+// One complete HTTP request: a WebSocket upgrade, the host script, a live
+// page, or the application's handler. Plain HTTP connections close after the
+// response.
+fun OneLiveServer.http(slot: int): void {
+    val input = slots[slot].input
+    val end = httpHeaderEnd(input)
+    if (end < 0) {
+        if (input.size > 65536) closeSlot(slot)
+        return
+    }
+    val head = httpParseRequest(input.slice(0, end))
+    val length = oneLiveContentLength(head)
+    if (input.size < end + length) {
+        if (length > 16777216) closeSlot(slot)
+        return
+    }
+    val request = httpParseRequest(input.slice(0, end + length))
+    slots[slot].input = input.slice(end + length, input.size)
+    if (request.path == "/one/live" && webSocketIsUpgradeRequest(request)) {
+        val id = request.queryParameter("s")
+        val session = findSession(id)
+        if (session < 0) {
+            // The server restarted or the session expired: the page reloads.
+            queue(slot, webSocketUpgradeResponse(request).render())
+            queue(slot, webSocketEncodeFrame(webSocketClosePayload(1008, "unknown session"), 8))
+            slots[slot].closing = true
+            return
+        }
+        if (sessions[session].slot >= 0 && sessions[session].slot != slot) closeSlot(sessions[session].slot)
+        sessions[session].slot = slot
+        sessions[session].changed = true
+        sessions[session].htmlSent = ""
+        slots[slot].upgraded = true
+        slots[slot].session = id
+        queue(slot, webSocketUpgradeResponse(request).render())
+        frames(slot)
+        return
+    }
+    val response = if (request.path == "/one/upload" && request.method == "POST") upload(request)
+        else if (request.path == "/one/cookies") cookies(request)
+        else if (request.path == "/one/host.js")
+        HttpResponse(200, [HttpHeader("Content-Type", "text/javascript; charset=utf-8"), HttpHeader("Cache-Control", "no-cache")], linuxReadFile(options.hostScript, 1048576))
+        else if (request.path == "/one/canvas.js")
+        HttpResponse(200, [HttpHeader("Content-Type", "text/javascript; charset=utf-8"), HttpHeader("Cache-Control", "no-cache")], linuxReadFile(oneLiveSibling(options.hostScript, "canvas.js"), 1048576))
+        else if (request.path.size > 11 && request.path.slice(0, 11) == "/one/fonts/" && oneLiveFontName(request.path.slice(11, request.path.size)))
+        HttpResponse(200, [HttpHeader("Content-Type", "font/ttf"), HttpHeader("Cache-Control", "max-age=86400")], linuxReadFile("${oneLiveSibling(options.hostScript, "")}../../../assets/fonts/${request.path.slice(11, request.path.size)}", 1048576))
+        else if (request.method == "GET" && isPage(request)) page(request)
+        else handler(request)
+    val rendered = if (request.method == "HEAD") response.renderHead() else response.render()
+    queue(slot, rendered)
+    slots[slot].closing = true
+    return
+}
+
+// Uploads from the page's file pickers. ?s=session&id=request&kind=...:
+// "profile"/"emoji" carry the normalized image as base64 text, "files" one
+// raw file per request (X-One-Name, Content-Type; X-One-Last on the final
+// one), "cancel" an empty body.
+fun OneLiveServer.upload(request: HttpRequest): HttpResponse {
+    val index = findSession(request.queryParameter("s"))
+    if (index < 0) return httpText("unknown session", 404)
+    val id = oneParseInt(request.queryParameter("id"), 0)
+    val kind = request.queryParameter("kind")
+    if (kind == "cancel") {
+        sessions[index].queue.complete(oneResponsePayload(id, 204, if (request.queryParameter("files") == "1") "[]" else "", ""))
+    } else if (kind == "profile" || kind == "emoji") {
+        sessions[index].queue.complete(oneResponsePayload(id, 200, request.body, ""))
+    } else {
+        val handle = "file-${oneLiveSessionId()}"
+        val info = jsonObject(["handle", "name", "size", "mime"], [jsonString(handle), jsonString(oneUrlDecode(request.header("x-one-name"))), jsonInteger(request.body.size), jsonString(if (request.header("content-type") != "") request.header("content-type") else "application/octet-stream")])
+        sessions[index].queue.addFile(handle, request.body, jsonStringify(info))
+        val picked = request.queryParameter("picked")
+        val all = if (picked == "") handle else "$picked,$handle"
+        if (request.header("x-one-last") == "1") {
+            val files: array<Json> = []
+            var start = 0
+            var i = 0
+            while (i <= all.size) {
+                if (i == all.size || all[i] == 44) {
+                    val stored = sessions[index].queue.fileInfo.get(all.slice(start, i))
+                    if (stored != null) files.append(jsonParse(stored).value)
+                    start = i + 1
+                }
+                i = i + 1
+            }
+            sessions[index].queue.complete(oneResponsePayload(id, 200, jsonStringify(jsonArray(files)), ""))
+        }
+        return HttpResponse(200, [HttpHeader("Content-Type", "text/plain"), HttpHeader("Cache-Control", "no-store")], handle)
+    }
+    HttpResponse(204, [HttpHeader("Cache-Control", "no-store")], "")
+}
+
+// The cookies for a session's stored values, fetched by the page after the
+// session reports a change (`{"t":"cookies"}`).
+fun OneLiveServer.cookies(request: HttpRequest): HttpResponse {
+    val index = findSession(request.queryParameter("s"))
+    val headers: array<HttpHeader> = [HttpHeader("Cache-Control", "no-store")]
+    if (index >= 0) for (line in sessionCookies(request, index)) headers.append(HttpHeader("Set-Cookie", line))
+    HttpResponse(204, headers, "")
+}
+
+fun OneLiveServer.sessionCookies(request: HttpRequest, index: int): array<string> {
+    val out: array<string> = []
+    val stored = sessions[index].queue.storage
+    for (key in stored.keys()) {
+        val value = stored.get(key)
+        if (value != null) for (line in storage.cookies(request, key, value)) out.append(line)
+    }
+    sessions[index].queue.cookiesChanged = false
+    out
+}
+
+fun oneLiveSibling(path: string, name: string): string {
+    var end = path.size
+    while (end > 0 && path[end - 1] != 47) end = end - 1
+    "${path.slice(0, end)}$name"
+}
+
+fun oneLiveFontName(name: string): bool = name == "Inter-400.ttf" || name == "Inter-500.ttf" || name == "Inter-600.ttf" || name == "Inter-700.ttf"
+
+// A live page. Each tab has its own session: a reload resumes the session
+// its tab just left (the host sets a short-lived `one_resume` cookie when the
+// page hides), and any other request starts a new session seeded from the
+// request. The page is rendered with the session's current state.
+fun OneLiveServer.page(request: HttpRequest): HttpResponse {
+    var index = findSession(oneLiveCookie(request, "one_resume"))
+    if (index < 0) {
+        val id = oneLiveSessionId()
+        val queueIndex = oneLiveQueueIndex(id)
+        val seeded = storage.seed(request)
+        for (key in seeded.keys()) {
+            val value = seeded.get(key)
+            if (value != null) oneLiveQueueList[queueIndex].storage.set(key, value)
+        }
+        val app = factory(request, id)
+        sessions.append(oneSession(id, app, oneLiveQueueList[queueIndex]))
+        index = sessions.size - 1
+    }
+    sessions[index].lastSeen = monotonicMilliseconds()
+    // The page's last known width (the host keeps it in a cookie), so the first
+    // paint already has the right layout.
+    val remembered = oneParseInt(oneLiveCookie(request, "one_width"), 0)
+    if (remembered > 0) sessions[index].width = remembered
+    val canvas = request.queryParameter("render") == "canvas"
+    // Settle work that completes without waiting (storage, in-process requests),
+    // so the first paint shows content rather than a loading state.
+    var rounds = 0
+    while (rounds < 16 && pump(index)) rounds = rounds + 1
+    // The first paint is always a document (canvas pages show it until the
+    // canvas takes over); a canvas session switches after.
+    sessions[index].canvas = false
+    val markup = sessions[index].render(theme, options.iconBase)
+    sessions[index].canvas = canvas
+    sessions[index].cssSent = sessions[index].css.rules.size
+    sessions[index].htmlSent = markup
+    val boot = "{\"s\":\"${sessions[index].id}\",\"r\":${sessions[index].revision},\"icons\":\"${options.iconBase}\"}"
+    val session = sessions[index]
+    val fill = if (session.document) "min-height:100%" else "height:100%"
+    val body = "<!doctype html><html lang=\"${oneHtmlEscape(if (session.lang != "") session.lang else options.lang)}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(if (session.title != "") session.title else options.title)}</title>${session.meta}${options.head}" +
+        "<style>html,body{margin:0;height:100%;background:${options.background}}#one-root{$fill}#one-root>.one{$fill}\n${oneWebBaseCss()}</style><style id=\"one-css\">${sessions[index].css.text()}</style>" +
+        "<script>window.__one=$boot</script><script src=\"one/${if (canvas) "canvas" else "host"}.js\" defer></script></head><body><div id=\"one-root\">$markup</div></body></html>"
+    val headers = [
+        HttpHeader("Content-Type", "text/html; charset=utf-8"),
+        HttpHeader("Cache-Control", "no-store"),
+        HttpHeader("Set-Cookie", "one_resume=; SameSite=Lax; Max-Age=0")
+    ]
+    if (sessions[index].queue.cookiesChanged) for (line in sessionCookies(request, index)) headers.append(HttpHeader("Set-Cookie", line))
+    HttpResponse(200, headers, body)
+}
+
+fun oneLiveCookie(request: HttpRequest, name: string): string {
+    val header = request.header("cookie")
+    var start = 0
+    while (start < header.size) {
+        var end = start
+        while (end < header.size && header[end] != 59) end = end + 1
+        var part = header.slice(start, end)
+        while (part.size > 0 && part[0] == 32) part = part.slice(1, part.size)
+        if (part.size > name.size && part.slice(0, name.size + 1) == "$name=") return part.slice(name.size + 1, part.size)
+        start = end + 1
+    }
+    ""
+}
+
+fun OneLiveServer.frames(slot: int): void {
+    var processing = true
+    while (processing && slots[slot].descriptor >= 0) {
+        val decoded = webSocketDecodeFrame(slots[slot].input, 4194304, true)
+        if (decoded.error != "") {
+            queue(slot, webSocketEncodeFrame(webSocketClosePayload(1002, "protocol error"), 8))
+            slots[slot].closing = true
+            processing = false
+        } else if (!decoded.complete) processing = false
+        else {
+            slots[slot].input = slots[slot].input.slice(decoded.consumed, slots[slot].input.size)
+            val frame = decoded.frame
+            if (frame.opcode == 9) queue(slot, webSocketEncodeFrame(frame.payload, 10))
+            else if (frame.opcode == 8) {
+                queue(slot, webSocketEncodeFrame(frame.payload, 8))
+                slots[slot].closing = true
+                processing = false
+            } else if (frame.opcode == 1) message(slot, frame.payload)
+        }
+    }
+    return
+}
+
+// Messages from the page host: {"t":"event","r":revision,"id":n,"v":value}
+// and {"t":"hello"} after (re)connecting.
+fun OneLiveServer.message(slot: int, payload: string): void {
+    val index = findSession(slots[slot].session)
+    if (index < 0) return
+    val parsed = jsonParse(payload)
+    if (!parsed.succeeded) return
+    val m = parsed.value
+    sessions[index].lastSeen = monotonicMilliseconds()
+    oneSessionMessage(sessions[index], theme, m)
+    return
+}
+
+// Runs one round of a session's platform work. Returns whether anything ran.
+fun OneLiveServer.pump(index: int): bool {
+    var worked = false
+    var requests = sessions[index].queue.takeRequests()
+    while (requests.size > 0) {
+        for (item in requests) sessions[index].queue.complete(oneLiveExecute(handler, item))
+        requests = sessions[index].queue.takeRequests()
+    }
+    val completions = sessions[index].queue.takeCompletions()
+    for (payload in completions) sessions[index].receive("result", payload)
+    val pushes = sessions[index].queue.takePushes()
+    for (payload in pushes) sessions[index].receive("push", payload)
+    completions.size > 0 || pushes.size > 0
+}
+
+// Same-origin requests run through the application's handler in process.
+fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest): string {
+    val r = item.request
+    // "./api/x" is the browser-relative form of "/api/x" (pages may be served
+    // under a path prefix); both run in process.
+    val url = if (r.url.size > 1 && r.url[0] == 46 && r.url[1] == 47) r.url.slice(1, r.url.size) else r.url
+    if (url.size == 0 || url[0] != 47) {
+        return oneResponsePayload(item.id, 501, "", "live sessions only reach their own server (relative URLs)")
+    }
+    var path = url
+    var query = ""
+    var i = 0
+    while (i < url.size) {
+        if (url[i] == 63) {
+            path = url.slice(0, i)
+            query = url.slice(i + 1, url.size)
+            i = url.size
+        }
+        i = i + 1
+    }
+    val headers: array<HttpHeader> = []
+    for (h in r.headers) headers.append(HttpHeader(oneLowerAscii(h.name), h.value))
+    var body = r.body
+    if (r.bodyBase64 != "") body = base64Decode(r.bodyBase64)
+    if (r.bodyFile != "") {
+        val bytes = oneLiveFileBytes(r.bodyFile)
+        if (bytes == null) return oneResponsePayload(item.id, 0, "", "unknown file handle")
+        body = bytes
+    }
+    if (r.parts.size > 0) {
+        val boundary = "abla-one-${oneLiveSessionId()}"
+        var out = ""
+        for (part in r.parts) {
+            var content = part.value
+            if (part.base64 != "") content = base64Decode(part.base64)
+            if (part.file != "") {
+                val bytes = oneLiveFileBytes(part.file)
+                content = if (bytes != null) bytes else ""
+            }
+            out = "$out--$boundary\r\nContent-Disposition: form-data; name=\"${part.name}\"${if (part.filename != "") "; filename=\"${part.filename}\"" else ""}\r\n${if (part.contentType != "") "Content-Type: ${part.contentType}\r\n" else ""}\r\n$content\r\n"
+        }
+        body = "$out--$boundary--\r\n"
+        headers.append(HttpHeader("content-type", "multipart/form-data; boundary=$boundary"))
+    }
+    val response = handler(HttpRequest(r.method, path, query, headers, body, [], []))
+    val names: array<string> = []
+    val values: array<Json> = []
+    for (h in response.headers) {
+        names.append(oneLowerAscii(h.name))
+        values.append(jsonString(h.value))
+    }
+    jsonStringify(jsonObject(["requestId", "status", "body", "error", "headers"], [jsonInteger(item.id), jsonInteger(response.status), jsonString(response.body), jsonString(""), jsonObject(names, values)]))
+}
+
+// Percent-decoding for names sent in headers (encodeURIComponent).
+fun oneUrlDecode(value: string): string {
+    var out = ""
+    var start = 0
+    var i = 0
+    while (i < value.size) {
+        if (value[i] == 37 && i + 2 < value.size) {
+            val hi = oneHexDigit(value[i + 1])
+            val lo = oneHexDigit(value[i + 2])
+            if (hi >= 0 && lo >= 0) {
+                out = "$out${value.slice(start, i)}${byteEncode(hi * 16 + lo)}"
+                i = i + 3
+                start = i
+                continue
+            }
+        }
+        i = i + 1
+    }
+    "$out${value.slice(start, value.size)}"
+}
+
+fun oneHexDigit(b: int): int = if (b >= 48 && b <= 57) b - 48 else if (b >= 97 && b <= 102) b - 87 else if (b >= 65 && b <= 70) b - 55 else -1
+
+fun oneLiveFileBytes(handle: string): string? {
+    for (q in oneLiveQueueList) {
+        val found = q.fileBytes.get(handle)
+        if (found != null) return found
+    }
+    null
+}
+
+// One loop iteration after IO: broadcasts, due timers, platform work, then a
+// patch for each connected session whose page changed.
+fun OneLiveServer.settle(): void {
+    if (oneLiveBroadcasts.size > 0) {
+        var i = 0
+        while (i + 1 < oneLiveBroadcasts.size) {
+            var j = 0
+            while (j < sessions.size) {
+                if (sessions[j].queue.subscribed(oneLiveBroadcasts[i])) sessions[j].queue.push(oneLiveBroadcasts[i + 1])
+                j = j + 1
+            }
+            i = i + 2
+        }
+        oneLiveBroadcasts.clear()
+    }
+    val now = monotonicMilliseconds()
+    var index = 0
+    while (index < sessions.size) {
+        sessions[index].queue.fireTimers(now)
+        var rounds = 0
+        while (rounds < 8 && pump(index)) rounds = rounds + 1
+        if (sessions[index].slot >= 0) for (message in sessions[index].queue.takeOutbox()) queue(sessions[index].slot, webSocketEncodeFrame(message, 1))
+        if (sessions[index].queue.cookiesChanged && sessions[index].slot >= 0) {
+            sessions[index].queue.cookiesChanged = false
+            queue(sessions[index].slot, webSocketEncodeFrame("{\"t\":\"cookies\"}", 1))
+        }
+        if (sessions[index].changed && sessions[index].slot >= 0) {
+            val message = oneSessionUpdate(sessions[index], theme, options.iconBase)
+            if (message != "") queue(sessions[index].slot, webSocketEncodeFrame(message, 1))
+        }
+        index = index + 1
+    }
+    // Sessions without a page for 30 minutes end.
+    val kept: array<OneLiveSession> = []
+    for (session in sessions) {
+        if (session.slot >= 0 || now - session.lastSeen < 1800000) kept.append(session)
+        else {
+            oneLiveForget(session.id)
+            oneMemoForget(session.id)
+        }
+    }
+    if (kept.size != sessions.size) {
+        sessions.clear()
+        for (session in kept) sessions.append(session)
+    }
+    return
+}
+
+fun OneLiveServer.nextTimeout(): int {
+    var timeout = 1000
+    val now = monotonicMilliseconds()
+    for (session in sessions) {
+        val wait = session.queue.nextTimer(now)
+        if (wait < timeout) timeout = wait
+    }
+    timeout
+}
+
+fun OneLiveServer.step(): void {
+    val events = poller.wait(1024, nextTimeout())
+    for (event in events.events) {
+        if (event.descriptor == listener.descriptor && event.readable) accept()
+        else {
+            val slot = findSlot(event.descriptor)
+            if (slot >= 0) {
+                if (event.error || event.closed) closeSlot(slot)
+                else {
+                    if (event.readable) read(slot)
+                    if (event.writable && slots[slot].descriptor >= 0) write(slot)
+                }
+            }
+        }
+    }
+    settle()
+    return
+}
+
+fun OneLiveServer.run(): int {
+    tcpEnableGracefulShutdown()
+    while (!stopped && !tcpShutdownRequested()) step()
+    0
+}

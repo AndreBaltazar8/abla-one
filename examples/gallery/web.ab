@@ -1,0 +1,24 @@
+import "abla/io"
+import "abla/fs"
+import "gallery.ab"
+import "../../src/backends/web_document.ab"
+
+// Server-side renders both gallery tabs to HTML files for review.
+fun main: int {
+    var app = Gallery()
+    val t = oneDefaultTheme()
+    val out = "build/gallery"
+    var ui = oneUi("web-document", t)
+    Path("$out/icons").createDirectories()
+    Path("$out/components.html").writeText(oneWebDocument("Abla One · Componentes", "pt-PT", app.render(ui), t, "icons", "#ffffff"))
+    app.tab = 1
+    var ui2 = oneUi("web-document", t)
+    Path("$out/people.html").writeText(oneWebDocument("Abla One · Pessoas", "pt-PT", app.render(ui2), t, "icons", "#ffffff"))
+    // The Wasm client page: the same first paint, then the app runs in the
+    // browser (build with `make gallery-client`).
+    app.tab = 0
+    var ui3 = oneUi("web-document", t)
+    Path("$out/client.html").writeText(oneWebClientDocument("Abla One", "pt-PT", app.render(ui3), t, "icons", "#ffffff", "one/host.js", "gallery.wasm"))
+    println("wrote $out")
+    0
+}

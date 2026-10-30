@@ -1,0 +1,26 @@
+// Reactive state. Application state lives in ordinary classes whose properties
+// are delegated to State: `var query: string by State("")`. A write that changes
+// the value bumps the global revision, which the run loop uses to decide
+// whether to render again.
+
+var oneStateRevision = 0
+
+fun oneRevision(): int = oneStateRevision
+
+class State<T>(var current: T) {
+    fun getValue(): T = current
+    fun setValue(next: T): void {
+        if (next != current) {
+            current = next
+            oneStateRevision += 1
+        }
+        return
+    }
+}
+
+// Marks the app dirty after an in-place change the State delegate can't see,
+// such as appending to an array held in state.
+fun oneInvalidate(): void {
+    oneStateRevision += 1
+    return
+}
