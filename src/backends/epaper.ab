@@ -28,7 +28,10 @@ class OneEpaperOptions(
     // Above this share of the panel (percent), refresh fully.
     val fullArea: int,
     // The thinnest border or rule, in panel pixels: one is too faint on e-paper.
-    val minStroke: int = 2
+    val minStroke: int = 2,
+    // Only solid black and white: the panel's greys look washed out, above all
+    // under fast refreshes. Light fills become outlines (oneEpaperCrispPaint).
+    val crisp: bool = true
 )
 
 fun onePaperMonoOptions(): OneEpaperOptions = OneEpaperOptions(480, 800, 133, "#ffffff", 12, 45)
@@ -93,10 +96,24 @@ fun oneEpaperLevel(gray: int, px: int, py: int): int {
 // first), each as nibble * 4 - 30.
 val oneEpaperDither: array<int> = [-30, 18, -22, 26, -14, 2, -6, 10, -18, 30, -26, 22, -2, 14, -10, 6]
 
+// Black or white, no dither: thin strokes' grey edges would scatter into dots
+// and look faded. The threshold keeps them dark.
+val oneEpaperCrispThreshold = 192
+
+fun oneEpaperCrispLevel(gray: int): int = if (gray >= oneEpaperCrispThreshold) 3 else 0
+
 fun oneEpaperGray(rgb: int): int = (((rgb >> 16) & 255) * 299 + ((rgb >> 8) & 255) * 587 + (rgb & 255) * 114) / 1000
 
+// A fill too light to print as black would vanish: its outline instead.
+fun oneEpaperCrispPaint(p: OnePaint, minStroke: int): OnePaint {
+    if (p.op != "rect" || oneColorAlpha(p.color) == 0) return p
+    val gray = oneEpaperGray(oneColorValue(p.color))
+    if (gray < oneEpaperCrispThreshold || gray >= 250) return p
+    OnePaint("border", p.x, p.y, p.w, p.h, p.radius, "#000000", p.text, p.size, p.weight, "$minStroke $minStroke $minStroke $minStroke")
+}
+
 // The paint list scaled from logical to panel pixels.
-fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int, minStroke: int = 2): OneFrame {
+fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int, minStroke: int = 2, crisp: bool = false): OneFrame {
     val paints: array<OnePaint> = []
     for (p in frame.paints) {
         val x = p.x * scale / 100
@@ -108,7 +125,8 @@ fun oneEpaperScaleFrame(frame: OneFrame, scale: int, width: int, height: int, mi
             if (w < minStroke) w = minStroke
             if (h < minStroke) h = minStroke
         }
-        paints.append(OnePaint(p.op, x, y, w, h, p.radius * scale / 100, p.color, p.text, p.size * scale / 100, p.weight, oneEpaperScaleSides(p.sides, scale, minStroke)))
+        val paint = OnePaint(p.op, x, y, w, h, p.radius * scale / 100, p.color, p.text, p.size * scale / 100, p.weight, oneEpaperScaleSides(p.sides, scale, minStroke))
+        paints.append(if (crisp) oneEpaperCrispPaint(paint, minStroke) else paint)
     }
     OneFrame(paints, frame.hits, frame.visible, width, height)
 }
@@ -139,7 +157,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     var ui = oneUiSized("epaper", theme, lw)
     val frame = onePaintFrame(oneLayout(app.render(ui), theme, "epaper", lw, lh, state.scroll), lw, lh)
     state.frame = frame
-    val scaled = oneEpaperScaleFrame(frame, o.scale, o.width, o.height, o.minStroke)
+    val scaled = oneEpaperScaleFrame(frame, o.scale, o.width, o.height, o.minStroke, o.crisp)
     // Redraw what the paint list says changed, quantise it into canvas bytes
     // (eight portrait rows are one physical byte), and mark the 8×8 tiles
     // whose bytes changed. A band of rows at a time, on one kept surface.
@@ -175,7 +193,11 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
                     var k = 0
                     while (k < 8) {
                         val y = column * 8 + k
-                        val level = oneEpaperLevel(oneEpaperGray(state.surface.pixels[(y - y0) * o.width + x]), y, py)
+                        // (Most of a screen is one colour: skip its arithmetic.)
+                        val pixel = state.surface.pixels[(y - y0) * o.width + x]
+                        val level = if (pixel == 16777215) 3
+                            else if (o.crisp) oneEpaperCrispLevel(oneEpaperGray(pixel))
+                            else oneEpaperLevel(oneEpaperGray(pixel), y, py)
                         if (level % 2 == 1) lsb = lsb + oneEpaperBit(k)
                         if (level >= 2) msb = msb + oneEpaperBit(k)
                         k = k + 1
@@ -204,7 +226,7 @@ fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, ic
     var mode = oneEpaperFastest
     if (rects.size > 0) {
         val area = changed * 100 / (tilesX * tilesY)
-        if (state.full || state.partials >= o.fullEvery || area >= o.fullArea) {
+        if (state.full || state.partials >= o.fullEvery || (!o.crisp && area >= o.fullArea)) {
             // Text, not Quality: 0.7 s rather than 3.4 s on the panel, with far less flashing.
             mode = oneEpaperText
             rects = [OneEpaperRect(0, 0, pw, ph)]

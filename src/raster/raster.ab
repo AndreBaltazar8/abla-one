@@ -979,9 +979,18 @@ fun oneFillRect(var surface: OneSurface, x: int, y: int, w: int, h: int, color: 
     var j = if (y > surface.clipY0()) y else surface.clipY0()
     while (j < bottom) {
         var i = left
-        while (i < right) {
-            surface.blend(i, j, color, alpha)
-            i = i + 1
+        if (alpha >= 255) {
+            // Opaque: straight into the row.
+            val row = (j - surface.originY) * surface.width
+            while (i < right) {
+                surface.pixels[row + i] = color
+                i = i + 1
+            }
+        } else {
+            while (i < right) {
+                surface.blend(i, j, color, alpha)
+                i = i + 1
+            }
         }
         j = j + 1
     }

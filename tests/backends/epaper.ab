@@ -15,6 +15,16 @@ fun main: int {
     expectEqual(oneEpaperPhysicalX(10, 20), 20, "portrait x → physical x")
     expectEqual(oneEpaperPhysicalY(10, 20, 480), 469, "portrait x → physical y (rotation 3)")
 
+    // Crisp: solid black or white, and light fills become outlines.
+    expectEqual(oneEpaperCrispLevel(0), 0, "black stays black")
+    expectEqual(oneEpaperCrispLevel(160), 0, "a thin stroke's grey edge stays dark")
+    expectEqual(oneEpaperCrispLevel(255), 3, "white stays white")
+    val lightFill = OnePaint("rect", 1, 2, 30, 40, 5, "#d0d0d0", "", 0, "", "")
+    expectEqual(oneEpaperCrispPaint(lightFill, 2).op, "border", "a light fill becomes an outline")
+    expectEqual(oneEpaperCrispPaint(lightFill, 2).radius, 5, "with its shape")
+    expectEqual(oneEpaperCrispPaint(OnePaint("rect", 1, 2, 30, 40, 5, "#000000", "", 0, "", ""), 2).op, "rect", "dark fills stay")
+    expectEqual(oneEpaperCrispPaint(OnePaint("rect", 1, 2, 30, 40, 5, "#ffffff", "", 0, "", ""), 2).op, "rect", "white fills stay")
+
     // Planes: LSB then MSB (48000 bytes each), rows of 100 bytes, MSB-first bits.
     val planes = filledArray(96000, 0)
     planes[0] = 0x5F
