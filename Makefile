@@ -7,9 +7,7 @@ TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab)
 
 # Unit, backend and integration tests (host only).
 test:
-	@# One program per invocation: testing several programs that use `$$theme`
-	@# in one `ablac test` run reuses staged expansions across them (ablac issue).
-	$(NIX) 'fail=0; for t in $(TESTS); do out=$$($(ABLAC) test $$t 2>&1); echo "$$out" | grep -E "^(PASS|FAIL)"; echo "$$out" | grep -q "^PASS" || fail=1; done; exit $$fail'
+	$(NIX) '$(ABLAC) test $(TESTS)'
 
 # Server-rendered gallery pages and their icons.
 gallery-web:

@@ -1,13 +1,15 @@
 import "abla/http"
 import "abla/net"
 import "abla/sys/linux"
+import "abla/process/environment"
 import "gallery.ab"
 import "../../src/backends/epaper_host.ab"
 
 // The gallery for a PaperMono: this host runs the app and serves its panel
 // updates (src/backends/epaper_host.ab) on :8954. A device polls
 // /one/epaper/update and posts taps; tests/ui/epaper_device.py plays the
-// device. Run from the abla-one root after `make gallery-web` (icons).
+// device. Run from the abla-one root after `make gallery-web` (icons). Set
+// ONE_EPAPER_ADDRESS=0.0.0.0 to serve a real PaperMono on the network.
 val galleryPanels: array<OneEpaperHost> = []
 
 fun galleryIcon(name: string): string = linuxReadFile("build/gallery/icons/$name.svg", 65536)
@@ -20,7 +22,7 @@ fun galleryEpaper(request: HttpRequest): HttpResponse {
 fun main: int {
     galleryPanels.append(oneEpaperHost(Gallery(), oneDefaultTheme(), onePaperMonoOptions(), OneIconSource({ name -> galleryIcon(name) }), { request -> httpText("no backend", 501) }))
     var server = oneLiveServer(
-        Ipv4SocketAddress("127.0.0.1", 8954),
+        Ipv4SocketAddress(processEnvironmentOr("ONE_EPAPER_ADDRESS", "127.0.0.1"), 8954),
         { request -> galleryEpaper(request) },
         { request -> false },
         { request, session -> galleryApp() },
