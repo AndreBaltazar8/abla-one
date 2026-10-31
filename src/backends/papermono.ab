@@ -70,6 +70,13 @@ trusted fun onePaperMonoClear(): void {
 
 // Runs `app` until the device powers off.
 fun onePaperMonoRun(var app: OneApp, theme: Theme, icons: OneIconSource): void {
+    onePaperMonoLoop(app, theme, icons, { "" })
+    return
+}
+
+// The same, with `poll` called while idle: a completion (a services payload) for the
+// app, or "".
+fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var poll: FnMut() -> string): void {
     // Collect after every 512 KiB of new objects: the heap is a few MB.
     runtimeMemorySetCollectionGrowth(524288)
     // Below the 6 MiB region, and it keeps reclaiming free memory in step.
@@ -101,6 +108,14 @@ fun onePaperMonoRun(var app: OneApp, theme: Theme, icons: OneIconSource): void {
                 val update = oneEpaperRender(app, theme, state, icons)
                 println("papermono: ${if (gesture == paperMonoGestureTap) "tap" else "swipe"} at $x,$y, ${update.rects.size} rectangles, mode ${update.mode}, ${onePaperMonoMilliseconds() - started} ms")
                 onePaperMonoShow(session, update)
+            }
+        }
+        // Finished work from the platform, one at a time.
+        if (gesture == paperMonoGestureNone) {
+            val completion = poll()
+            if (completion != "") {
+                app.receive("result", completion)
+                onePaperMonoShow(session, oneEpaperRender(app, theme, state, icons))
             }
         }
         // Cleaning up memory takes 100-200 ms: do it while nothing is waiting,

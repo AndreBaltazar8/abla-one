@@ -25,7 +25,8 @@
 
 The design is in SPEC section 16; these build it.
 
-- [ ] Per-target start screens, starting with NovaKind (login on mobile and embedded).
+- [ ] Text input on the PaperMono: an on-screen keyboard for `input` nodes (taps on an
+      input do nothing today, so a sign-in form can't be filled in).
 
 ## Toolchain
 
