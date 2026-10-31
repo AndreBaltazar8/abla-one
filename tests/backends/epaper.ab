@@ -221,6 +221,7 @@ fun main: int {
     oneEpaperRender(shown, t, shownState, fileIcons())
     Path("build/ui/epaper-gallery-people.png").writeText(oneEpaperPreview(shownState))
     oneEpaperKeyboardTest()
+    oneEpaperKeyboardScrollTest()
     oneEpaperPressTest()
     // Routes: a new one opens at the top with no keyboard, and back finds its scroll.
     var routed = Gallery(OneNoServices())
@@ -277,6 +278,48 @@ fun keyTap(var app: OneApp, t: Theme, var state: OneEpaperState, label: string):
     return
 }
 
+class OneEpaperLongForm(var value: string by State("")) : OneApp {
+    fun render(var ui: Ui): Node {
+        val fields: array<Node> = []
+        var i = 0
+        while (i < 12) {
+            fields.append(input(value, "campo $i", ui.change { typed -> value = typed }, style().height(60)))
+            i = i + 1
+        }
+        column(style().fill(), [scroll(style().grow(1).gap(4), fields)])
+    }
+    fun receive(kind: string, payload: string): void { return }
+}
+
+// A field low on the screen stays in sight when the keyboard opens.
+fun oneEpaperKeyboardScrollTest(): void {
+    var app = OneEpaperLongForm()
+    val t = oneDefaultTheme()
+    var state = oneEpaperState(onePaperMonoOptions())
+    oneEpaperRender(app, t, state, OneIconSource({ name -> "" }))
+    val height = oneEpaperLogicalHeight(state.options)
+    var low = -1
+    var i = 0
+    while (i < state.frame.hits.size) {
+        val h = state.frame.hits[i]
+        if (h.kind == "input" && h.y + h.h < height && h.y + h.h > height - oneEpaperKeyboardHeight) low = i
+        i = i + 1
+    }
+    expect(low >= 0, "a field the keyboard would cover")
+    val event = state.frame.hits[low].event
+    val h = state.frame.hits[low]
+    oneEpaperTouch(app, t, state, (h.x + h.w / 2) * state.options.scale / 100, (h.y + h.h / 2) * state.options.scale / 100)
+    oneEpaperRender(app, t, state, OneIconSource({ name -> "" }))
+    var seen = false
+    for (after in state.frame.hits) if (after.kind == "input" && after.event == event) {
+        seen = true
+        expect(after.y + after.h <= height - oneEpaperKeyboardHeight, "it's above the keyboard")
+        expect(after.y >= 0, "and not off the top")
+    }
+    expect(seen, "it's still on screen")
+    return
+}
+
 fun oneEpaperKeyboardTest(): void {
     val t = theme()
     var app = Form()
@@ -285,7 +328,7 @@ fun oneEpaperKeyboardTest(): void {
     expect(oneEpaperTouch(app, t, state, 100, 20), "an input opens the keyboard")
     oneEpaperRender(app, t, state, OneIconSource({ name -> "" }))
     expect(state.typingEvent != 0, "typing")
-    keyTap(app, t, state, "⇧")
+    keyTap(app, t, state, "Aa")
     keyTap(app, t, state, "A")
     expectEqual(state.keyLayer, 0, "one capital")
     keyTap(app, t, state, "b")

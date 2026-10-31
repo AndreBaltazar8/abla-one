@@ -4,6 +4,8 @@
 #   tools/build-papermono examples/gallery/papermono [build|flash -p PORT|...]
 # ONE_MODE=thin builds thin mode (its build-thin.ab), and ONE_HOST names the server;
 # the default, full, runs the whole app on the device (build.ab).
+# ONE_SECURE_STORAGE (build-key or hmac) encrypts its NVS, in a build of its own: build-secure,
+# with sdkconfig-secure. See docs/papermono-secure-storage.md. It burns nothing.
 # Needs the sibling ablac (its nix shell has LLVM with Xtensa) and
 # abla-embedded (ESP-IDF 6.0.2 under ~/.cache/abla-embedded: make setup there).
 set -euo pipefail
@@ -46,5 +48,8 @@ options=""
 if [[ ${ONE_MODE:-full} == thin ]]; then
   export SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.thin"
   options="-B build-thin -D SDKCONFIG=sdkconfig-thin"
+elif [[ -n ${ONE_SECURE_STORAGE:-} ]]; then
+  export SDKCONFIG_DEFAULTS="sdkconfig.defaults;$root/tools/sdkconfig.secure-storage"
+  options="-B build-secure -D SDKCONFIG=sdkconfig-secure"
 fi
 exec nix-shell "$embedded/shell.nix" --run "steam-run bash -c 'source \"$idf_root/export.sh\" >/dev/null && idf.py $options $*'"

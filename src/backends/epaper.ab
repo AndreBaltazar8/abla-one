@@ -248,7 +248,8 @@ fun oneEpaperLayOut(tree: Node, theme: Theme, var state: OneEpaperState): void {
         state.typingEvent = 0
         state.typed = ""
     }
-    val shown = if (state.typingEvent != 0) column(style().fill(), [tree.styled(style().set("height", "fill")), oneEpaperKeyboard(state.keyLayer)]) else tree
+    // The same shape with the keyboard or without, as scroll positions go by their path in it.
+    val shown = column(style().fill(), if (state.typingEvent != 0) [tree.styled(style().set("height", "fill")), oneEpaperKeyboard(state.keyLayer)] else [tree.styled(style().set("height", "fill"))])
     val laid = oneLayoutCached(shown, theme, "epaper", oneEpaperLogicalWidth(o), oneEpaperLogicalHeight(o), state.scroll, state.layoutCache)
     state.boxes.clear()
     state.boxes.append(laid)
@@ -739,6 +740,7 @@ fun oneEpaperTap(var state: OneEpaperState, x: int, y: int): OneEpaperTap {
                 state.typingEvent = h.event
                 state.typed = h.value
                 state.keyLayer = 0
+                oneEpaperKeepAboveKeyboard(state, h)
                 return OneEpaperTap(0, "", true)
             }
         }
@@ -747,12 +749,34 @@ fun oneEpaperTap(var state: OneEpaperState, x: int, y: int): OneEpaperTap {
     OneEpaperTap(0, "", false)
 }
 
+// Four rows of 44, the gaps, its padding and its border (oneEpaperKeyboard).
+val oneEpaperKeyboardHeight = 187
+
+// The keyboard takes the bottom of the screen: scrolls a field that would end up under it.
+fun oneEpaperKeepAboveKeyboard(var state: OneEpaperState, field: OneHit): void {
+    val height = oneEpaperLogicalHeight(state.options)
+    var i = state.frame.hits.size - 1
+    while (i >= 0) {
+        val h = state.frame.hits[i]
+        if (h.kind == "scroll" && field.x >= h.x && field.x < h.x + h.w && field.y >= h.y && field.y < h.y + h.h) {
+            val visible = if (h.y + h.h < height - oneEpaperKeyboardHeight) h.y + h.h else height - oneEpaperKeyboardHeight
+            if (field.y + field.h > visible) {
+                state.scroll.set(h.key, oneParseInt(h.value, 0) + field.y + field.h - visible + 8)
+                state.scrolled = true
+            }
+            return
+        }
+        i = i - 1
+    }
+    return
+}
+
 val oneEpaperKeyBase = 900000
-// A row of a layer, a key per space-separated word. Special keys: "⇧" and "#" change
+// A row of a layer, a key per space-separated word. Special keys: "Aa" and "#" change
 // layer, "<" deletes, "OK" closes, and "_" under the space bar is a space.
 val oneEpaperLayers: array<array<string>> = [
-    ["q w e r t y u i o p", "a s d f g h j k l", "⇧ z x c v b n m <", "# @ . espaço OK"],
-    ["Q W E R T Y U I O P", "A S D F G H J K L", "⇧ Z X C V B N M <", "# @ . espaço OK"],
+    ["q w e r t y u i o p", "a s d f g h j k l", "Aa z x c v b n m <", "# @ . espaço OK"],
+    ["Q W E R T Y U I O P", "A S D F G H J K L", "Aa Z X C V B N M <", "# @ . espaço OK"],
     ["1 2 3 4 5 6 7 8 9 0", "- _ / : ; ( ) & ! ?", "á à ã â é ê í ó õ ú", "ç + = , < # espaço OK"]
 ]
 
@@ -787,7 +811,7 @@ fun oneEpaperKey(var state: OneEpaperState, index: int): OneEpaperTap {
         state.typingEvent = 0
         return OneEpaperTap(0, "", true)
     }
-    if (key == "⇧") {
+    if (key == "Aa") {
         state.keyLayer = if (state.keyLayer == 0) 1 else 0
         return OneEpaperTap(0, "", true)
     }

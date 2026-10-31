@@ -1,4 +1,5 @@
 import "papermono.ab"
+import "papermono_policy.ab"
 import "abla/bytes"
 import "abla/json"
 import "../../../abla-embedded/src/esp32/esp_idf_net.ab"
@@ -18,9 +19,17 @@ trusted noescape extern:"c" fun nvs_get_blob(handle: u32, key: i64*, value: i64*
 trusted noescape extern:"c" fun nvs_erase_key(handle: u32, key: i64*): i32
 trusted noescape extern:"c" fun nvs_commit(handle: u32): i32
 trusted noescape extern:"c" fun nvs_close(handle: u32): void
+trusted noescape extern:"c" fun nvs_get_u8(handle: u32, key: i64*, value: i64*): i32
+trusted noescape extern:"c" fun nvs_set_u8(handle: u32, key: i64*, value: u8): i32
+trusted noescape extern:"c" fun nvs_flash_secure_init(keys: i64*): i32
+trusted noescape extern:"c" fun nvs_flash_deinit(): i32
+trusted noescape extern:"c" fun esp_efuse_get_key_purpose(block: i32): i32
+trusted noescape extern:"c" fun esp_hmac_calculate(key: i32, message: i64*, length: u32, out: i64*): i32
 
 // Wi-Fi credentials, as C strings with their lengths.
-class OneWifiConfig(val ssid: int, val ssidLength: int, val password: int, val passwordLength: int)
+// `storage`: how secure values are kept (oneNetStartStorage), and tools/papermono-thin-config sets it.
+class OneWifiConfig(val ssid: int, val ssidLength: int, val password: int, val passwordLength: int,
+    val storage: int = 0, val storageKey: int = 0, val storageFuse: int = 0)
 
 val oneNetHostStorage = nativeStaticAllocate(256)
 val oneNetReceiveStorage = nativeStaticAllocate(2048)
@@ -172,8 +181,85 @@ trusted fun oneNetExchange(url: OneNetUrl, text: string, onWait: () -> void): st
     answer.toText()
 }
 
-// A secure value: NVS holds it (on flash, encrypted only if the build enables NVS
-// encryption), "" when absent.
+val oneNetStoragePlain = 0
+val oneNetStorageBuildKey = 1
+val oneNetStorageFuse = 2
+// nvs_sec_cfg_t: the XTS encryption key, then its tweak key.
+val oneNetKeysStorage = nativeStaticAllocate(64)
+val oneNetSeedStorage = nativeStaticAllocate(32)
+val oneNetFlagStorage = nativeStaticAllocate(4)
+// ESP-IDF's seeds (nvs_sec_provider.c), so its own scheme would derive the same keys.
+val oneNetEncryptSeed = 2931710554
+val oneNetTweakSeed = 3470697893
+val oneNetFuseFirstKeyBlock = 4
+val oneNetFuseHmacUp = 8
+
+trusted fun oneNetFuseKey(fuse: int, seed: int, out: int): bool {
+    val message = nativeBufferAt(oneNetSeedStorage, 32)
+    var i = 0
+    while (i < 32) {
+        message.storeU32(i, seed)
+        i = i + 4
+    }
+    esp_hmac_calculate(i32(fuse), pointer(oneNetSeedStorage), u32(32), pointer(out)) == i32(0)
+}
+
+// The keys into oneNetKeysStorage; false if they can't be had. Only reads eFuses.
+trusted fun oneNetStorageKeys(wifi: OneWifiConfig): bool {
+    if (wifi.storage == oneNetStorageBuildKey) {
+        val from = nativeBufferAt(wifi.storageKey, 64)
+        val keys = nativeBufferAt(oneNetKeysStorage, 64)
+        var i = 0
+        while (i < 64) {
+            keys.store(i, from.load(i))
+            i = i + 1
+        }
+        return true
+    }
+    if (int(esp_efuse_get_key_purpose(i32(oneNetFuseFirstKeyBlock + wifi.storageFuse))) != oneNetFuseHmacUp) {
+        println("papermono: secure storage needs its eFuse key, which isn't there (docs/papermono-secure-storage.md)")
+        return false
+    }
+    oneNetFuseKey(wifi.storageFuse, oneNetEncryptSeed, oneNetKeysStorage) && oneNetFuseKey(wifi.storageFuse, oneNetTweakSeed, oneNetKeysStorage + 32)
+}
+
+// A first start on encrypted NVS: anything from before is erased, or the plain values would
+// stay on flash, unreadable by the app and readable by anyone else.
+trusted fun oneNetStorageMarked(): bool {
+    if (nvs_open(pointer(nativeStaticBytes("abla_one_sec\x00")), i32(1), pointer(oneNetCells)) != i32(0)) return false
+    val handle = u32(nativeAddressLoadU32(oneNetCells, 0))
+    val key = pointer(nativeStaticBytes("encrypted\x00"))
+    val marked = nvs_get_u8(handle, key, pointer(oneNetFlagStorage)) == i32(0)
+    nvs_close(handle)
+    marked
+}
+
+trusted fun oneNetStorageMark(): bool {
+    if (nvs_open(pointer(nativeStaticBytes("abla_one_sec\x00")), i32(1), pointer(oneNetCells)) != i32(0)) return false
+    val handle = u32(nativeAddressLoadU32(oneNetCells, 0))
+    val status = nvs_set_u8(handle, pointer(nativeStaticBytes("encrypted\x00")), u8(1))
+    val committed = nvs_commit(handle)
+    nvs_close(handle)
+    status == i32(0) && committed == i32(0)
+}
+
+// Brings up NVS as the build says, and then Wi-Fi. Encrypted fails closed: without its keys
+// there's no storage, and values aren't kept in the clear instead.
+trusted fun oneNetStartStorage(wifi: OneWifiConfig): int {
+    if (wifi.storage == oneNetStoragePlain) return wifiStart()
+    if (!oneNetStorageKeys(wifi)) return 100
+    val keys = pointer(oneNetKeysStorage)
+    if (nvs_flash_secure_init(keys) != i32(0) || !oneNetStorageMarked()) {
+        nvs_flash_deinit()
+        nvs_flash_erase()
+        if (nvs_flash_secure_init(keys) != i32(0)) return 101
+        if (!oneNetStorageMark()) return 102
+    }
+    wifiStartDriver()
+}
+
+// A secure value: NVS holds it (encrypted by a build with ONE_SECURE_STORAGE, on plain flash
+// otherwise), "" when absent.
 trusted fun oneNetStoreOpen(): u32 {
     val status = nvs_open(pointer(nativeStaticBytes("abla_one\x00")), i32(1), pointer(oneNetCells))
     if (status != i32(0)) return u32(0)
@@ -267,7 +353,8 @@ trusted fun onePaperMonoServe(): string {
     var i = 0
     while (i < onePaperMonoJobs.size) {
         val job = onePaperMonoJobs[i]
-        if (job.kind != "timer" || onePaperMonoMilliseconds() >= job.due) {
+        val waits = job.kind == "http" && oneNetRequestWaits(wifiHasAddress(), onePaperMonoMilliseconds(), oneNetWaitUntil)
+        if (!waits && (job.kind != "timer" || onePaperMonoMilliseconds() >= job.due)) {
             var k = i
             while (k + 1 < onePaperMonoJobs.size) {
                 onePaperMonoJobs[k] = onePaperMonoJobs[k + 1]
@@ -302,22 +389,20 @@ trusted fun onePaperMonoRun1(job: OnePaperMonoJob): string {
 }
 
 val oneNetStarted = nativeStaticMutableU32s([0])
+var oneNetWaitUntil = 0
 
-// A networked app on a PaperMono: the screen comes first, Wi-Fi joins when the idle loop
-// reaches it, and `services` jobs run between touches. Runs until the device powers off.
+// A networked app on a PaperMono: the screen comes first, Wi-Fi joins in the background from
+// the idle loop, and `services` jobs run between touches. Runs until the device powers off.
 trusted fun onePaperMonoRunNet(var app: OneApp, theme: Theme, icons: OneIconSource, wifi: OneWifiConfig): void {
-    var retryAt = 0
     onePaperMonoLoop(app, theme, icons, {
         if (nativeAddressLoadU32(oneNetStarted, 0) == 0) {
             nativeAddressStoreU32(oneNetStarted, 0, 1)
-            val status = wifiStart()
+            oneNetWaitUntil = onePaperMonoMilliseconds() + oneNetBootWait
+            val status = oneNetStartStorage(wifi)
             if (status != 0) println("papermono: Wi-Fi start failed: $status")
+            else if (!wifiJoinBegin(wifi.ssid, wifi.ssidLength, wifi.password, wifi.passwordLength)) println("papermono: no Wi-Fi: its name or password doesn't fit")
         }
-        // Joining blocks for a while; not on every idle turn.
-        if (!wifiHasAddress() && onePaperMonoMilliseconds() >= retryAt) {
-            if (!wifiJoin(wifi.ssid, wifi.ssidLength, wifi.password, wifi.passwordLength, 15000)) println("papermono: no Wi-Fi yet")
-            retryAt = onePaperMonoMilliseconds() + 30000
-        }
+        wifiJoinTick()
         onePaperMonoServe()
     })
     return

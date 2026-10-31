@@ -1,0 +1,7 @@
+// What a PaperMono decides from its clock alone, apart from its hardware.
+
+// Wi-Fi joins after the screen comes up. For this long a request waits for it, instead of
+// failing and showing an app "no connection" on an ordinary boot.
+val oneNetBootWait = 20000
+
+fun oneNetRequestWaits(hasAddress: bool, now: int, waitUntil: int): bool = !hasAddress && now < waitUntil

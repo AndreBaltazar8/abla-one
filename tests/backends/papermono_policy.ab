@@ -1,0 +1,10 @@
+import "abla/test"
+import "../../src/backends/papermono_policy.ab"
+
+fun main: int {
+    expect(oneNetRequestWaits(false, 0, oneNetBootWait), "a boot's first request waits for Wi-Fi")
+    expect(oneNetRequestWaits(false, oneNetBootWait - 1, oneNetBootWait), "until the wait is over")
+    expect(!oneNetRequestWaits(false, oneNetBootWait, oneNetBootWait), "then it fails, as it should")
+    expect(!oneNetRequestWaits(true, 0, oneNetBootWait), "with an address it goes at once")
+    testsPassed()
+}

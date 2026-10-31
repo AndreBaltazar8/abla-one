@@ -28,7 +28,8 @@ fun badge(ui: Ui, value: string, variant: string): Node =
     row(oneParts(ui.theme, "Badge", variant, "", style()), [text(value, oneParts(ui.theme, "Badge", variant, "label", style()))])
 
 fun chip(ui: Ui, label: string, selected: bool, onPress: int): Node =
-    pressable(onPress, oneParts(ui.theme, "Chip", if (selected) "selected" else "", "", style()), [
+    // Light tints quantise to white on e-paper, which would leave the selected chip the plainest.
+    pressable(onPress, oneParts(ui.theme, "Chip", if (selected) "selected" else "", "", style().on("epaper", if (selected) style().border(2, "#000000") else style())), [
         text(label, oneParts(ui.theme, "Chip", if (selected) "selected" else "", "label", style()))
     ]).set("selected", if (selected) "true" else "false")
 
