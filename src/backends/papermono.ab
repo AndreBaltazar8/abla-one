@@ -78,8 +78,10 @@ fun onePaperMonoRun(var app: OneApp, theme: Theme, icons: OneIconSource): void {
 // The same, with `poll` called while idle: a completion (a services payload) for the
 // app, or "".
 fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var poll: FnMut() -> string): void {
-    // Collect after every 512 KiB of new objects: the heap is a few MB.
-    runtimeMemorySetCollectionGrowth(524288)
+    // Memory is cleaned up while idle (below). The runtime's own collection is a safety net
+    // for work that outruns that: its threshold only moves when it runs itself, so one set
+    // near the idle level would go off in the middle of a tap.
+    runtimeMemorySetCollectionGrowth(3145728)
     // Below the 6 MiB region, and it keeps reclaiming free memory in step.
     runtimeMemorySetLimit(5242880)
     val control = paperMonoOpen()
@@ -123,12 +125,12 @@ fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var po
                 onePaperMonoShow(session, state, oneEpaperRender(app, theme, state, icons))
             }
         }
-        // Cleaning up memory takes 100-200 ms: do it while nothing is waiting,
-        // so a tap does not pay for it.
+        // Cleaning up memory takes 100-200 ms: do it while nothing is waiting and no finger
+        // is down, so a tap does not pay for it.
         if (gesture == paperMonoGestureNone) {
             val live = runtimeMemoryLiveBytes()
             if (live < collected) collected = live
-            if (live > collected + 262144) {
+            if (live > collected + 262144 && paperMonoGestureCell(paperMonoGestureDown) == 0) {
                 runtimeMemoryCollect()
                 collected = runtimeMemoryLiveBytes()
             }

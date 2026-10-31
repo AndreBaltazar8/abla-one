@@ -136,7 +136,8 @@ trusted fun oneThinConnect(config: OneThinConfig): void {
 
 // Runs until the device powers off.
 trusted fun onePaperMonoRunThin(theme: Theme, icons: OneIconSource, config: OneThinConfig): void {
-    runtimeMemorySetCollectionGrowth(524288)
+    // A safety net: memory is cleaned up while idle (see onePaperMonoLoop).
+    runtimeMemorySetCollectionGrowth(3145728)
     runtimeMemorySetLimit(5242880)
     val control = paperMonoOpen()
     if ((control|0) == 0) return
@@ -189,7 +190,7 @@ trusted fun onePaperMonoRunThin(theme: Theme, icons: OneIconSource, config: OneT
         if (gesture == paperMonoGestureNone) {
             val live = runtimeMemoryLiveBytes()
             if (live < collected) collected = live
-            if (live > collected + 262144) {
+            if (live > collected + 262144 && paperMonoGestureCell(paperMonoGestureDown) == 0) {
                 runtimeMemoryCollect()
                 collected = runtimeMemoryLiveBytes()
             }
