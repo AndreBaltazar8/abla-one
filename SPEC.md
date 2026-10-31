@@ -482,10 +482,8 @@ interface Backend {
   - quality for the first frame, periodically, and for large changes;
   - fast or fastest partial refreshes in between.
 
-  The app runs on a host (`epaper_host.ab`), like a live web session. The
-  device polls for updates and posts taps over HTTP, and only copies the
-  rectangles into its canvas and refreshes them, so it needs no heap. A
-  device that falls behind gets the whole panel again. The default theme
+  The app runs on the device, or on a server with the device doing the rest
+  (§16, embedded modes). The default theme
   has `epaper:` tokens, because pale fills would round to white. Running
   the app on the device itself would need a bounded arena variant of the
   tree (no heap growth during render, a fixed node capacity); that's
@@ -527,7 +525,10 @@ abla-one/
   src/backends/web_session.ab    (a web session: shared by live and Wasm)
   src/backends/web_client.ab     (Wasm client mode)
   src/backends/epaper.ab         PaperMono planes, dirty rectangles, modes (M4)
-  src/backends/epaper_host.ab    host-run panels over HTTP (M4)
+  src/backends/papermono.ab      a PaperMono, full mode
+  src/backends/papermono_thin.ab a PaperMono, thin mode
+  src/backends/thin_host.ab      an app on a server for thin devices
+  src/server/                    @server: $remote, routes, server.lock (§16)
   src/backends/test.ab
   src/layout/                one-layout, paint list         (M3)
   docs/  examples/  tests/
@@ -706,9 +707,9 @@ A compile flag picks the mode, and the same app source builds either way.
   testing and drawing itself, so scrolling never waits on the network, and sends only
   events back. It needs the device's renderer but less memory for app state.
 
-Thin mode replaces the current host-run link (§10, `epaper_host.ab`), which sends
-finished pixels and makes scrolling and hit testing a server round trip. That link
-goes away once thin mode works.
+`make papermono-gallery MODE=thin ONE_HOST=...` builds thin mode; the server side is
+`src/backends/thin_host.ab`. It replaced an earlier link that sent finished pixels
+and made scrolling and hit testing a server round trip.
 
 ### Start screens per target
 
@@ -725,7 +726,7 @@ still vary by target through theming (§8) and `ui.target`.
 ### Open questions
 
 - Offline: what `$remote` gives an app on a device with no network.
-- How thin mode sends tree updates to a small device: whole trees or diffs.
+- Thin mode sends whole trees; diffs if a real app's trees prove too big.
 
 ## 15. Decisions
 

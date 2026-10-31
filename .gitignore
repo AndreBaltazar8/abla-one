@@ -7,4 +7,6 @@ examples/*/android/build/
 build/
 .abla-cache/
 examples/*/papermono/sdkconfig*
+!examples/*/papermono/sdkconfig.thin
+build-thin/
 !examples/*/papermono/sdkconfig.defaults

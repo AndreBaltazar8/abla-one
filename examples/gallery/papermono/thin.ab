@@ -1,0 +1,14 @@
+import "../../../src/backends/papermono_thin.ab"
+import "../../../src/kit/theme.ab"
+import "../../../build/papermono/icons.ab"
+import "../../../build/papermono/thin_config.ab"
+#requiredInternalFunction("freestandingMemorySet32", "memset")
+
+// The gallery's screen on a PaperMono in thin mode: `examples/gallery/thin.ab` runs
+// the app on a server, and this binary has none of it.
+//   make papermono-gallery flash-papermono MODE=thin ONE_HOST=192.168.1.10
+
+@export("app_main")
+fun appMain(): void {
+    onePaperMonoRunThin(oneDefaultTheme(), OneIconSource({ name -> oneEmbeddedIcon(name) }), oneThinConfigured())
+}

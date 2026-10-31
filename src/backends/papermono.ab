@@ -18,8 +18,6 @@ import "../../../abla-embedded/src/m5stack/papermono_gestures.ab"
 //       onePaperMonoRun(app, myTheme(), OneIconSource({ name -> "" }))
 //   }
 
-trusted noescape extern:"c" fun vTaskDelay(ticks: u32): void
-
 trusted fun onePaperMonoPause(milliseconds: int): void {
     vTaskDelay(u32(milliseconds))
     return

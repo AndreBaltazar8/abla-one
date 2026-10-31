@@ -2,6 +2,8 @@
 # Builds an Abla One app for the M5Stack PaperMono (ESP32-S3) and, with a
 # command (build, flash, monitor), runs ESP-IDF on its project.
 #   tools/build-papermono examples/gallery/papermono [build|flash -p PORT|...]
+# ONE_MODE=thin builds thin mode (its build-thin.ab), and ONE_HOST names the server;
+# the default, full, runs the whole app on the device (build.ab).
 # Needs the sibling ablac (its nix shell has LLVM with Xtensa) and
 # abla-embedded (ESP-IDF 6.0.2 under ~/.cache/abla-embedded: make setup there).
 set -euo pipefail
@@ -19,15 +21,28 @@ if compgen -G "$project/../icons/*.xml" > /dev/null; then
   python3 tools/vector2svg.py build/papermono/icons --tint "$project"/../icons/*.xml
   python3 tools/icons-ab.py build/papermono/icons.ab build/papermono/icons
 fi
+driver=build.ab
+if [[ ${ONE_MODE:-full} == thin ]]; then
+  driver=build-thin.ab
+  # With Wi-Fi's libraries the app's code spreads past CALL8's reach in the catch-all
+  # flash statement: call through literals.
+  export ABLA_XTENSA_DIRECT_CALLS=0
+  tools/papermono-thin-config "${ONE_HOST:?ONE_MODE=thin needs ONE_HOST (a.b.c.d[:port] or https://name)}"
+fi
 nix-shell "$ablac/shell.nix" --run "
   set -e
   ulimit -s 131072 2>/dev/null || true
   export ABLA_ESP_CPU=esp32s3 ABLA_SYSROOT='$ablac' PATH='$embedded/tools/esp-llvm-bin':\$PATH
-  '$ablac/build/ablac' build '$project/build.ab' -o build/papermono/build-driver
+  '$ablac/build/ablac' build '$project/$driver' -o build/papermono/build-driver
   build/papermono/build-driver"
 [[ $# -eq 0 ]] && exit 0
 
 idf_root="${IDF_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/abla-embedded/esp-idf-v6.0.2}"
 cd "$root/$project"
 unset PYTHONPATH
-exec nix-shell "$embedded/shell.nix" --run "steam-run bash -c 'source \"$idf_root/export.sh\" >/dev/null && idf.py $*'"
+options=""
+if [[ ${ONE_MODE:-full} == thin ]]; then
+  export SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.thin"
+  options="-B build-thin -D SDKCONFIG=sdkconfig-thin"
+fi
+exec nix-shell "$embedded/shell.nix" --run "steam-run bash -c 'source \"$idf_root/export.sh\" >/dev/null && idf.py $options $*'"

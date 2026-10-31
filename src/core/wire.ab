@@ -1,0 +1,73 @@
+import "abla/json"
+import "node.ab"
+
+// A node tree as JSON, for a thin client (SPEC §16): a client gets the whole tree,
+// as a browser gets a page, and does layout, scrolling and drawing itself. Styles
+// repeat a lot, so they are sent once:
+//   {"revision": n, "styles": [[target, state, property, value, ...], ...], "root": node}
+// and a node is [kind, key, style index, [name, value, ...], [children]].
+
+fun oneTreeJson(root: Node, revision: int): string {
+    val styles: array<Style> = []
+    val encoded: array<Json> = []
+    val index: Map<string, int> = Map()
+    val node = oneNodeJson(root, styles, encoded, index)
+    jsonStringify(jsonObject(["revision", "styles", "root"], [jsonInteger(revision), jsonArray(encoded), node]))
+}
+
+fun oneNodeJson(node: Node, var styles: array<Style>, var encoded: array<Json>, var index: Map<string, int>): Json {
+    val parts: array<Json> = []
+    for (entry in node.style.entries) {
+        parts.append(jsonString(entry.target))
+        parts.append(jsonString(entry.state))
+        parts.append(jsonString(entry.property))
+        parts.append(jsonString(entry.value))
+    }
+    val style = jsonArray(parts)
+    val text = jsonStringify(style)
+    var at = index.get(text) ?? -1
+    if (at < 0) {
+        at = encoded.size
+        encoded.append(style)
+        index.set(text, at)
+    }
+    val attrs: array<Json> = []
+    for (item in node.attrs) {
+        attrs.append(jsonString(item.name))
+        attrs.append(jsonString(item.value))
+    }
+    val children: array<Json> = []
+    for (child in node.children) children.append(oneNodeJson(child, styles, encoded, index))
+    jsonArray([jsonString(node.kind), jsonString(node.key), jsonInteger(at), jsonArray(attrs), jsonArray(children)])
+}
+
+class OneTree(val revision: int, val root: Node, val valid: bool)
+
+fun oneTreeParse(text: string): OneTree {
+    val parsed = jsonParse(text)
+    if (!parsed.succeeded || !parsed.value.isObject()) return OneTree(0, none(), false)
+    val styles: array<Style> = []
+    for (value in parsed.value.get("styles").values) {
+        val entries: array<StyleEntry> = []
+        var i = 0
+        while (i + 3 < value.values.size) {
+            entries.append(StyleEntry(value.values[i].asString(), value.values[i + 1].asString(), value.values[i + 2].asString(), value.values[i + 3].asString()))
+            i = i + 4
+        }
+        styles.append(Style(entries))
+    }
+    OneTree(parsed.value.get("revision").asInt(), oneNodeParse(parsed.value.get("root"), styles), true)
+}
+
+fun oneNodeParse(value: Json, styles: array<Style>): Node {
+    val attrs: array<Attr> = []
+    val raw = value.at(3).values
+    var i = 0
+    while (i + 1 < raw.size) {
+        attrs.append(Attr(raw[i].asString(), raw[i + 1].asString()))
+        i = i + 2
+    }
+    val children: array<Node> = []
+    for (child in value.at(4).values) children.append(oneNodeParse(child, styles))
+    Node(value.at(0).asString(), value.at(1).asString(), styles[value.at(2).asInt()], attrs, children)
+}

@@ -3,7 +3,7 @@ ABLAC ?= $(abspath ../ablac/build/ablac)
 NIX := nix-shell ../ablac/shell.nix --run
 TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab tests/remote/client.ab tests/remote/routes.ab)
 
-.PHONY: test-remote papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-epaper ui-epaper ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
+.PHONY: test-remote papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-thin ui-thin ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
 
 # Unit, backend and integration tests (host only).
 test:
@@ -57,13 +57,12 @@ ui-web-client: gallery-client services-client
 	node tests/ui/web_client_gallery.mjs
 	node tests/ui/web_client_services.mjs
 
-# The gallery on a PaperMono, run on this host (:8954), and the device
-# simulator that applies its updates.
-gallery-epaper: gallery-web
-	$(NIX) '$(ABLAC) build examples/gallery/epaper.ab -o build/gallery-epaper --fast'
+# The gallery's app for thin devices, on this host (:8954), and a device's requests.
+gallery-thin:
+	$(NIX) '$(ABLAC) build examples/gallery/thin.ab -o build/gallery-thin --fast'
 
-ui-epaper: gallery-epaper
-	python3 tests/ui/epaper_device.py
+ui-thin: gallery-thin
+	python3 tests/ui/thin_device.py
 
 gallery-live: gallery-web
 	$(NIX) '$(ABLAC) build examples/gallery/live.ab -o build/gallery-live --fast'
@@ -79,12 +78,15 @@ gallery-desktop: gallery-web
 ui-desktop: gallery-desktop
 	tests/ui/desktop_gallery.sh
 
-ui: ui-web ui-web-live ui-web-client ui-epaper ui-desktop ui-android ui-android-services
+ui: ui-web ui-web-live ui-web-client ui-thin ui-desktop ui-android ui-android-services
 
 # The gallery on an M5Stack PaperMono, entirely on the device (ESP32-S3).
 PORT ?= /dev/ttyACM0
+# MODE=thin ONE_HOST=a.b.c.d: the app runs on `make gallery-thin`; the device gets its
+# tree, and does layout, scrolling and drawing.
+MODE ?= full
 papermono-gallery:
-	tools/build-papermono examples/gallery/papermono build
+	ONE_MODE=$(MODE) ONE_HOST=$(ONE_HOST) tools/build-papermono examples/gallery/papermono build
 
 flash-papermono:
-	tools/build-papermono examples/gallery/papermono -p $(PORT) flash
+	ONE_MODE=$(MODE) ONE_HOST=$(ONE_HOST) tools/build-papermono examples/gallery/papermono -p $(PORT) flash

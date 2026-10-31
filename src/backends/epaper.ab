@@ -1,18 +1,14 @@
-import "abla/bytes"
 import "../one.ab"
 import "../layout/layout.ab"
 import "../layout/paint.ab"
 import "../raster/raster.ab"
 
-// The `epaper` target (SPEC §10, M4), PaperMono first. The app runs on a
-// host (like a live web session); each change is laid out, painted and
-// rasterized (one-layout, one-raster), then quantised to the panel's four
-// grey levels with the SSD1677 driver's own Bayer dither, in its drawing
-// planes, a band of rows at a time. Changed areas become byte-aligned dirty rectangles, and the
-// backend picks the refresh mode: a full refresh first and
-// periodically, fast partial refreshes in between. The device only copies
-// the rectangles into its canvas and refreshes them (abla-embedded's
-// ssd1677 session upload/refresh), so it needs no heap.
+// The `epaper` target (SPEC §10, M4), PaperMono first. Each change is laid out,
+// painted and rasterized (one-layout, one-raster), then quantised to the panel's
+// four grey levels in its drawing planes, a band of rows at a time. Changed areas
+// become byte-aligned dirty rectangles, and the backend picks the refresh mode: a
+// full refresh first and periodically, fast partial refreshes in between. A device
+// runner (papermono.ab) copies the rectangles into its canvas and refreshes them.
 //
 // Coordinates: the panel is 800×480 physically and used in portrait
 // (480×800, PaperMono rotation 0). `scale` maps logical pixels to panel
@@ -213,16 +209,34 @@ fun oneEpaperScaleSides(sides: string, scale: int, minStroke: int): string {
 // rectangles means nothing visible changed.
 fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, icons: OneIconSource): OneEpaperUpdate {
     val o = state.options
-    val lw = oneEpaperLogicalWidth(o)
-    val lh = oneEpaperLogicalHeight(o)
     if (state.boxes.size == 1 && state.scrolled && state.boxRevision == oneRevision()) oneLayoutRescroll(state.boxes[0], state.scroll, "r")
     else {
-        var ui = oneUiSized("epaper", theme, lw)
+        var ui = oneUiSized("epaper", theme, oneEpaperLogicalWidth(o))
         val built = app.render(ui)
-        val laid = oneLayoutCached(built, theme, "epaper", lw, lh, state.scroll, state.layoutCache)
-        state.boxes.clear()
-        state.boxes.append(laid)
+        oneEpaperLayOut(built, theme, state)
     }
+    oneEpaperDraw(state, icons)
+}
+
+// The same for a tree that comes from elsewhere (a thin device's server).
+fun oneEpaperRenderTree(tree: Node, theme: Theme, var state: OneEpaperState, icons: OneIconSource): OneEpaperUpdate {
+    if (state.boxes.size == 1 && state.scrolled && state.boxRevision == oneRevision()) oneLayoutRescroll(state.boxes[0], state.scroll, "r")
+    else oneEpaperLayOut(tree, theme, state)
+    oneEpaperDraw(state, icons)
+}
+
+fun oneEpaperLayOut(tree: Node, theme: Theme, var state: OneEpaperState): void {
+    val o = state.options
+    val laid = oneLayoutCached(tree, theme, "epaper", oneEpaperLogicalWidth(o), oneEpaperLogicalHeight(o), state.scroll, state.layoutCache)
+    state.boxes.clear()
+    state.boxes.append(laid)
+    return
+}
+
+fun oneEpaperDraw(var state: OneEpaperState, icons: OneIconSource): OneEpaperUpdate {
+    val o = state.options
+    val lw = oneEpaperLogicalWidth(o)
+    val lh = oneEpaperLogicalHeight(o)
     state.scrolled = false
     state.boxRevision = oneRevision()
     val frame = onePaintFrame(state.boxes[0], lw, lh)
@@ -591,19 +605,22 @@ fun oneEpaperPlaneLevel(planes: array<int>, px: int, py: int): int {
 
 fun oneEpaperBit(position: int): int = if (position == 0) 128 else if (position == 1) 64 else if (position == 2) 32 else if (position == 3) 16 else if (position == 4) 8 else if (position == 5) 4 else if (position == 6) 2 else 1
 
-// A tap at a portrait panel pixel. Returns whether a handler ran.
-fun oneEpaperTouch(var app: OneApp, theme: Theme, state: OneEpaperState, x: int, y: int): bool {
+// The event of what is pressable at a portrait panel pixel, 0 if nothing is.
+fun oneEpaperPressAt(state: OneEpaperState, x: int, y: int): int {
     val lx = x * 100 / state.options.scale
     val ly = y * 100 / state.options.scale
     var i = state.frame.hits.size - 1
     while (i >= 0) {
         val h = state.frame.hits[i]
-        if (h.kind == "press" && lx >= h.x && lx < h.x + h.w && ly >= h.y && ly < h.y + h.h)
-            return oneDispatch(app, "epaper", theme, h.event, "", oneEpaperLogicalWidth(state.options))
+        if (h.kind == "press" && lx >= h.x && lx < h.x + h.w && ly >= h.y && ly < h.y + h.h) return h.event
         i = i - 1
     }
-    false
+    0
 }
+
+// A tap at a portrait panel pixel. Returns whether a handler ran.
+fun oneEpaperTouch(var app: OneApp, theme: Theme, state: OneEpaperState, x: int, y: int): bool =
+    oneDispatch(app, "epaper", theme, oneEpaperPressAt(state, x, y), "", oneEpaperLogicalWidth(state.options))
 
 // A swipe at portrait pixel (x, y): scrolls the innermost scroll area there
 // by `dy` panel pixels (positive moves the content up, as a finger dragging
@@ -693,48 +710,6 @@ fun oneEpaperShowsGrey(planes: array<int>, r: OneEpaperRect): bool {
         row = row + 1
     }
     false
-}
-
-// The update on the wire, for a device to apply: "ONE1", revision (u32),
-// mode (u8), rectangle count (u8), then per rectangle x, y, w, h (u16) and
-// its LSB rows followed by its MSB rows (w/8 bytes per row). Little endian.
-fun oneEpaperWire(update: OneEpaperUpdate, width: int, height: int): string {
-    var out = byteBuffer()
-    out.appendText("ONE1")
-    oneEpaperLe(out, update.revision, 4)
-    out.appendByteValue(update.mode)
-    out.appendByteValue(update.rects.size)
-    val stride = (width + 7) / 8
-    val plane = stride * height
-    for (r in update.rects) {
-        oneEpaperLe(out, r.x, 2)
-        oneEpaperLe(out, r.y, 2)
-        oneEpaperLe(out, r.w, 2)
-        oneEpaperLe(out, r.h, 2)
-        for (base in [0, plane]) {
-            var row = r.y
-            while (row < r.y + r.h) {
-                var col = r.x / 8
-                while (col < (r.x + r.w) / 8) {
-                    out.appendByteValue(update.planes[base + row * stride + col])
-                    col = col + 1
-                }
-                row = row + 1
-            }
-        }
-    }
-    out.toText()
-}
-
-fun oneEpaperLe(var out: ByteBuffer, value: int, bytes: int): void {
-    var v = value
-    var i = 0
-    while (i < bytes) {
-        out.appendByteValue(v % 256)
-        v = v / 256
-        i = i + 1
-    }
-    return
 }
 
 // A preview of the panel as it will look (four greys), as a PNG.

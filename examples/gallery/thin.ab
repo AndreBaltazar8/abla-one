@@ -1,0 +1,22 @@
+import "abla/http"
+import "abla/net"
+import "gallery.ab"
+import "../../src/backends/thin_host.ab"
+
+// The gallery for thin devices: this host runs the app and serves its node tree
+// (src/backends/thin_host.ab) on :8954. Set ONE_THIN_ADDRESS=0.0.0.0 to serve a real
+// device on the network.
+val galleryHosts: array<OneThinHost> = []
+
+fun galleryThin(request: HttpRequest): HttpResponse {
+    val answer = galleryHosts[0].handle(request)
+    if (answer != null) answer else httpText("not found", 404)
+}
+
+fun main: int {
+    galleryHosts.append(oneThinHost(Gallery(), oneDefaultTheme(), "epaper", 360, { request -> httpText("no in-process routes", 404) }))
+    val router = httpRouter()
+    router.get("/one/thin/tree", galleryThin)
+    router.post("/one/thin/event", galleryThin)
+    serveHttp(router, 8954)
+}

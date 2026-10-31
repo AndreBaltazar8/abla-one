@@ -1,0 +1,8 @@
+# Thin mode, on top of sdkconfig.defaults. Wi-Fi needs internal RAM, which the panel's
+# buffers mostly take: a smaller main stack and data cache, and what
+# can live in PSRAM does.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=48000
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+CONFIG_ESP32S3_DATA_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=n

@@ -1,0 +1,24 @@
+import "../one.ab"
+import "../core/wire.ab"
+
+// The app on a thin device: it shows the tree the server sent (thin_host.ab). Layout,
+// scrolling and drawing happen here; a press goes back to the server, by event id.
+class OneThinApp(var tree: Node, var revision: int) : OneApp {
+    fun render(var ui: Ui): Node = tree
+    fun receive(kind: string, value: string): void {
+        return
+    }
+}
+
+fun oneThinApp(): OneThinApp = OneThinApp(column(style(), [text("…", style())]), -1)
+
+// Takes a tree the server sent. Whether the screen needs drawing.
+fun OneThinApp.update(body: string): bool {
+    if (body == "") return false
+    val parsed = oneTreeParse(body)
+    if (!parsed.valid || parsed.revision == revision) return false
+    tree = parsed.root
+    revision = parsed.revision
+    oneInvalidate()
+    true
+}

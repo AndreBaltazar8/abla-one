@@ -146,15 +146,6 @@ fun main: int {
     greyPlanes[100] = 0
     expect(oneEpaperShowsGrey(greyPlanes, OneEpaperRect(0, 0, 16, 8)), "planes that differ are grey")
 
-    // Wire format: header and the rectangle bytes.
-    val wire = oneEpaperWire(counted, 800, 480)
-    expect(wire.slice(0, 4) == "ONE1", "magic")
-    expectEqual(wire[8], oneEpaperFastest, "mode byte")
-    expectEqual(wire[9], counted.rects.size, "rectangle count")
-    var expected = 10
-    for (r in counted.rects) expected = expected + 8 + 2 * (r.w / 8) * r.h
-    expectEqual(wire.size, expected, "rectangles carry both planes")
-
     // Switching tabs changes most of the screen: a full refresh.
     app.tab = 1
     val people = oneEpaperRender(app, t, state, noIcons())

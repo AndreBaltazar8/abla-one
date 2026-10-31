@@ -1,0 +1,31 @@
+import "abla/test"
+import "../../src/one.ab"
+import "../../src/core/wire.ab"
+import "../../src/layout/layout.ab"
+import "../../src/layout/paint.ab"
+
+// A node tree sent to a thin client is the same tree: same layout, same hits.
+fun screen(): Node =
+    column(style().padding(8).gap(4), [
+        text("Olá “mundo” \\ \n dois", style().fontSize(18).on("epaper", style().color("#000000")).pressed(style().opacity(50))),
+        pressable(7, style().padding(6), [icon("bell", "Avisos", style()), text("Ok", style())]).keyed("k1"),
+        scroll(style().height(100), [text("one", style().height(80)), text("two", style().height(80))]),
+        feed(style(), [], "top", 0, 9)
+    ])
+
+fun dump(node: Node): string {
+    var out = "${node.kind}|${node.key}|"
+    for (e in node.style.entries) out = "$out${e.target}/${e.state}/${e.property}/${e.value};"
+    for (a in node.attrs) out = "$out${a.name}=${a.value};"
+    for (c in node.children) out = "$out(${dump(c)})"
+    out
+}
+
+fun main: int {
+    val tree = oneTreeParse(oneTreeJson(screen(), 12))
+    expect(tree.valid, "parses")
+    expectEqual(tree.revision, 12, "revision")
+    expectEqual(dump(tree.root), dump(screen()), "same tree")
+    expect(!oneTreeParse("not json").valid, "garbage is refused")
+    0
+}

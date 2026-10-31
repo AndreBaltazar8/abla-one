@@ -25,9 +25,6 @@
 
 The design is in SPEC section 16; these build it.
 
-- [ ] Build thin embedded mode (the server sends the tree; the device does layout,
-      scrolling and drawing), behind a compile flag with full mode, and retire the
-      pixel link (`epaper_host.ab`).
 - [ ] Per-target start screens, starting with NovaKind (login on mobile and embedded).
 
 ## Toolchain

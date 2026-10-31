@@ -1,0 +1,12 @@
+import "abla/compiler"
+
+val target = #compilerDefineTarget(
+    "esp32-xtensa", "xtensa-esp-unknown-elf", "elf", "none", "none",
+    false, false
+)
+val built = #compilerBuildProgram(
+    "abla-one-gallery-papermono", "examples/gallery/papermono/thin.ab",
+    "build/papermono/gallery.o", "esp32-xtensa", "object",
+    false, false
+)
+fun main: int = if (target && built) 0 else 1

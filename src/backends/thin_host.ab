@@ -1,0 +1,82 @@
+import "abla/http"
+import "abla/process/time"
+import "../core/wire.ab"
+import "web_live.ab"
+
+// An app run on the server for thin devices (SPEC §16): the state and handlers stay
+// here, and a device gets the node tree, then does layout, scrolling and drawing
+// itself, so scrolling never waits on the network. Mount on any server:
+//
+//   GET  /one/thin/tree?have=<revision>     → 200 tree (core/wire.ab), or 204
+//   POST /one/thin/event?id=<event>         → 200 the tree after it, with `value` as the body
+//
+// The app's services are a session queue ("thin"): timers run on each request, and
+// its requests go to `handler` (relative URLs, in process).
+
+class OneThinHost(
+    var app: OneApp,
+    val theme: Theme,
+    val target: string,
+    val width: int,
+    val handler: (HttpRequest) -> HttpResponse,
+    var revision: int,
+    var seen: int,
+    var tree: string
+)
+
+fun oneThinHost(app: OneApp, theme: Theme, target: string, width: int, handler: (HttpRequest) -> HttpResponse): OneThinHost {
+    var host = OneThinHost(app, theme, target, width, handler, 0, -1, "")
+    host.refresh()
+    host
+}
+
+// Platform work, then a render when the app's state changed.
+fun OneThinHost.refresh(): void {
+    val index = oneLiveQueueIndex("thin")
+    var rounds = 0
+    while (rounds < 8) {
+        oneLiveQueueList[index].fireTimers(monotonicMilliseconds())
+        for (item in oneLiveQueueList[index].takeRequests()) oneLiveQueueList[index].complete(oneLiveExecute(handler, item))
+        val completions = oneLiveQueueList[index].takeCompletions()
+        for (payload in completions) app.receive("result", payload)
+        if (completions.size == 0) rounds = 8
+        rounds = rounds + 1
+    }
+    if (seen == oneRevision() && tree != "") return
+    seen = oneRevision()
+    var ui = oneUiSized(target, theme, width)
+    val text = oneTreeJson(app.render(ui), revision + 1)
+    // The same tree keeps its revision: the device has nothing to do.
+    if (text.size != tree.size || oneThinBody(text) != oneThinBody(tree)) {
+        revision = revision + 1
+        tree = text
+    }
+    return
+}
+
+// A tree without its revision (the part before "styles" holds only that).
+fun oneThinBody(text: string): string {
+    var i = 0
+    while (i < text.size && text[i] != 44) i = i + 1
+    text.slice(i, text.size)
+}
+
+fun oneThinAnswer(body: string): HttpResponse =
+    if (body == "") HttpResponse(204, [HttpHeader("Cache-Control", "no-store")], "")
+    else HttpResponse(200, [HttpHeader("Content-Type", "application/json"), HttpHeader("Cache-Control", "no-store")], body)
+
+// Answers a device's requests; null for other paths.
+fun OneThinHost.handle(request: HttpRequest): HttpResponse? {
+    if (request.path == "/one/thin/tree" && request.method == "GET") {
+        refresh()
+        return oneThinAnswer(if (oneParseInt(request.queryParameter("have"), -1) == revision) "" else tree)
+    }
+    if (request.path == "/one/thin/event" && request.method == "POST") {
+        oneDispatch(app, target, theme, oneParseInt(request.queryParameter("id"), 0), request.body, width)
+        // A handler can change what state can't see (plain fields).
+        oneInvalidate()
+        refresh()
+        return oneThinAnswer(tree)
+    }
+    null
+}
