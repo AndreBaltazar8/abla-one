@@ -38,6 +38,8 @@ check(find('Adicionar (2)') is not None, 'press events update state')
 todas = find('Todas'); b = bounds(todas) if todas is not None else [0, 0, 0, 0]
 screen = bounds(nodes()[0])[2]
 check(todas is not None and b[2] - b[0] < screen / 3, 'chips hug their label')
+# The first page, as the other targets' screenshots show it.
+subprocess.run(['adb', 'exec-out', 'screencap', '-p'], stdout=open('build/ui/android-gallery.png', 'wb'))
 tap('Pessoas')
 check(find('Maya Townsend') is not None, 'tab switch')
 tap('Maya Townsend'); tap('Componentes')
@@ -49,6 +51,5 @@ adb('shell', 'input', 'keyevent', '4')  # close the keyboard, which covers the t
 time.sleep(0.5)
 tap('Pessoas')
 check(find('Tiago Mendes') is not None and find('Sofia Costa', tries=1) is None, 'text input filters the list')
-subprocess.run(['adb', 'exec-out', 'screencap', '-p'], stdout=open('build/ui/android-gallery.png', 'wb'))
 print('PASS tests/ui/android_gallery.py' if failures == 0 else f'{failures} failed')
 sys.exit(1 if failures else 0)

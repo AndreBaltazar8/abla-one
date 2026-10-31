@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 exec nix-shell -p xorg.xorgserver xdotool imagemagick --run '
 set -euo pipefail
-Xvfb :97 -screen 0 600x900x24 >/dev/null 2>&1 &
+Xvfb :97 -screen 0 420x760x24 >/dev/null 2>&1 &
 xvfb=$!
 trap "kill \$app \$xvfb 2>/dev/null" EXIT
 export DISPLAY=:97

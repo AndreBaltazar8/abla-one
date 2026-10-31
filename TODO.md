@@ -29,8 +29,3 @@
       memory limit (only covered by soak runs on the device so far).
 - [ ] Decide on export global roots: a reference global with a constant initializer
       isn't rooted in a program entered only through exports.
-
-## Screenshots
-
-- [ ] Retake matching gallery screenshots on web, desktop and Android (the Android
-      one shows a filtered Pessoas page; desktop has black bars).
