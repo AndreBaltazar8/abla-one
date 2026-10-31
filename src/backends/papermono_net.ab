@@ -287,10 +287,10 @@ trusted fun onePaperMonoRun1(job: OnePaperMonoJob): string {
         val value = oneNetStoreRead(job.key)
         return oneResponsePayload(job.id, if (value == "") 404 else 200, value, "")
     }
-    if (job.kind == "write") return oneResponsePayload(job.id, if (oneNetStoreWrite(job.key, job.value)) 200 else 500, "", "")
+    if (job.kind == "write") return oneResponsePayload(job.id, if (oneNetStoreWrite(job.key, job.value)) 204 else 500, "", "")
     if (job.kind == "remove") {
         oneNetStoreRemove(job.key)
-        return oneResponsePayload(job.id, 200, "", "")
+        return oneResponsePayload(job.id, 204, "", "")
     }
     if (job.kind == "http") {
         val url = oneNetParseUrl(job.request.url)
