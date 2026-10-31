@@ -29,8 +29,3 @@
       memory limit (only covered by soak runs on the device so far).
 - [ ] Decide on export global roots: a reference global with a constant initializer
       isn't rooted in a program entered only through exports.
-
-## Screenshots
-
-- [ ] Retake the Android gallery screenshot (`make ui-android`): it still shows a filtered
-      Pessoas page. The test now takes it on the first page; it needs a running emulator.
