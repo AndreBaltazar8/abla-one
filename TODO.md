@@ -15,7 +15,8 @@
 ## Routes
 
 - [ ] PaperMono: routes and popovers are covered by host tests and the firmware builds, in both modes;
-      not yet run on the device.
+      not yet run on the device, which wasn't connected on 2026-10-31. Needs its owner's taps: open and go back
+      between routes, open a popover and tap outside it, in full and in thin mode.
 
 ## Toolchain
 
@@ -31,6 +32,11 @@
 ## Abla One bugs seen
 
 - PaperMono thin mode after the compact storage change: it links (`make papermono-gallery MODE=thin
-  ONE_HOST=...`), but hasn't run on a device.
+  ONE_HOST=...`, again on 2026-10-31 with the Wi-Fi change) and `make ui-thin` passes on the host, but it hasn't run
+  on a device.
+- PaperMono: joining Wi-Fi in the background and encrypted NVS (`docs/papermono-secure-storage.md`) are tested on
+  the host and build; neither has run on a device. Check boots join without "Sem ligação", and `build-key`.
+- abla-embedded `tools/check-source` stops with "Illegal instruction" (core dump) after "ESP32 full opaque parity",
+  on master before and after the Wi-Fi change (`make check`, 2026-10-31), so it checks nothing after that point.
 - `tests/ui/android_gallery.py`, first run after an emulator boot: "fast typing reaches the app" failed with
   the field stopped at 58 of 160 characters. It passed on each of the next runs; not reproduced since.

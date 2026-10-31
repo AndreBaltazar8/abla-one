@@ -55,10 +55,10 @@ else's data, and decide on flash encryption before a device leaves your hands wi
 make flash-papermono ONE_SECURE_STORAGE=build-key NOVAKIND_SERVER=https://name
 ```
 
-Then, in the shell of step 1 below, dump the partition and look for a token (there should be none):
+Then, in the shell of step 1 below, dump the partition and look for a token (it should count 0):
 
 ```
-python -m esptool --port /dev/ttyACM0 read-flash 0x9000 0x6000 nvs.bin && strings nvs.bin | grep -c .
+python -m esptool --port /dev/ttyACM0 read-flash 0x9000 0x6000 nvs.bin && strings nvs.bin | grep -c accessToken
 ```
 
 To go back, flash without `ONE_SECURE_STORAGE`, and sign in again.
