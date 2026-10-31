@@ -41,3 +41,9 @@
   on master before and after the Wi-Fi change (`make check`, 2026-10-31), so it checks nothing after that point.
 - `tests/ui/android_gallery.py`, first run after an emulator boot: "fast typing reaches the app" failed with
   the field stopped at 58 of 160 characters. It passed on each of the next runs; not reproduced since.
+
+## Tools in Python
+
+- [ ] `tools/papermono-thin-config`, `tools/vector2svg.py`, `tools/fonts.py` and `tools/icons-ab.py` are Python. NovaKind no longer calls
+      `vector2svg.py` (`novakind-tool icons`, byte-identical on its 33 icons, could move here for other apps), but `make papermono` still needs
+      `papermono-thin-config`, which reads Wi-Fi credentials (seen 2026-10-31).
