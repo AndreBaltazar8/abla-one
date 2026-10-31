@@ -1067,6 +1067,8 @@ fun oneRasterInto(var surface: OneSurface, frame: OneFrame, icons: OneIconSource
         else if (p.op == "icon") {
             val svg = icons.load(p.text)
             if (svg != "") oneDrawSvg(surface, svg, p.x, p.y, p.w, p.h, if (p.color == "") "#111111" else p.color)
+        } else if (p.op == "bitmap") {
+            oneDrawBitmap(surface, p)
         } else if (p.op == "image") {
             val svg = if (p.text.size > 0 && p.text[0] != 47 && p.text[0] != 46 && !oneStarts(p.text, "http")) icons.load(p.text) else ""
             if (svg != "") oneDrawSvgColors(surface, svg, p.x, p.y, p.w, p.h)
@@ -1132,6 +1134,39 @@ fun oneFillRoundCrisp(var surface: OneSurface, x: int, y: int, w: int, h: int, r
             val inner = stroke + oneCornerInset(fromEdge - stroke, innerRadius)
             oneFillRect(surface, x + outer, row, inner - outer, 1, color, alpha)
             oneFillRect(surface, x + w - inner, row, inner - outer, 1, color, alpha)
+        }
+        row = row + 1
+    }
+    return
+}
+
+// A bitmap node: every cell the same whole number of pixels, centered in the box.
+fun oneDrawBitmap(var surface: OneSurface, p: OnePaint): void {
+    val columns = oneParseInt(p.weight, 0)
+    if (columns <= 0) return
+    val rows = p.text.size / columns
+    if (rows <= 0) return
+    val across = p.w / columns
+    val down = p.h / rows
+    val cell = if (across < down) across else down
+    if (cell <= 0) return
+    val left = p.x + (p.w - cell * columns) / 2
+    val top = p.y + (p.h - cell * rows) / 2
+    oneFillRect(surface, left, top, cell * columns, cell * rows, 16777215, 255)
+    var row = 0
+    while (row < rows) {
+        val y = top + row * cell
+        // Rows outside the surface's band are skipped: this runs once per band.
+        if (y + cell > surface.clipY0() && y < surface.clipY1()) {
+            var column = 0
+            while (column < columns) {
+                if (p.text[row * columns + column] == 49) {
+                    var end = column + 1
+                    while (end < columns && p.text[row * columns + end] == 49) end = end + 1
+                    oneFillRect(surface, left + column * cell, y, (end - column) * cell, cell, 0, 255)
+                    column = end
+                } else column = column + 1
+            }
         }
         row = row + 1
     }

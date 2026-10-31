@@ -58,6 +58,12 @@ fun icon(name: string, label: string, look: Style): Node = oneNode("icon", look,
 // authorization header value and a local fallback.
 fun image(src: string, label: string, look: Style): Node = oneNode("image", look, []).set("src", src).set("label", label)
 
+// Dark and light cells, drawn with sharp edges for a code a camera reads: `cells` holds a
+// "1" for each dark cell and a "0" for each light one, row by row, `columns` to a row. Where
+// pixels are drawn, each cell is the same whole number of pixels, as many as fit the box
+// and centered in it. Include any margin the code needs in the cells.
+fun bitmap(cells: string, columns: int, label: string, look: Style): Node = oneNode("bitmap", look, []).set("cells", cells).setInt("columns", columns).set("label", label)
+
 fun pressable(event: int, look: Style, children: array<Node>): Node =
     oneNode("pressable", look, oneVisible(children)).setInt("onPress", event)
 

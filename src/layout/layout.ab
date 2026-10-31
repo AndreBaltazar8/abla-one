@@ -330,7 +330,7 @@ fun oneMeasureFresh(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: 
         for (lw in lineWidths) if (lw > widest) widest = lw
         if (w < 0) w = widest + pl + pr
         if (h < 0) h = lines.size * oneLineHeight(r) + pt + pb
-    } else if (kind == "icon" || kind == "image") {
+    } else if (kind == "icon" || kind == "image" || kind == "bitmap") {
         val size = r.int("size", if (kind == "icon") 24 else 40)
         if (w < 0) w = size
         if (h < 0) h = size

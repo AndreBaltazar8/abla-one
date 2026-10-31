@@ -209,6 +209,7 @@ fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string,
         "rich" -> "<span $common>${oneWebRuns(node.attr("runs"))}</span>"
         "icon" -> "<span $common role=\"img\" aria-label=\"${oneHtmlEscape(node.attr("label"))}\" style=\"--i:url('${oneHtmlEscape(iconBase)}/${oneHtmlEscape(node.attr("name"))}.svg')\"></span>"
         "image" -> "<img $common src=\"${oneHtmlEscape(oneWebImageSource(node, iconBase))}\" alt=\"${oneHtmlEscape(node.attr("label"))}\">"
+        "bitmap" -> oneWebBitmap(node, common)
         "pressable" -> "<button type=\"button\" $common data-one-press=\"${node.attr("onPress")}\"$disabled$selected${oneWebLabel(node)}>$inner</button>"
         "input" -> oneWebInput(node, common)
         "divider" -> "<div $common role=\"separator\"></div>"
@@ -253,6 +254,24 @@ fun oneWebImageSource(node: Node, iconBase: string): string {
     // Authorized images can't be fetched by a plain <img>; SSR shows the fallback.
     if (node.attr("authorization") != "" && node.attr("fallback") != "") return "$iconBase/${node.attr("fallback")}.svg"
     if (src.startsWith("http") || src.startsWith("/") || src.startsWith("./") || src.startsWith("../") || src.startsWith("data:")) src else "$iconBase/$src.svg"
+}
+
+// A bitmap node as an SVG of its dark cells, whose edges stay sharp.
+fun oneWebBitmap(node: Node, common: string): string {
+    val cells = node.attr("cells")
+    val columns = oneParseInt(node.attr("columns"), 0)
+    val rows = if (columns > 0) cells.size / columns else 0
+    var path = ""
+    var row = 0
+    while (row < rows) {
+        var column = 0
+        while (column < columns) {
+            if (cells[row * columns + column] == 49) path = "${path}M$column ${row}h1v1h-1z"
+            column = column + 1
+        }
+        row = row + 1
+    }
+    "<svg $common role=\"img\" aria-label=\"${oneHtmlEscape(node.attr("label"))}\" viewBox=\"0 0 $columns $rows\" shape-rendering=\"crispEdges\"><rect width=\"$columns\" height=\"$rows\" fill=\"#fff\"/><path d=\"$path\"/></svg>"
 }
 
 fun oneWebInput(node: Node, common: string): string {

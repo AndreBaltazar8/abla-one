@@ -79,6 +79,8 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
         frame.paints.append(OnePaint("icon", x, y, box.w, box.h, 0, if (r.get("tint") != "") r.get("tint") else r.get("color"), box.node.attr("name"), 0, "", ""))
     } else if (kind == "image") {
         frame.paints.append(OnePaint("image", x, y, box.w, box.h, radius, "", box.node.attr("src"), 0, r.get("fit"), ""))
+    } else if (kind == "bitmap") {
+        frame.paints.append(OnePaint("bitmap", x, y, box.w, box.h, 0, "", box.node.attr("cells"), 0, box.node.attr("columns"), ""))
     } else if (kind == "input") {
         val value = box.node.attr("value")
         val size = r.int("size", 16)

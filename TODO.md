@@ -12,6 +12,11 @@
 - Only list what is really open. A task is done when it is verified where it
   runs (on the device for device work), not just when it compiles.
 
+## Components
+
+- [ ] `bitmap` draws on the raster targets (e-paper, canvas, desktop) and on web-document (an SVG), not on
+      Android: `OneRenderer.kt` in abla-mobile doesn't know the kind. Nothing there uses it yet.
+
 ## Routes
 
 - [ ] Thin devices: an event of an older revision within one route runs by its id, untranslated, so it can

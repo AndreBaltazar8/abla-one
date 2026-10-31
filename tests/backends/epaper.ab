@@ -54,6 +54,34 @@ fun main: int {
     }
     expect(same, "a band's pixels are the frame's rows 200-239")
 
+    // A bitmap: cells of one whole number of panel pixels, whichever way the scale rounds.
+    val cells = "101" + "010" + "111"
+    val bitmapOwners: array<string> = []
+    val mapped = oneEpaperScaleFrame(onePaintFrame(oneLayout(column(style().fill().paddingLeft(7).paddingTop(5), [bitmap(cells, 3, "code", style().size(100))]), oneDefaultTheme(), "epaper", 360, 601, Map()), 360, 601), 133, 480, 800, 2, true, bitmapOwners)
+    expectEqual(oneEpaperCrispPaint(mapped.paints[0]).text, cells, "a bitmap keeps its cells")
+    val pixels = oneRasterFrame(mapped, "#ffffff", noIcons())
+    val box = mapped.paints[0]
+    val size = box.w / 3
+    expectEqual(size, 44, "the most whole pixels per cell that fit")
+    val left = box.x + (box.w - size * 3) / 2
+    val top = box.y + (box.h - size * 3) / 2
+    var sharp = true
+    var cellY = 0
+    while (cellY < size * 3) {
+        var cellX = 0
+        while (cellX < size * 3) {
+            val dark = cells[(cellY / size) * 3 + cellX / size] == 49
+            if ((pixels.pixels.word((top + cellY) * 480 + left + cellX) & 16777215) != (if (dark) 0 else 16777215)) sharp = false
+            cellX = cellX + 1
+        }
+        cellY = cellY + 1
+    }
+    expect(sharp, "every pixel of every cell is pure black or white")
+    expectEqual(pixels.pixels.word((top - 1) * 480 + left) & 16777215, 16777215, "nothing above the cells")
+    val bandCells = oneRasterBand(mapped, "#ffffff", noIcons(), top + size - 8, 40)
+    expectEqual(bandCells.pixels.word(8 * 480 + left + size) & 16777215, 0, "a band draws the rows it reaches: dark")
+    expectEqual(bandCells.pixels.word(8 * 480 + left) & 16777215, 16777215, "and light")
+
     val t = oneDefaultTheme()
     var app = Gallery(OneNoServices())
     var state = oneEpaperState(onePaperMonoOptions())
