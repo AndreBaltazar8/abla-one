@@ -42,13 +42,14 @@ val oneEpaperText = 2
 val oneEpaperFast = 3
 val oneEpaperFastest = 4
 
-class OneEpaperUpdate(val revision: int, val mode: int, val rects: array<OneEpaperRect>, val planes: array<int>)
+// The rectangles' bytes are in the state's planes.
+class OneEpaperUpdate(val revision: int, val mode: int, val rects: array<OneEpaperRect>)
 
-class OneEpaperState(
+resource class OneEpaperState(
     val options: OneEpaperOptions,
     // The panel as last rendered: the SSD1677 drawing planes (the layout
-    // oneEpaperPlaneLevel reads), one byte value per element.
-    val planes: array<int>,
+    // oneEpaperPlaneLevel reads).
+    val planes: OneMemory,
     var revision: int,
     var partials: int,
     var frame: OneFrame,
@@ -66,6 +67,8 @@ class OneEpaperState(
     // the scroll areas each paint sits in ("|key|key|"), to shift rather than redraw.
     val offsets: Map<string, int>,
     var owners: array<string>,
+    // Which 8x8 tiles a render changed, a byte each.
+    val dirty: OneMemory,
     // Called between bands of a render: a device reads its touch panel here.
     var onBand: () -> void = { },
     // Style and text work kept between layouts, the last layout, and the state
@@ -74,8 +77,6 @@ class OneEpaperState(
     val boxes: array<OneBox> = [],
     var boxRevision: int = -1,
     var scrolled: bool = false,
-    // Which 8x8 tiles a render changed, kept: the array is a tenth of a render's garbage.
-    val dirty: array<int> = [],
     // The on-screen keyboard (oneEpaperTap): the input it types into (its change
     // event, 0 when closed), that input's text, and its layer.
     var typingEvent: int = 0,
@@ -91,8 +92,12 @@ fun oneEpaperBandSurface(options: OneEpaperOptions): OneSurface {
     surface
 }
 
-fun oneEpaperState(options: OneEpaperOptions): OneEpaperState =
-    OneEpaperState(options, filledArray(options.width * options.height / 4, 0), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), [], [], 0, oneEpaperBandSurface(options), Map(), [])
+fun oneEpaperState(options: OneEpaperOptions): OneEpaperState {
+    val planes = oneMemory(options.width * options.height / 4)
+    val surface = oneEpaperBandSurface(options)
+    val dirty = oneMemory(options.height / 8 * ((options.width + 7) / 8))
+    OneEpaperState(options, move(planes), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), [], [], 0, move(surface), Map(), [], move(dirty), { }, oneLayoutCache(), [], -1, false, 0, "", 0, "")
+}
 
 // Portrait rows rasterized at a time: a multiple of 8 (a canvas byte) that
 // divides 800. A whole frame at once would take a 480×800 surface, more
@@ -261,7 +266,6 @@ fun oneEpaperDraw(var state: OneEpaperState, icons: OneIconSource): OneEpaperUpd
     val plane = stride * ph
     val tilesX = pw / 8
     val tilesY = (ph + 7) / 8
-    while (state.dirty.size < tilesX * tilesY) state.dirty.append(0)
     var changed = 0
     val background = oneColorValue(o.background)
     val hashes: array<int> = []
@@ -304,46 +308,7 @@ fun oneEpaperDraw(var state: OneEpaperState, icons: OneIconSource): OneEpaperUpd
             oneSurfaceMoveTo(state.surface, area.x, y0, area.x + area.w, rows, background)
             oneRasterInto(state.surface, scaled, icons)
             drawn = drawn + area.w * rows
-            var x = area.x
-            while (x < area.x + area.w) {
-                val py = oneEpaperPhysicalY(x, 0, o.width)
-                var column = y0 / 8
-                while (column * 8 < y0 + rows) {
-                    var lsb = 0
-                    var msb = 0
-                    var k = 0
-                    var at = (column * 8 - y0) * o.width + x
-                    var bit = 128
-                    while (k < 8) {
-                        val pixel = state.surface.pixels[at]
-                        // (Most of a screen is black or white: skip their arithmetic.)
-                        if (pixel == 16777215) {
-                            lsb = lsb | bit
-                            msb = msb | bit
-                        } else if (pixel != 0 || !o.crisp) {
-                            val y = column * 8 + k
-                            val level = if (o.crisp) oneEpaperShade(oneEpaperGray(pixel)) else oneEpaperLevel(oneEpaperGray(pixel), y, py)
-                            if ((level & 1) == 1) lsb = lsb | bit
-                            if (level >= 2) msb = msb | bit
-                        }
-                        at = at + o.width
-                        bit = bit >> 1
-                        k = k + 1
-                    }
-                    val offset = py * stride + column
-                    if (state.planes[offset] != lsb || state.planes[offset + plane] != msb) {
-                        state.planes[offset] = lsb
-                        state.planes[offset + plane] = msb
-                        val tile = (py / 8) * tilesX + column
-                        if (state.dirty[tile] == 0) {
-                            state.dirty[tile] = 1
-                            changed = changed + 1
-                        }
-                    }
-                    column = column + 1
-                }
-                x = x + 1
-            }
+            changed = changed + oneEpaperQuantise(state, area.x, area.x + area.w, y0, rows)
             y0 = y0 + rows
         }
     }
@@ -354,11 +319,7 @@ fun oneEpaperDraw(var state: OneEpaperState, icons: OneIconSource): OneEpaperUpd
     var rects: array<OneEpaperRect> = []
     if (changed > 0) {
         rects = oneEpaperRects(state.dirty, tilesX, tilesY, ph)
-        var tile = 0
-        while (tile < state.dirty.size) {
-            state.dirty[tile] = 0
-            tile = tile + 1
-        }
+        state.dirty.clear(0, state.dirty.size)
     }
     var mode = oneEpaperFastest
     if (rects.size > 0) {
@@ -375,7 +336,69 @@ fun oneEpaperDraw(var state: OneEpaperState, icons: OneIconSource): OneEpaperUpd
         }
         state.revision = state.revision + 1
     }
-    OneEpaperUpdate(state.revision, mode, rects, state.planes)
+    OneEpaperUpdate(state.revision, mode, rects)
+}
+
+// Quantises the surface's columns x0 until x1 (all its rows, y0 byte-aligned as every
+// redrawn area is) into canvas bytes, and marks the tiles whose bytes changed; how many
+// it marked. Addresses move by additions: on a small device this runs for every pixel.
+trusted fun oneEpaperQuantise(var state: OneEpaperState, x0: int, x1: int, y0: int, rows: int): int {
+    val o = state.options
+    val crisp = o.crisp
+    val stride = o.height / 8
+    val plane = stride * o.width
+    val first = y0 / 8
+    val last = (y0 + rows + 7) / 8
+    state.surface.pixels.check(((last - first) * 8 - 1) * o.width * 4 + x1 * 4 - 4, 4)
+    state.planes.check((o.width - x0) * stride - stride + last - 1 + plane, 1)
+    val pixels = ablaUnsafePointerAddress(state.surface.pixels.address)
+    val planes = ablaUnsafePointerAddress(state.planes.address)
+    val dirty = ablaUnsafePointerAddress(state.dirty.address)
+    val rowBytes = o.width * 4
+    var marked = 0
+    var x = x0
+    while (x < x1) {
+        val py = oneEpaperPhysicalY(x, 0, o.width)
+        val line = planes + py * stride
+        val tiles = dirty + (py >> 3) * stride
+        var at = pixels + x * 4
+        var column = first
+        while (column < last) {
+            var lsb = 0
+            var msb = 0
+            var k = 0
+            var bit = 128
+            while (k < 8) {
+                val pixel = ablaUnsafeLoadU32(nativePointerFromAddress(at))
+                // (Most of a screen is black or white: skip their arithmetic.)
+                if (pixel == 16777215) {
+                    lsb = lsb | bit
+                    msb = msb | bit
+                } else if (pixel != 0 || !crisp) {
+                    val level = if (crisp) oneEpaperShade(oneEpaperGray(pixel)) else oneEpaperLevel(oneEpaperGray(pixel), column * 8 + k, py)
+                    if ((level & 1) == 1) lsb = lsb | bit
+                    if (level >= 2) msb = msb | bit
+                }
+                at = at + rowBytes
+                bit = bit >> 1
+                k = k + 1
+            }
+            val low = nativePointerFromAddress(line + column)
+            val high = nativePointerFromAddress(line + column + plane)
+            if (ablaUnsafeLoadU8(low) != lsb || ablaUnsafeLoadU8(high) != msb) {
+                ablaUnsafeStoreU8(low, lsb)
+                ablaUnsafeStoreU8(high, msb)
+                val tile = nativePointerFromAddress(tiles + column)
+                if (ablaUnsafeLoadU8(tile) == 0) {
+                    ablaUnsafeStoreU8(tile, 1)
+                    marked = marked + 1
+                }
+            }
+            column = column + 1
+        }
+        x = x + 1
+    }
+    marked
 }
 
 // A scroll area to shift: its canvas-byte rows top until bottom (portrait), its
@@ -420,19 +443,16 @@ fun oneEpaperShiftPlanes(var state: OneEpaperState, shift: OneEpaperShift, tiles
         var plane = 0
         while (plane < 2) {
             val base = plane * 48000 + py * 100
-            var column = if (by > 0) first else last - 1
-            while (column >= first && column < last) {
-                val source = column + by
-                if (source >= first && source < last) state.planes[base + column] = state.planes[base + source]
-                column = if (by > 0) column + 1 else column - 1
-            }
+            val span = if (by > 0) by else 0 - by
+            if (by > 0) state.planes.move(base + first, base + first + by, last - first - span)
+            else state.planes.move(base + first + span, base + first, last - first - span)
             plane = plane + 1
         }
         var column = first
         while (column < last) {
             val tile = (py / 8) * tilesX + column
-            if (state.dirty[tile] == 0) {
-                state.dirty[tile] = 1
+            if (state.dirty.byte(tile) == 0) {
+                state.dirty.setByte(tile, 1)
                 marked = marked + 1
             }
             column = column + 1
@@ -555,17 +575,19 @@ fun oneEpaperAddArea(var areas: array<OneEpaperRect>, p: OnePaint, width: int, h
 
 // Dirty tiles as rectangles: runs per tile row, joined downwards while the
 // run lines up. Very many small rectangles collapse into their bounds.
-fun oneEpaperRects(dirty: array<int>, tilesX: int, tilesY: int, height: int): array<OneEpaperRect> {
+fun oneEpaperRects(dirty: OneMemory, tilesX: int, tilesY: int, height: int): array<OneEpaperRect> {
     val open: array<OneEpaperRect> = []
     val done: array<OneEpaperRect> = []
     var ty = 0
     while (ty < tilesY) {
+        // (Most rows have nothing: no arrays for them.)
+        while (ty < tilesY - 1 && open.size == 0 && dirty.isClear(ty * tilesX, tilesX)) ty = ty + 1
         val runs: array<OneEpaperRect> = []
         var tx = 0
         while (tx < tilesX) {
-            if (dirty[ty * tilesX + tx] == 1) {
+            if (dirty.byte(ty * tilesX + tx) == 1) {
                 var end = tx
-                while (end < tilesX && dirty[ty * tilesX + end] == 1) end = end + 1
+                while (end < tilesX && dirty.byte(ty * tilesX + end) == 1) end = end + 1
                 runs.append(OneEpaperRect(tx * 8, ty * 8, (end - tx) * 8, 8))
                 tx = end
             } else tx = tx + 1
@@ -606,10 +628,10 @@ fun oneEpaperRects(dirty: array<int>, tilesX: int, tilesY: int, height: int): ar
 // plane, then the MSB plane, each one bit per pixel, rows of 100 bytes (800
 // physical pixels), most significant bit first. The grey level (0 black … 3
 // white) of physical pixel (px, py):
-fun oneEpaperPlaneLevel(planes: array<int>, px: int, py: int): int {
+fun oneEpaperPlaneLevel(planes: OneMemory, px: int, py: int): int {
     val offset = py * 100 + px / 8
     val bit = oneEpaperBit(px % 8)
-    (if ((planes[offset] / bit) % 2 == 1) 1 else 0) + (if ((planes[offset + 48000] / bit) % 2 == 1) 2 else 0)
+    (if ((planes.byte(offset) / bit) % 2 == 1) 1 else 0) + (if ((planes.byte(offset + 48000) / bit) % 2 == 1) 2 else 0)
 }
 
 fun oneEpaperBit(position: int): int = if (position == 0) 128 else if (position == 1) 64 else if (position == 2) 32 else if (position == 3) 16 else if (position == 4) 8 else if (position == 5) 4 else if (position == 6) 2 else 1
@@ -878,13 +900,13 @@ fun oneEpaperRectGap(p: OneEpaperRect, q: OneEpaperRect): int {
 }
 
 // Whether a canvas rectangle shows a grey (the planes differ only there).
-fun oneEpaperShowsGrey(planes: array<int>, r: OneEpaperRect): bool {
+fun oneEpaperShowsGrey(planes: OneMemory, r: OneEpaperRect): bool {
     var row = r.y
     while (row < r.y + r.h) {
         var column = r.x / 8
         while (column < (r.x + r.w) / 8) {
             val at = row * 100 + column
-            if (planes[at] != planes[at + 48000]) return true
+            if (planes.byte(at) != planes.byte(at + 48000)) return true
             column = column + 1
         }
         row = row + 1
@@ -901,7 +923,7 @@ fun oneEpaperPreview(state: OneEpaperState): string {
         var x = 0
         while (x < o.width) {
             val v = oneEpaperPlaneLevel(state.planes, oneEpaperPhysicalX(x, y), oneEpaperPhysicalY(x, y, o.width)) * 85
-            surface.pixels[y * o.width + x] = v * 65536 + v * 256 + v
+            surface.pixels.setWord(y * o.width + x, v * 65536 + v * 256 + v)
             x = x + 1
         }
         y = y + 1

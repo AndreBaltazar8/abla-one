@@ -183,7 +183,7 @@ trusted fun onePaperMonoRunThin(theme: Theme, icons: OneIconSource, config: OneT
         if (draw || (!shown && app.revision >= 0)) {
             val update = oneEpaperRenderTree(app.tree, theme, state, icons)
             println("papermono: thin revision ${app.revision}, ${update.rects.size} rectangles, mode ${update.mode}, ${onePaperMonoMilliseconds() - started} ms")
-            onePaperMonoShow(session, update)
+            onePaperMonoShow(session, state, update)
             shown = true
         }
         if (gesture == paperMonoGestureNone) {

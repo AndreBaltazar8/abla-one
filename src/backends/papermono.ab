@@ -30,7 +30,7 @@ trusted fun onePaperMonoMilliseconds(): int = int(esp_timer_get_time()) / 1000
 // areas far apart refresh separately: greys between them must not go through a
 // fast waveform. An area that shows greys takes the fast mode rather than the
 // fastest, which has no grey stage.
-trusted fun onePaperMonoShow(session: Ssd1677Session, update: OneEpaperUpdate): void {
+trusted fun onePaperMonoShow(session: Ssd1677Session, state: OneEpaperState, update: OneEpaperUpdate): void {
     if (update.rects.size == 0) return
     val canvas = session.canvas()
     for (r in update.rects) {
@@ -38,12 +38,9 @@ trusted fun onePaperMonoShow(session: Ssd1677Session, update: OneEpaperUpdate): 
         while (plane < 2) {
             var row = r.y
             while (row < r.y + r.h) {
-                val base = plane * 48000 + row * 100
-                var column = r.x / 8
-                while (column < (r.x + r.w) / 8) {
-                    canvas.store(base + column, update.planes[base + column])
-                    column = column + 1
-                }
+                val at = plane * 48000 + row * 100 + r.x / 8
+                val count = (r.x + r.w) / 8 - r.x / 8
+                if (canvas.hasAddressRange(at, count)) ablaUnsafeCopyMemory(canvas.addressValue() + at, state.planes.addressAt(at), count)
                 row = row + 1
             }
             plane = plane + 1
@@ -51,7 +48,7 @@ trusted fun onePaperMonoShow(session: Ssd1677Session, update: OneEpaperUpdate): 
     }
     for (group in oneEpaperGroupRects(update.rects)) {
         session.markDirtyOwned(group.x, group.y, group.w, group.h, true)
-        val mode = if (update.mode == oneEpaperFastest && oneEpaperShowsGrey(update.planes, group)) oneEpaperFast else update.mode
+        val mode = if (update.mode == oneEpaperFastest && oneEpaperShowsGrey(state.planes, group)) oneEpaperFast else update.mode
         if (!paperMonoRefresh(session, mode)) paperMonoRefresh(session, paperMonoQuality)
     }
     return
@@ -95,7 +92,7 @@ fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var po
     var state = oneEpaperState(onePaperMonoOptions())
     state.onBand = { paperMonoGestureSample() }
     var started = onePaperMonoMilliseconds()
-    onePaperMonoShow(session, oneEpaperRender(app, theme, state, icons))
+    onePaperMonoShow(session, state, oneEpaperRender(app, theme, state, icons))
     println("papermono: first frame in ${onePaperMonoMilliseconds() - started} ms")
     var collected = runtimeMemoryLiveBytes()
     while (true) {
@@ -106,7 +103,7 @@ fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var po
             val x = paperMonoGestureAtX()
             val y = paperMonoGestureAtY()
             if (onePaperMonoPressLook && gesture == paperMonoGestureTap && oneEpaperPress(state, x, y)) {
-                onePaperMonoShow(session, oneEpaperRender(app, theme, state, icons))
+                onePaperMonoShow(session, state, oneEpaperRender(app, theme, state, icons))
                 oneEpaperRelease(state)
             }
             val acted = if (gesture == paperMonoGestureTap) oneEpaperTouch(app, theme, state, x, y)
@@ -115,7 +112,7 @@ fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var po
             if (acted || state.scrolled) {
                 val update = oneEpaperRender(app, theme, state, icons)
                 println("papermono: ${if (gesture == paperMonoGestureTap) "tap" else "swipe"} at $x,$y, ${update.rects.size} rectangles, mode ${update.mode}, ${onePaperMonoMilliseconds() - started} ms")
-                onePaperMonoShow(session, update)
+                onePaperMonoShow(session, state, update)
             }
         }
         // Finished work from the platform, one at a time.
@@ -123,7 +120,7 @@ fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var po
             val completion = poll()
             if (completion != "") {
                 app.receive("result", completion)
-                onePaperMonoShow(session, oneEpaperRender(app, theme, state, icons))
+                onePaperMonoShow(session, state, oneEpaperRender(app, theme, state, icons))
             }
         }
         // Cleaning up memory takes 100-200 ms: do it while nothing is waiting,

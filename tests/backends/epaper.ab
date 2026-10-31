@@ -28,11 +28,11 @@ fun main: int {
     expectEqual(oneEpaperCrispPaint(OnePaint("rect", 0, 0, 9, 9, 0, "#d0d0d0", "", 0, "", "")).color, "#d0d0d0", "fills keep their shade")
 
     // Planes: LSB then MSB (48000 bytes each), rows of 100 bytes, MSB-first bits.
-    val planes = filledArray(96000, 0)
-    planes[0] = 0x5F
-    planes[48000] = 0x3F
-    planes[100] = 0xBF
-    planes[48100] = 0xFF
+    val planes = oneMemory(96000)
+    planes.setByte(0, 0x5F)
+    planes.setByte(48000, 0x3F)
+    planes.setByte(100, 0xBF)
+    planes.setByte(48100, 0xFF)
     expectEqual(oneEpaperPlaneLevel(planes, 0, 0), 0, "LSB 0, MSB 0: black")
     expectEqual(oneEpaperPlaneLevel(planes, 1, 0), 1, "LSB 1, MSB 0")
     expectEqual(oneEpaperPlaneLevel(planes, 2, 0), 2, "LSB 0, MSB 1")
@@ -49,7 +49,7 @@ fun main: int {
     var same = true
     var at = 0
     while (at < 480 * 40) {
-        if (banded.pixels[at] != whole.pixels[200 * 480 + at]) same = false
+        if (banded.pixels.word(at) != whole.pixels.word(200 * 480 + at)) same = false
         at = at + 1
     }
     expect(same, "a band's pixels are the frame's rows 200-239")
@@ -62,7 +62,7 @@ fun main: int {
     expectEqual(first.mode, oneEpaperText, "the first frame is a full quality refresh")
     expectEqual(first.rects.size, 1, "covering")
     expect(first.rects[0].w == 800 && first.rects[0].h == 480, "the whole panel")
-    expectEqual(first.planes.size, 96000, "PaperMono canvas: two 48000-byte planes")
+    expectEqual(state.planes.size, 96000, "PaperMono canvas: two 48000-byte planes")
     var dark = 0
     var py = 0
     while (py < 480) {
@@ -108,7 +108,7 @@ fun main: int {
     var planesMatch = true
     var planeAt = 0
     while (planeAt < 96000) {
-        if (fresh.planes[planeAt] != state.planes[planeAt]) planesMatch = false
+        if (fresh.planes.byte(planeAt) != state.planes.byte(planeAt)) planesMatch = false
         planeAt = planeAt + 1
     }
     expect(planesMatch, "skipping bands leaves the same planes as a fresh render")
@@ -131,7 +131,7 @@ fun main: int {
         var same = 0
         var at = 0
         while (at < 96000) {
-            if (freshScroll.planes[at] != state.planes[at]) same = same + 1
+            if (freshScroll.planes.byte(at) != state.planes.byte(at)) same = same + 1
             at = at + 1
         }
         expectEqual(same, 0, "swipe $delta looks like a fresh render")
@@ -141,9 +141,9 @@ fun main: int {
     expectEqual(oneEpaperGroupRects([OneEpaperRect(0, 0, 8, 8), OneEpaperRect(400, 0, 8, 8)]).size, 2, "far apart stays apart")
     expectEqual(oneEpaperGroupRects([OneEpaperRect(0, 0, 8, 8), OneEpaperRect(8, 8, 8, 8)]).size, 1, "touching merge")
     expectEqual(oneEpaperGroupRects([OneEpaperRect(0, 0, 8, 8), OneEpaperRect(100, 0, 8, 8), OneEpaperRect(200, 0, 8, 8), OneEpaperRect(300, 0, 8, 8), OneEpaperRect(400, 0, 8, 8), OneEpaperRect(500, 0, 8, 8)]).size, 4, "at most four")
-    val greyPlanes = filledArray(96000, 255)
+    val greyPlanes = oneMemory(96000)
     expect(!oneEpaperShowsGrey(greyPlanes, OneEpaperRect(0, 0, 16, 8)), "white is not grey")
-    greyPlanes[100] = 0
+    greyPlanes.setByte(100, 1)
     expect(oneEpaperShowsGrey(greyPlanes, OneEpaperRect(0, 0, 16, 8)), "planes that differ are grey")
 
     // Switching tabs changes most of the screen: a full refresh.

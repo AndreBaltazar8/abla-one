@@ -24,13 +24,11 @@ if compgen -G "$project/../icons/*.xml" > /dev/null; then
   python3 "$root/tools/icons-ab.py" build/papermono/icons.ab build/papermono/icons
 fi
 driver=build.ab
-# Large apps with Wi-Fi: ONE_DIRECT_CALLS=0 (see below).
-export ABLA_XTENSA_DIRECT_CALLS="${ONE_DIRECT_CALLS:-1}"
+# The gallery's code now spreads past CALL8's reach in the catch-all flash statement:
+# call through literals. A small app can set ONE_DIRECT_CALLS=1.
+export ABLA_XTENSA_DIRECT_CALLS="${ONE_DIRECT_CALLS:-0}"
 if [[ ${ONE_MODE:-full} == thin ]]; then
   driver=build-thin.ab
-  # With Wi-Fi's libraries the app's code spreads past CALL8's reach in the catch-all
-  # flash statement: call through literals.
-  export ABLA_XTENSA_DIRECT_CALLS=0
   "$root/tools/papermono-thin-config" "${ONE_HOST:?ONE_MODE=thin needs ONE_HOST (a.b.c.d[:port] or https://name)}"
 fi
 nix-shell "$ablac/shell.nix" --run "

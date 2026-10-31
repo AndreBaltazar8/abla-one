@@ -5,13 +5,40 @@ import "../../src/one_kit.ab"
 import "../../src/raster/raster.ab"
 import "../../examples/gallery/gallery.ab"
 
-fun pixel(s: OneSurface, x: int, y: int): int = s.pixels[y * s.width + x]
+fun pixel(s: OneSurface, x: int, y: int): int = s.pixels.word(y * s.width + x)
 fun red(c: int): int = (c / 65536) % 256
 
 fun main: int {
     expectEqual(oneColorValue("#193c30"), 1653808, "hex colours")
     expectEqual(oneColorValue("#fff"), 16777215, "short hex")
     expectEqual(oneColorAlpha("#80ffffff"), 128, "alpha hex")
+
+    // Compact storage: words and bytes, signed reads, fills, overlapping moves.
+    val memory = oneMemory(16)
+    expect(memory.isClear(0, 16), "new memory is zero")
+    memory.setWord(1, 0 - 5)
+    expectEqual(memory.signedWord(1), -5, "a word reads back signed")
+    expectEqual(memory.word(1), 4294967291, "and unsigned")
+    expectEqual(memory.byte(4), 251, "little-endian bytes")
+    memory.clear(4, 4)
+    memory.fillWords(1, 3, 16777215)
+    expectEqual(memory.word(0), 0, "a fill stops at its start")
+    expectEqual(memory.word(2), 16777215, "and covers its words")
+    expectEqual(memory.word(3), 0, "and stops at its end")
+    memory.clear(0, 16)
+    var byteAt = 0
+    while (byteAt < 8) {
+        memory.setByte(byteAt, byteAt + 1)
+        byteAt = byteAt + 1
+    }
+    memory.move(0, 2, 6)
+    expectEqual(memory.byte(0), 3, "a move down")
+    expectEqual(memory.byte(5), 8, "keeps every byte")
+    memory.move(2, 0, 6)
+    expectEqual(memory.byte(7), 8, "a move up")
+    expectEqual(memory.byte(2), 3, "keeps every byte")
+    expect(!memory.isClear(0, 8), "bytes that are set are not clear")
+    expect(memory.isClear(8, 8), "the rest is")
 
     var s = oneSurface(40, 40, 16777215)
     var square = onePath()
@@ -40,8 +67,8 @@ fun main: int {
     oneDrawText(g, "o", 10, 5, 50, 48, "regular", "#000000")
     var dark = 0
     var i = 0
-    while (i < g.pixels.size) {
-        if (red(g.pixels[i]) < 128) dark = dark + 1
+    while (i * 4 < g.pixels.size) {
+        if (red(g.pixels.word(i)) < 128) dark = dark + 1
         i = i + 1
     }
     expect(dark > 100, "glyph ink ($dark)")

@@ -149,7 +149,7 @@ trusted fun oneDesktopBlit(var pixels: PixelBuffer, surface: OneSurface): bool {
     while (y < surface.height) {
         var x = 0
         while (x < surface.width) {
-            val c = surface.pixels[y * surface.width + x]
+            val c = surface.pixels.word(y * surface.width + x)
             ok = pixels.setRgba8(x, y, (c / 65536) % 256, (c / 256) % 256, c % 256, 255) && ok
             x = x + 1
         }
