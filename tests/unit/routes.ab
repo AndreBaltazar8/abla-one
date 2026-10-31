@@ -13,6 +13,15 @@ class Shown(val seen: array<string>, val redirect: string, val services: OneServ
 }
 
 fun main: int {
+    // A route twice in the stack: back goes past it, and at the bottom there's nowhere to go.
+    var twice = oneRoutes()
+    twice.start("/")
+    twice.navigate("/a", false)
+    twice.navigate("/", true)
+    expect(!twice.canGoBack() || twice.current() != "/", "the same route below is no way back")
+    twice.navigate("/b", false)
+    twice.back("")
+    expect(twice.current() == "/", "back to it from elsewhere")
     // Paths
     expectEqual(oneRoutePath(""), "/", "empty is the root")
     expectEqual(oneRoutePath("people"), "/people", "gets its slash")

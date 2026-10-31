@@ -46,9 +46,10 @@ fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
         fence.rendered(oneAppRoutes, revision)
         mobilePublishTree(mobileEncodeStyledTree(revision, "", false, oneAndroidNode(oneRouteStamp(root, oneAppRoutes), theme, "root"), false, background))
         recent.append(oneEventMap(root))
-        if (recent.size > 8) {
+        // Keys typed fast all carry the revision the host had: a short window lost the ninth.
+        if (recent.size > 64) {
             val kept: array<OneEventMap> = []
-            var i = recent.size - 8
+            var i = recent.size - 64
             while (i < recent.size) {
                 kept.append(recent[i])
                 i = i + 1

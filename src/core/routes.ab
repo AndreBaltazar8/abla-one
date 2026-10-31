@@ -16,8 +16,14 @@ class OneRoutes(val entries: array<OneRouteEntry>, var index: int, var lastId: i
     fun current(): string = if (entries.size == 0) "" else entries[index].path
     // Scroll positions belong to an entry: a new visit to the same path has its own.
     fun entry(): int = if (entries.size == 0) 0 else entries[index].id
-    fun canGoBack(): bool = index > 0
+    fun canGoBack(): bool = previous() >= 0
     fun canGoForward(): bool = index + 1 < entries.size
+    // The last entry showing something else: going back to the same route would look like nothing happened.
+    fun previous(): int {
+        var i = index - 1
+        while (i >= 0 && entries[i].path == current()) i = i - 1
+        i
+    }
     fun fresh(): int {
         lastId = lastId + 1
         lastId
@@ -58,7 +64,7 @@ class OneRoutes(val entries: array<OneRouteEntry>, var index: int, var lastId: i
     // Back one entry; with nothing to go back to, replaces this one with `fallback`
     // (a shared link's back button goes to its parent), or stays when that is "".
     fun back(fallback: string): void {
-        if (canGoBack()) moveTo(index - 1)
+        if (canGoBack()) moveTo(previous())
         else if (fallback != "") navigate(fallback, true)
         return
     }
