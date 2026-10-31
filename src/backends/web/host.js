@@ -434,6 +434,7 @@
     document.documentElement.setAttribute('data-one-ready', '');
   };
 
+  let leaving = false;
   const connect = () => {
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Relative to the page, so the app also works under a path prefix.
@@ -448,8 +449,8 @@
     socket.onmessage = (e) => receive(JSON.parse(e.data));
     socket.onclose = (e) => {
       document.documentElement.setAttribute('data-one-offline', '');
-      // An unknown session (server restarted) needs a fresh page.
-      if (e.code === 1008) return location.reload();
+      // An unknown or ended session needs a fresh page, unless one is already on its way.
+      if (e.code === 1008) return setTimeout(() => location.reload(), leaving ? 3000 : 0);
       setTimeout(connect, Math.min(1000 * 2 ** retry++, 10000));
     };
   };
@@ -468,7 +469,7 @@
   // covers navigations that skip it.
   const resume = () => { document.cookie = `one_resume=${boot.s}; path=${basePath}; max-age=15; samesite=lax`; };
   if (!boot.wasm) {
-    addEventListener('beforeunload', resume);
+    addEventListener('beforeunload', () => { leaving = true; resume(); });
     addEventListener('pagehide', resume);
   }
   addEventListener('pagehide', saveScroll);

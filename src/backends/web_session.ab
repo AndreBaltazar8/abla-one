@@ -314,7 +314,9 @@ class OneLiveSession(
     // answered with the next patch; canvas scroll positions per entry.
     val fence: OneRouteFence,
     var routeAnswer: int,
-    val scrolls: OneRouteScrolls
+    val scrolls: OneRouteScrolls,
+    // A page has had a socket to this session.
+    var connected: bool
 ) {
     // Renders the current state; returns the markup and records the event map.
     fun render(theme: Theme, iconBase: string): string {
@@ -444,5 +446,5 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
 }
 
 fun oneSession(id: string, app: OneApp, queue: OneLiveQueue): OneLiveSession {
-    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), 0, oneRouteScrolls())
+    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), 0, oneRouteScrolls(), false)
 }

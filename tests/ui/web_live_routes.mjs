@@ -123,6 +123,40 @@ try {
   await page.waitForTimeout(200);
   check(bad.length === 0, `relative URLs hold on a nested path ${bad.join(' ')}`);
 
+  // A session doesn't outlive its credentials: `resumes` refuses, on a reload or a new socket.
+  {
+    const gone = await browser.newPage({viewport: {width: 390, height: 844}});
+    await gone.goto(base + '/');
+    await gone.waitForTimeout(200);
+    await gone.getByRole('button', {name: 'Adicionar (0)'}).click();
+    await gone.getByText('Adicionar (1)').waitFor();
+    const session = await gone.evaluate(() => window.__one.s);
+    await gone.reload();
+    check(await gone.evaluate(() => window.__one.s) === session && await gone.getByText('Adicionar (1)').count() === 1, 'resumes allows: a reload continues');
+    await gone.waitForTimeout(200);
+    await gone.evaluate(() => { document.cookie = 'gallery_signed_out=1; path=/'; });
+    // From another page: this one reloads when its session ends.
+    const other = await browser.newPage();
+    await other.goto(base + '/icons/nav_home.svg');
+    await other.context().addCookies([{name: 'gallery_signed_out', value: '1', url: base}]);
+    const refused = await other.evaluate((s) => new Promise((done) => {
+      const socket = new WebSocket(`ws://${location.host}/one/live?s=${s}`);
+      socket.onclose = (e) => done(e.code);
+      setTimeout(() => done(0), 3000);
+    }), session);
+    await other.close();
+    check(refused === 1008, `resumes refuses: a new socket is closed (${refused})`);
+    await gone.getByText('Adicionar (0)').waitFor({timeout: 5000});
+    await gone.waitForTimeout(1500);
+    const again = await gone.evaluate(() => window.__one.s);
+    check(again !== session, 'and the page starts over in a new session');
+    await gone.reload();
+    check(await gone.evaluate(() => window.__one.s) !== again, 'a reload while refused: again a new one, and no loop');
+    await gone.waitForTimeout(1500);
+    check(await gone.getByText('Adicionar (0)').count() === 1, 'and the page stays');
+    await gone.close();
+  }
+
   // The app's own back button.
   const shared = await browser.newPage({viewport: {width: 390, height: 844}});
   await shared.goto(base + '/form/5');

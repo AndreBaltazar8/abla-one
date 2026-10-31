@@ -26,7 +26,9 @@ fun main: int {
         oneLivePaths(["/", "/people", "/form/:n"]),
         galleryApp,
         oneDefaultTheme(),
-        OneLiveOptions("Abla One", "pt-PT", "#ffffff", "/icons", "src/backends/web/host.js", "")
+        OneLiveOptions("Abla One", "pt-PT", "#ffffff", "/icons", "src/backends/web/host.js", ""),
+        // A page whose credentials are gone doesn't continue its session (tests/ui/web_live_routes.mjs).
+        OneLiveStorage({ request -> Map<string, string>() }, { request, key, value -> array<string>() }, { request, stored -> oneLiveCookie(request, "gallery_signed_out") == "" })
     )
     server.run()
 }

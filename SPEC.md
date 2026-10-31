@@ -477,7 +477,10 @@ if (kind == "route") {
 `oneLivePaths(["/", "/people", "/form/:n", "/docs/*"])`. A GET of a claimed path renders
 that route for first paint: a new session starts there, and a resumed one (a reload) moves
 there if it's elsewhere. Anything else still goes to the handler, and `/one/*` is the
-server's whatever a predicate says. Pages carry `<base href>` pointing at the app's
+server's whatever a predicate says. A session doesn't outlive its credentials: a page load or
+a new socket that would continue one first asks `OneLiveStorage.resumes` with the request and
+the session's stored values; refused, the session ends and the page starts a new one from the
+request. Pages carry `<base href>` pointing at the app's
 root (`./`, `../`), so relative URLs (icons, images, `one/host.js`, requests) mean the same on
 every route and after any `pushState`, also behind a proxy that strips a prefix; on a
 nested route, the host handles `#fragment` links itself. A relative `link` href therefore

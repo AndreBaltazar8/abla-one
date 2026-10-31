@@ -52,13 +52,17 @@ class OneLiveOptions(
 // values back to cookies. Storage is the app's; cookies let a later page load
 // (or another server process) continue where the session left off, for
 // example after the session rotated its tokens. An empty value means the key
-// was removed.
+// was removed. `resumes` says whether a request's credentials may continue a session
+// holding these values, on a page load or a new socket: a session outlives neither the
+// credentials it was opened with nor the person's signing out elsewhere. Refused, the
+// session ends and the page starts a new one from the request.
 class OneLiveStorage(
     val seed: (HttpRequest) -> Map<string, string>,
-    val cookies: (HttpRequest, string, string) -> array<string>
+    val cookies: (HttpRequest, string, string) -> array<string>,
+    val resumes: (HttpRequest, Map<string, string>) -> bool
 )
 
-fun oneLiveNoStorage(): OneLiveStorage = OneLiveStorage({ request -> Map<string, string>() }, { request, key, value -> array<string>() })
+fun oneLiveNoStorage(): OneLiveStorage = OneLiveStorage({ request -> Map<string, string>() }, { request, key, value -> array<string>() }, { request, stored -> true })
 
 resource class OneLiveServer(
     val handler: (HttpRequest) -> HttpResponse,
@@ -192,6 +196,38 @@ fun OneLiveServer.closeSlot(slot: int): void {
     return
 }
 
+// Ends a session now: its page is told to reload, and nothing of it stays to resume.
+fun OneLiveServer.endSession(index: int): void {
+    val id = sessions[index].id
+    val slot = sessions[index].slot
+    if (slot >= 0 && slots[slot].descriptor >= 0) {
+        queue(slot, webSocketEncodeFrame(webSocketClosePayload(1008, "session ended"), 8))
+        if (slots[slot].descriptor >= 0) {
+            slots[slot].session = ""
+            slots[slot].closing = true
+        }
+    }
+    oneLiveForget(id)
+    oneMemoForget(id)
+    val kept: array<OneLiveSession> = []
+    var i = 0
+    while (i < sessions.size) {
+        if (i != index) kept.append(sessions[i])
+        i = i + 1
+    }
+    sessions.clear()
+    for (session in kept) sessions.append(session)
+    return
+}
+
+// The session a request names, if its credentials may continue it; one they may not is over.
+fun OneLiveServer.resumable(request: HttpRequest, id: string): int {
+    val index = findSession(id)
+    if (index < 0 || storage.resumes(request, sessions[index].queue.storage)) return index
+    endSession(index)
+    -1
+}
+
 fun OneLiveServer.accept(): void {
     var accepting = true
     while (accepting) {
@@ -267,9 +303,10 @@ fun OneLiveServer.http(slot: int): void {
     slots[slot].input = input.slice(end + length, input.size)
     if (request.path == "/one/live" && webSocketIsUpgradeRequest(request)) {
         val id = request.queryParameter("s")
-        val session = findSession(id)
+        // A session's first socket comes from the page load that just opened it or passed the check.
+        val session = if (findSession(id) >= 0 && !sessions[findSession(id)].connected) findSession(id) else resumable(request, id)
         if (session < 0) {
-            // The server restarted or the session expired: the page reloads.
+            // The server restarted, the session expired or its credentials are gone: the page reloads.
             queue(slot, webSocketUpgradeResponse(request).render())
             queue(slot, webSocketEncodeFrame(webSocketClosePayload(1008, "unknown session"), 8))
             slots[slot].closing = true
@@ -277,6 +314,7 @@ fun OneLiveServer.http(slot: int): void {
         }
         if (sessions[session].slot >= 0 && sessions[session].slot != slot) closeSlot(sessions[session].slot)
         sessions[session].slot = slot
+        sessions[session].connected = true
         sessions[session].changed = true
         sessions[session].htmlSent = ""
         slots[slot].upgraded = true
@@ -372,10 +410,11 @@ fun oneLiveFontName(name: string): bool = name == "Inter-400.ttf" || name == "In
 // page hides), and any other request starts a new session seeded from the
 // request. The page is rendered with the session's current state, at the route
 // the request names: a new session starts there, and one resumed at another route
-// (a typed URL, a link followed from the page) moves there.
+// (a typed URL, a link followed from the page) moves there. Resuming asks
+// `storage.resumes` first.
 fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val route = oneLiveRoute(request)
-    var index = findSession(oneLiveCookie(request, "one_resume"))
+    var index = resumable(request, oneLiveCookie(request, "one_resume"))
     if (index < 0) {
         val id = oneLiveSessionId()
         val queueIndex = oneLiveQueueIndex(id)
