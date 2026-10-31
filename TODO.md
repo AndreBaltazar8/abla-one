@@ -31,6 +31,7 @@
 
 ## Abla One bugs seen
 
+- `make ui-android-services` doesn't build its APK, so it can run a stale one (seen 2026-10-31).
 - PaperMono thin mode after the compact storage change: it links (`make papermono-gallery MODE=thin
   ONE_HOST=...`, again on 2026-10-31 with the Wi-Fi change) and `make ui-thin` passes on the host, but it hasn't run
   on a device.
