@@ -70,4 +70,15 @@ copy
 printf '\nclass Bad(val run: () -> int)\n@server\nfun bad(): Bad = Bad({ 1 })\n' >> "$shop"
 build server.ab server > "$work/log"; check "a closure fails" "$?" 1
 check "naming the field" "$(grep -c 'bad__result_run' "$work/log")" 1
+
+# A route named like one of the live server's own paths would never be reached.
+for name in live upload cookies host canvas fonts thin; do
+  copy
+  printf '\n@server\nfun %s(): int = 1\n' "$name" >> "$shop"
+  build server.ab server > "$work/log"; check "a route named $name fails" "$?" 1
+  check "and says so" "$(grep -c "route_${name}_is_reserved" "$work/log")" 1
+done
+copy
+printf '\n@server\nfun livestock(): int = 1\n' >> "$shop"
+build server.ab server > "$work/log"; check "a name that only starts like one is fine" "$?" 0
 exit $failed

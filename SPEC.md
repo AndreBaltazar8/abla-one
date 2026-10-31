@@ -769,6 +769,9 @@ A client imports the same file as a contract, and calls through `$remote`:
 
 ### Stable routes
 
+A `@server` function can't be named after the live server's own paths under `/one/` (`live`, `upload`,
+`cookies`, `host`, `canvas`, `fonts`, `thin`): it's a compile error, as such a route would never run.
+
 Devices update rarely, so an old build keeps calling a newer server. Routes stay
 stable by default, and removing one is deliberate:
 

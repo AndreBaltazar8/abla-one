@@ -426,8 +426,17 @@ compile fun oneRemoteWriteRoutes(var source: OneRemoteSource): void {
     return
 }
 
+// The live server answers these under /one/ itself, before any route: a route of this name would
+// never run (src/backends/web_live.ab, thin_host.ab).
+compile fun oneRemoteReservedRoute(route: string): bool =
+    route == "live" || route == "upload" || route == "cookies" || route == "host" || route == "canvas" || route == "fonts" || route == "thin"
+
 compile fun oneRemoteGenerate(): void {
     var source = OneRemoteSource("", [], [])
+    for (function in compiler.functionsAnnotated("server")) {
+        val route = oneRemoteRoute(compiler.functionName(function))
+        if (oneRemoteReservedRoute(route)) source.problems.append("route $route is reserved by the live server: rename it")
+    }
     oneRemoteWriteClients(source)
     oneRemoteWriteRoutes(source)
     if (source.code == "") return
