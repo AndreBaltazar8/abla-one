@@ -12,7 +12,9 @@ class Session(var app: Gallery, val theme: Theme) {
     fun press(needle: string): bool {
         val id = onePressFor(render(), needle)
         if (id == 0) return false
-        oneDispatch(app, "test", theme, id, "")
+        val handled = oneDispatch(app, "test", theme, id, "")
+        oneRoutesDrain(app, oneAppRoutes)
+        handled
     }
     fun type(placeholder: string, value: string): bool {
         val field = oneFind(render(), placeholder)
@@ -23,7 +25,7 @@ class Session(var app: Gallery, val theme: Theme) {
 
 fun main: int {
     val t = oneDefaultTheme()
-    var s = Session(Gallery(), t)
+    var s = Session(Gallery(OneRecordedServices(0, [], [])), t)
     expect(s.shows("Adicionar (0)"), "starts at zero")
     expect(s.press("Adicionar (0)"), "press add")
     expect(s.press("Adicionar (1)"), "press add again")
@@ -48,5 +50,24 @@ fun main: int {
     s.app.query = "zzz"
     expect(s.shows("Ninguém encontrado"), "empty state")
     expect(s.press("Avisos"), "icon button by label")
+
+    // Routes: a screen is a path, and handlers only say where to go.
+    s.app.query = ""
+    expect(s.press("Componentes"), "components")
+    expectEqual(oneAppRoutes.current(), "/", "the root")
+    expect(s.press("Abrir formulário"), "open the form")
+    expectEqual(oneAppRoutes.current(), "/form/1", "its path")
+    expect(s.shows("Formulário 1"), "its screen")
+    expect(s.press("Formulário seguinte"), "the next one")
+    expectEqual(oneAppRoutes.current(), "/form/2", "a new path")
+    expect(s.press("Voltar"), "back")
+    expect(s.shows("Formulário 1"), "the previous screen")
+    expect(s.press("Voltar"), "back again")
+    expect(s.shows("Eliminar"), "the components")
+    s.app.receive("route", "/people?q=ti")
+    expect(s.shows("Tiago Mendes") && !s.shows("Sofia Costa"), "a route with a query")
+    expectEqual(s.render().attr("page.title"), "Pessoas · Abla One", "and its title")
+    s.app.receive("route", "/nothing/here")
+    expect(s.shows("Eliminar"), "an unknown route shows the first screen")
     testsPassed()
 }

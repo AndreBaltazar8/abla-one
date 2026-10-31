@@ -107,5 +107,29 @@ check(find('Notas: fim', tries=12) is not None and find('Formulário seguinte', 
 tap('Formulário seguinte')
 check(find('Formulário 2') is not None, 'next form opens')
 check(find('Nome') is not None and find('Formulário seguinte', tries=1) is None, 'next screen opens at the top')
+
+# The system's back button walks the routes, and each screen is as it was left.
+adb('shell', 'input', 'keyevent', '4')
+check(find('Formulário 1') is not None, 'back: the previous route')
+check(find('Formulário seguinte') is not None and find('Nome', tries=1) is None, 'back: its scroll is restored')
+adb('shell', 'input', 'keyevent', '4')
+# Nothing left to go back to: the app leaves, as Android apps do. Tabs were routes too.
+def focused(): return [l for l in adb('shell', 'dumpsys', 'window').splitlines() if 'mCurrentFocus' in l][0]
+presses = 0
+while PACKAGE in focused() and presses < 16:
+    adb('shell', 'input', 'keyevent', '4')
+    time.sleep(1)
+    presses += 1
+check(PACKAGE not in focused() and presses > 1, f'back walks to the first entry, then leaves the app ({presses} presses)')
+
+# A deep link reaches the app as a route, going in the same stack.
+def link(url):
+    adb('shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', f"'{url}'", PACKAGE)
+link('abla-one-gallery://open/form/7')
+check(find('Formulário 7', tries=12) is not None, 'a deep link opens its screen')
+adb('shell', 'input', 'keyevent', '4')
+check(find('Formulário 7', tries=1) is None and find('Pessoas') is not None, 'back from a deep link')
+link('abla-one-gallery://open/people?q=maya')
+check(find('Maya Townsend', tries=12) is not None and find('Sofia Costa', tries=1) is None, 'a deep link\'s query string')
 print('PASS tests/ui/android_gallery.py' if failures == 0 else f'{failures} failed')
 sys.exit(1 if failures else 0)

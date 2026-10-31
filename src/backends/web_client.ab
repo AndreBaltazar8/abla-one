@@ -15,15 +15,15 @@ import "web_session.ab"
 //   trusted fun alloc(length: u32): u32 = oneClientAlloc(length)
 //   @export("one_message")
 //   trusted fun message(pointer: u32, length: u32): int =
-//       oneClientRespond(pointer, length, { session -> Gallery() }, oneDefaultTheme(), "icons")
+//       oneClientRespond(pointer, length, { session -> Gallery(oneLiveServices(session)) }, oneDefaultTheme(), "icons")
 //
 // `one_message` takes one page message as JSON and returns the messages for
 // the page as a JSON array (address << 32 | length, valid until the next call):
-//   page → app: hello {r, w, h, storage}, event, viewport, scroll,
-//               result {payload}, upload {id, kind, name, mime, base64, last,
-//               picked}, tick
+//   page → app: hello {r, w, h, e, p, storage}, event, route {p, e, n}, viewport,
+//               scroll, result {payload}, upload {id, kind, name, mime, base64,
+//               last, picked}, tick
 //   app → page: patch, frame, pick, fetch {id, request}, store {storage},
-//               wait {ms}
+//               wait {ms}, back {to}, forward
 
 val oneClientSessions: array<OneLiveSession> = []
 val oneClientOutput: array<string> = []
@@ -58,6 +58,9 @@ fun oneClientMessage(input: string, create: (string) -> OneApp, theme: Theme, ic
         val queueIndex = oneLiveQueueIndex("client")
         val storage = m.get("storage")
         if (storage.isObject()) for (key in storage.keys) oneLiveQueueList[queueIndex].storage.set(key, storage.getString(key))
+        // The module runs at the path the page was opened at.
+        oneLiveQueueList[queueIndex].browser = true
+        oneLiveQueueList[queueIndex].routes.start(if (m.getString("p") != "") m.getString("p") else "/")
         val app = create("client")
         oneClientSessions.append(oneSession("client", app, oneLiveQueueList[queueIndex]))
         oneLiveQueueList[queueIndex].cookiesChanged = false
@@ -100,11 +103,12 @@ fun oneClientMessage(input: string, create: (string) -> OneApp, theme: Theme, ic
 // requests go to the page as fetches.
 fun oneClientPump(var out: array<string>): bool {
     val index = oneLiveQueueIndex("client")
+    val moved = oneClientSessions[0].deliverRoutes()
     oneLiveQueueList[index].fireTimers(monotonicMilliseconds())
     for (item in oneLiveQueueList[index].takeRequests()) out.append(jsonStringify(jsonObject(["t", "id", "request"], [jsonString("fetch"), jsonInteger(item.id), oneClientRequestJson(item.request)])))
     val completions = oneLiveQueueList[index].takeCompletions()
     for (payload in completions) oneClientSessions[0].receive("result", payload)
-    completions.size > 0
+    moved || completions.size > 0
 }
 
 // The request as the page's fetch needs it. File and multipart bodies are

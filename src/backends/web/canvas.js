@@ -13,6 +13,21 @@
   let frame = null;
   let editor = null;
   const queue = [];
+  // As in host.js: <base> is the app's root. The session keeps the scroll, per
+  // entry, so moves here only touch the history. `?render=canvas` stays in the URL,
+  // so that a reload is a canvas page too.
+  const base = document.baseURI;
+  const basePath = new URL(base).pathname;
+  const here = () => (location.pathname.startsWith(basePath) ? '/' + location.pathname.slice(basePath.length) : location.pathname) + location.search;
+  const urlOf = (path) => {
+    const url = new URL('.' + path, base);
+    url.searchParams.set('render', 'canvas');
+    return url.href;
+  };
+  let entry = history.state && history.state.one ? history.state : {one: 1, i: 0, e: Date.now()};
+  let asked = 0;
+  let answered = 0;
+  history.replaceState(entry, '', boot.route ? urlOf(boot.route) : location.href);
   const canvas = document.createElement('canvas');
   canvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;touch-action:none;display:none';
   document.body.appendChild(canvas);
@@ -163,7 +178,7 @@
     if (moved) return;
     const hit = hitAt(e.clientX, e.clientY, ['press', 'input', 'link']);
     if (!hit) { if (editor) editor.blur(); return; }
-    if (hit[0] === 'link') { if (!hit[8].startsWith('#')) location.href = new URL(hit[8], location.href).href; return; }
+    if (hit[0] === 'link') { if (!hit[8].startsWith('#')) location.href = new URL(hit[8], base).href; return; }
     if (hit[0] === 'input') openEditor(hit);
     else if (hit[5]) event(hit[5], '');
   });
@@ -183,32 +198,67 @@
     resizing = setTimeout(() => send({t: 'viewport', w: innerWidth, h: innerHeight}), 120);
   });
 
+  // --- routes -----------------------------------------------------------------------
+  const moves = (message) => {
+    for (const move of message.nav || []) {
+      if (move.e === entry.e) { history.replaceState(entry, '', urlOf(move.p)); continue; }
+      entry = {one: 1, i: move.x ? entry.i : entry.i + 1, e: move.e};
+      if (move.x) history.replaceState(entry, '', urlOf(move.p));
+      else history.pushState(entry, '', urlOf(move.p));
+    }
+    if (message.ack) answered = message.ack;
+    if (message.at && answered === asked && new URL(urlOf(message.at)).pathname !== location.pathname) history.replaceState(entry, '', urlOf(message.at));
+    if (message.title && document.title !== message.title) document.title = message.title;
+  };
+  const ask = (path) => {
+    if (editor) { editor.remove(); editor = null; }
+    asked++;
+    send({t: 'route', p: path, e: entry.e, n: asked});
+  };
+  addEventListener('popstate', (e) => {
+    entry = e.state && e.state.one ? e.state : {one: 1, i: 0, e: Date.now()};
+    ask(here());
+  });
+  const goBack = (to) => {
+    if (entry.i > 0) return history.back();
+    if (!to) return;
+    entry = {one: 1, i: 0, e: Date.now()};
+    history.replaceState(entry, '', urlOf(to));
+    ask(to);
+  };
+
   // --- connection -------------------------------------------------------------------
   const connect = () => {
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = new URL(`one/live?s=${encodeURIComponent(boot.s)}`, location.href);
+    const url = new URL(`one/live?s=${encodeURIComponent(boot.s)}`, base);
     socket = new WebSocket(`${scheme}//${url.host}${url.pathname}${url.search}`);
     socket.onopen = () => {
       retry = 0;
-      socket.send(JSON.stringify({t: 'hello', r: revision, w: innerWidth, h: innerHeight}));
+      socket.send(JSON.stringify({t: 'hello', r: revision, w: innerWidth, h: innerHeight, e: entry.e}));
       while (queue.length) socket.send(queue.shift());
     };
     socket.onmessage = (e) => {
       const message = JSON.parse(e.data);
       if (message.t === 'frame') {
-        frame = message.frame;
-        window.__oneFrame = frame;
+        moves(message);
+        if (message.frame) {
+          frame = message.frame;
+          window.__oneFrame = frame;
+          if (canvas.style.display === 'none') { canvas.style.display = 'block'; root.style.display = 'none'; }
+          draw();
+        }
         revision = message.r;
-        if (canvas.style.display === 'none') { canvas.style.display = 'block'; root.style.display = 'none'; }
-        draw();
-      } else if (message.t === 'cookies') fetch(`one/cookies?s=${encodeURIComponent(boot.s)}`, {method: 'POST', credentials: 'same-origin'});
+      } else if (message.t === 'back') goBack(message.to);
+      else if (message.t === 'forward') history.forward();
+      else if (message.t === 'cookies') fetch(`one/cookies?s=${encodeURIComponent(boot.s)}`, {method: 'POST', credentials: 'same-origin'});
     };
     socket.onclose = (e) => {
       if (e.code === 1008) return location.reload();
       setTimeout(connect, Math.min(1000 * 2 ** retry++, 10000));
     };
   };
-  const resume = () => { document.cookie = `one_resume=${boot.s}; max-age=15; samesite=lax`; };
+  const resume = () => { document.cookie = `one_resume=${boot.s}; path=${basePath}; max-age=15; samesite=lax`; };
+  document.cookie = `one_resume=; path=${basePath}; max-age=0; samesite=lax`;
   addEventListener('beforeunload', resume);
   addEventListener('pagehide', resume);
   connect();

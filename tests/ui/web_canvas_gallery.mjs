@@ -39,6 +39,15 @@ try {
   check(await waitText(page, 'Tiago Mendes'), 'navigation');
   check(!(await texts(page)).includes('Sofia Costa'), 'the server filtered the list from the typed query');
   await page.screenshot({path: 'build/ui/web-canvas-people.png'});
+  check(new URL(page.url()).pathname === '/people' && new URL(page.url()).search.includes('render=canvas'), `a move changes the URL and stays a canvas page (${page.url()})`);
+  check(await page.title() === 'Pessoas · Abla One', 'and the title');
+  await page.goBack();
+  check(await waitText(page, 'Adicionar (1)'), 'back shows the last screen');
+  await page.goForward();
+  check(await waitText(page, 'Tiago Mendes'), 'forward');
+  await page.reload();
+  check(await waitText(page, 'Tiago Mendes'), 'reload keeps the route');
+  check(await page.locator('canvas').isVisible(), 'as a canvas page');
   const back = await hit(page, 'Componentes');
   await page.mouse.click(back.x, back.y);
   await waitText(page, 'CARTÃO');

@@ -143,7 +143,7 @@ rows.
 
 Platform completions (HTTP, storage, timers, pickers) arrive as
 `receive("result", payload)`, pushes from the live server as
-`receive("push", payload)`.
+`receive("push", payload)`, moves between routes as `receive("route", path)` (§9).
 
 ## 5. Components
 
@@ -210,7 +210,7 @@ component ConversationRow(room: Room, onOpen: () -> void) = $one
 | `icon` | named vector icon from the theme's icon set | name, label |
 | `image` | raster/vector image, local or remote with auth | src, fallback, label |
 | `pressable` | anything tappable; a container with press/long-press | onPress, onLongPress, enabled |
-| `link` | a container that navigates: an `<a>` on the web, the browser elsewhere | href, onPress (optional) |
+| `link` | a container that navigates: an `<a>` on the web, the browser elsewhere; `routeLink(path, event, ...)` is one to the app's own route, a press off the web | href, onPress (optional), route |
 | `input` | single or multi-line text field | value, placeholder, keyboard (`number`, `decimal`, `email`), secure, onChange, onSubmit |
 | `toggle` | switch or checkbox | checked, onChange |
 | `spacer`, `divider` | space and rules | size |
@@ -390,6 +390,9 @@ interface OneServices {
     fun pickImage(kind: string): int    // platform-normalized avatar/emoji
     fun clearImageCache(): void
     fun effect(kind: string, payload: string): bool   // toast, copy, openUrl, haptic
+    fun navigate(path: string, replace: bool = false): void
+    fun back(fallback: string = ""): void
+    fun forward(): void
 }
 ```
 
@@ -426,11 +429,81 @@ for a missing key. Values stored as plain strings before typed storage still
 read back as strings. `timer(ms)` is a one-shot timer that completes after the
 delay; repeat it for polling.
 
+### Routes (soft navigation)
+
+A screen can have a path: moving between screens changes the URL with no page load,
+back and forward work, and a reload or a shared link opens the same screen, rendered
+on the server for first paint. A route is plain data (`src/core/routes.ab`), a path
+with an optional query: `/people?q=ma`.
+
+```abla
+// in a handler: only say where to go
+ui.press { services.navigate("/form/3") }
+ui.change { value -> services.navigate("/search?q=${oneRouteEncode(value)}", true) }
+
+// in `receive`: the one place that turns a route into a screen
+if (kind == "route") {
+    val parts = oneRouteSegments(value)           // "/form/3?x=1" → ["form", "3"]
+    screen = if (parts.size == 2 && parts[0] == "form") Form(oneParseInt(parts[1], 0)) else Home
+    query = oneRouteParam(value, "q")             // decoded; oneRouteHasParam tells absent from empty
+}
+```
+
+- **`receive("route", path)`** runs before the next render for every move, on every
+  target: `navigate` from the app, back and forward, a deep link, and the path the app
+  starts at (`/` where there's no URL). What the app does there may `navigate` again (a
+  redirect; use `replace`). Apps without routes ignore the kind.
+- **`navigate(path, replace)`** adds a history entry, or with `replace` changes the
+  current one. A push of the route already current adds nothing. Paths are confined to
+  the app: `//host/x` means `/host/x`.
+- **`back(fallback)`** goes back an entry. With nothing to go back to (a shared link),
+  it replaces the current entry with `fallback`, so the app's back button never leaves the
+  site; with `""` it stays. `forward()` is its opposite.
+- **Entries and scroll.** A new entry opens at the top with focus and any keyboard
+  gone, and going back finds it as it was left. A query change by `replace` stays in its
+  entry, so a search field can write its text to the URL as someone types.
+- **A press that races a move** doesn't land on the new screen: an event from a render of
+  an earlier page (a different path) is dropped (`OneRouteFence`). Within a page, events are
+  translated as usual (§4), including across query changes.
+
+| Target | History | Back | Scroll |
+|---|---|---|---|
+| Web, live and Wasm | the browser's (`pushState`, `popstate`, title) | the browser's; `services.back` | window and scroll areas, per entry, also across a reload |
+| Web, canvas | the same, `?render=canvas` stays in the URL | the same | on the server, per entry |
+| Android | a stack (at most 64 entries) | the system button walks it, then leaves the app | saved state of the entry |
+| Desktop, e-paper (full and thin) | a stack; thin, on the server | the app's (`services.back`) | per entry, the last 16 |
+
+**Web pages.** The live server claims paths through `isPage`, a predicate, or
+`oneLivePaths(["/", "/people", "/form/:n", "/docs/*"])`. A GET of a claimed path renders
+that route for first paint: a new session starts there, and a resumed one (a reload) moves
+there if it's elsewhere. Anything else still goes to the handler, and `/one/*` is the
+server's whatever a predicate says. Pages carry `<base href>` pointing at the app's
+root (`./`, `../`), so relative URLs (icons, images, `one/host.js`, requests) mean the same on
+every route and after any `pushState`, also behind a proxy that strips a prefix; on a
+nested route, the host handles `#fragment` links itself. A relative `link` href therefore
+resolves from the root, not from the route.
+
+In client mode the module starts at the page's path. A server gets first paints from
+`oneWebClientDocument(..., route)`, one page per route, and has to answer each path with its
+page (`examples/gallery/web.ab`).
+
+**Android.** A VIEW intent reaches the app as `receive("openUrl", ...)` as before, with
+the whole URL, then as a route (`oneRouteFromUrl`: path and query, whatever the scheme, no
+fragment). The app declares its links with a `MobileAndroidIntentFilter`. A cold start shows
+the `/` route until the link arrives, about half a second later, and back then goes to it.
+
+**Protocol.** Page to session: `{t:"route", p, e, n}` when the browser moves, and `e` in
+`hello`. Session to page, with the next patch or frame (sent even when the markup is the
+same): `nav: [{p, x, e}]`, the moves; `ack: n`, the last route message handled; `at`, the
+route it's at. `{t:"back", to}` and `{t:"forward"}` ask the browser. The session decides what
+is a new entry (`e`). Thin devices send `r`, the revision they showed, with an event.
+
 ### Test and preview implementations
 
-`OneNoServices` does nothing, for previews. `OneRecordedServices` records
-every call with increasing ids, for tests that deliver completions with
-`oneResponsePayload`.
+`OneNoServices` does nothing, for previews, except move between routes.
+`OneRecordedServices` records every call with increasing ids, for tests that deliver
+completions with `oneResponsePayload`. Both use `oneAppRoutes`, as Android and PaperMono do;
+`oneRoutesDrain(app, oneAppRoutes)` delivers the moves.
 
 ## 10. Backends
 
@@ -513,6 +586,7 @@ abla-one/
   src/core/theme.ab          Theme, tokens, component defaults
   src/core/node.ab           Node kinds, keys, constructors
   src/core/ui.ab             Ui render context, handler table, dispatch
+  src/core/routes.ab         routes: history, paths, scroll per entry
   src/core/run.ab            oneRun loop, Backend and Services interfaces
   src/dsl/one.ab             $one subparser                 (M2)
   src/dsl/theme.ab           $theme subparser               (M2)

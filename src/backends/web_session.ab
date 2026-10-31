@@ -27,7 +27,11 @@ class OneLiveQueue(
     val outbox: array<string>,
     // Uploaded files by handle: bytes and their {handle, name, size, mime}.
     val fileBytes: Map<string, string>,
-    val fileInfo: Map<string, string>
+    val fileInfo: Map<string, string>,
+    val routes: OneRoutes,
+    // A page holds the history (web sessions): moves for it, sent with the next patch.
+    var browser: bool,
+    val moves: array<Json>
 ) {
     fun takeRequests(): array<OneLiveRequest> {
         val out: array<OneLiveRequest> = []
@@ -94,6 +98,27 @@ class OneLiveQueue(
         fileInfo.remove(handle)
         existed
     }
+    fun takeMoves(): array<Json> {
+        val out: array<Json> = []
+        for (item in moves) out.append(item)
+        moves.clear()
+        out
+    }
+    fun navigate(path: string, replace: bool): void {
+        routes.navigate(path, replace)
+        if (browser) moves.append(jsonObject(["p", "x", "e"], [jsonString(routes.current()), jsonBoolean(replace), jsonInteger(routes.entry())]))
+        return
+    }
+    fun back(fallback: string): void {
+        if (browser) toPage(jsonStringify(jsonObject(["t", "to"], [jsonString("back"), jsonString(if (fallback != "") oneRoutePath(fallback) else "")])))
+        else routes.back(fallback)
+        return
+    }
+    fun forward(): void {
+        if (browser) toPage("{\"t\":\"forward\"}")
+        else routes.forward()
+        return
+    }
     fun subscribe(topic: string): void {
         if (!subscribed(topic)) topics.append(topic)
         return
@@ -135,7 +160,7 @@ class OneLiveQueue(
     }
 }
 
-fun oneLiveQueue(): OneLiveQueue = OneLiveQueue(0, [], [], [], Map(), [], [], false, [], Map(), Map())
+fun oneLiveQueue(): OneLiveQueue = OneLiveQueue(0, [], [], [], Map(), [], [], false, [], Map(), Map(), oneRoutes(), false, [])
 
 // Session queues, shared by each session's services and the server. They are
 // reached through this global (by session id), which is how both sides may
@@ -247,6 +272,18 @@ class OneLiveServices(val session: string) : OneServices {
         }
         false
     }
+    fun navigate(path: string, replace: bool = false): void {
+        oneLiveQueueList[oneLiveQueueIndex(session)].navigate(path, replace)
+        return
+    }
+    fun back(fallback: string = ""): void {
+        oneLiveQueueList[oneLiveQueueIndex(session)].back(fallback)
+        return
+    }
+    fun forward(): void {
+        oneLiveQueueList[oneLiveQueueIndex(session)].forward()
+        return
+    }
 }
 
 class OneLiveSession(
@@ -272,7 +309,12 @@ class OneLiveSession(
     var title: string,
     var lang: string,
     var meta: string,
-    var document: bool
+    var document: bool,
+    // What keeps a raced press off a new route; a route message from the page,
+    // answered with the next patch; canvas scroll positions per entry.
+    val fence: OneRouteFence,
+    var routeAnswer: int,
+    val scrolls: OneRouteScrolls
 ) {
     // Renders the current state; returns the markup and records the event map.
     fun render(theme: Theme, iconBase: string): string {
@@ -284,6 +326,7 @@ class OneLiveSession(
         meta = oneWebPageMeta(root)
         document = root.attr("page.flow") == "document"
         revision = revision + 1
+        fence.rendered(queue.routes, revision)
         maps.append(oneEventMap(root))
         if (maps.size > 8) {
             val kept: array<OneEventMap> = []
@@ -296,6 +339,7 @@ class OneLiveSession(
             for (item in kept) maps.append(item)
         }
         if (canvas) {
+            scrolls.moved("${queue.routes.entry()}", scroll)
             val frame = onePaintFrame(oneLayout(root, theme, "web-canvas", if (width > 0) width else 390, if (height > 0) height else 844, scroll), if (width > 0) width else 390, if (height > 0) height else 844)
             // Rows the page shows in full are reported like the DOM host does.
             for (v in frame.visible) {
@@ -313,6 +357,7 @@ class OneLiveSession(
     // An event from the page; `eventRevision` is the revision it was shown at.
     fun event(theme: Theme, eventRevision: int, eventId: int, value: string): void {
         oneMemoScope = id
+        if (fence.stale(queue.routes, eventRevision)) return
         val age = revision - eventRevision
         var target = 0
         if (age == 0) target = eventId
@@ -329,10 +374,17 @@ class OneLiveSession(
         changed = true
         return
     }
+    // Moves between routes reach the app. Whether there were any.
+    fun deliverRoutes(): bool {
+        oneMemoScope = id
+        val moved = oneRoutesDrain(app, queue.routes)
+        if (moved) changed = true
+        moved
+    }
 }
 
 
-// A message from the page: hello, event, viewport, scroll.
+// A message from the page: hello, event, route (the browser moved), viewport, scroll.
 fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void {
     val kind = m.getString("t")
     if (kind == "event") session.event(theme, m.get("r").asInt(), m.get("id").asInt(), m.getString("v"))
@@ -342,6 +394,11 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
         session.changed = true
         if (m.get("w").intAvailable()) session.width = m.get("w").asInt()
         if (m.get("h").intAvailable()) session.height = m.get("h").asInt()
+        if (m.get("e").intAvailable()) session.queue.routes.adopt(m.get("e").asInt())
+    } else if (kind == "route") {
+        session.queue.routes.arrive(m.getString("p"), m.get("e").asInt())
+        session.routeAnswer = m.get("n").asInt()
+        session.changed = true
     } else if (kind == "viewport" && m.get("w").intAvailable()) {
         session.width = m.get("w").asInt()
         if (m.get("h").intAvailable()) session.height = m.get("h").asInt()
@@ -359,13 +416,33 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
     if (!session.changed) return ""
     session.changed = false
     val markup = session.render(theme, iconBase)
-    if (markup == session.htmlSent) return ""
+    val moves = session.queue.takeMoves()
+    val answer = session.routeAnswer
+    session.routeAnswer = 0
+    val same = markup == session.htmlSent
+    // A move goes out even when the screen looks the same: the URL still changes.
+    if (same && moves.size == 0 && answer == 0) return ""
     val css = session.css.since(session.cssSent)
     session.cssSent = session.css.rules.size
     session.htmlSent = markup
-    if (session.canvas) "{\"t\":\"frame\",\"r\":${session.revision},\"frame\":$markup}"
-    else jsonStringify(jsonObject(["t", "r", "html", "css", "title"], [jsonString("patch"), jsonInteger(session.revision), jsonString(markup), jsonString(css), jsonString(session.title)]))
+    val keys = ["t", "r", "css", "title"]
+    val values = [jsonString(if (session.canvas) "frame" else "patch"), jsonInteger(session.revision), jsonString(css), jsonString(session.title)]
+    if (!same && !session.canvas) {
+        keys.append("html")
+        values.append(jsonString(markup))
+    }
+    if (moves.size > 0 || answer > 0) {
+        keys.append("nav")
+        values.append(jsonArray(moves))
+        keys.append("ack")
+        values.append(jsonInteger(answer))
+        keys.append("at")
+        values.append(jsonString(session.queue.routes.current()))
+    }
+    val text = jsonStringify(jsonObject(keys, values))
+    if (session.canvas && !same) "${text.slice(0, text.size - 1)},\"frame\":$markup}" else text
 }
 
-fun oneSession(id: string, app: OneApp, queue: OneLiveQueue): OneLiveSession =
-    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false)
+fun oneSession(id: string, app: OneApp, queue: OneLiveQueue): OneLiveSession {
+    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), 0, oneRouteScrolls())
+}

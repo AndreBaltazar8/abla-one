@@ -8,6 +8,6 @@ import "../../../build/papermono/icons.ab"
 
 @export("app_main")
 fun appMain(): void {
-    var app: OneApp = Gallery()
+    var app: OneApp = Gallery(OneNoServices())
     onePaperMonoRun(app, oneDefaultTheme(), OneIconSource({ name -> oneEmbeddedIcon(name) }))
 }

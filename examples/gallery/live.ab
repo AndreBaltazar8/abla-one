@@ -15,7 +15,7 @@ fun icons(request: HttpRequest): HttpResponse {
     HttpResponse(200, [HttpHeader("Content-Type", "image/svg+xml")], linuxReadFile("build/gallery/icons/$name", 65536))
 }
 
-fun galleryApp(request: HttpRequest, session: string): OneApp = Gallery()
+fun galleryApp(request: HttpRequest, session: string): OneApp = Gallery(oneLiveServices(session))
 
 fun main: int {
     val router = httpRouter()
@@ -23,7 +23,7 @@ fun main: int {
     var server = oneLiveServer(
         Ipv4SocketAddress("127.0.0.1", 8950),
         { request -> router.dispatch(request) },
-        { request -> request.path == "/" },
+        oneLivePaths(["/", "/people", "/form/:n"]),
         galleryApp,
         oneDefaultTheme(),
         OneLiveOptions("Abla One", "pt-PT", "#ffffff", "/icons", "src/backends/web/host.js", "")

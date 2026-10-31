@@ -83,7 +83,9 @@ resource class OneEpaperState(
     var typed: string = "",
     var keyLayer: int = 0,
     // What shows its pressed style in the next render (a hit's key), "" for nothing.
-    var pressed: string = ""
+    var pressed: string = "",
+    // Scroll positions of the route entries visited (the tree's `one.entry`).
+    val routeScrolls: OneRouteScrolls
 )
 
 fun oneEpaperBandSurface(options: OneEpaperOptions): OneSurface {
@@ -96,7 +98,7 @@ fun oneEpaperState(options: OneEpaperOptions): OneEpaperState {
     val planes = oneMemory(options.width * options.height / 4)
     val surface = oneEpaperBandSurface(options)
     val dirty = oneMemory(options.height / 8 * ((options.width + 7) / 8))
-    OneEpaperState(options, move(planes), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), [], [], 0, move(surface), Map(), [], move(dirty), { }, oneLayoutCache(), [], -1, false, 0, "", 0, "")
+    OneEpaperState(options, move(planes), 0, 0, OneFrame([], [], [], 0, 0), true, Map(), [], [], 0, move(surface), Map(), [], move(dirty), { }, oneLayoutCache(), [], -1, false, 0, "", 0, "", oneRouteScrolls())
 }
 
 // Portrait rows rasterized at a time: a multiple of 8 (a canvas byte) that
@@ -221,11 +223,13 @@ fun oneEpaperScaleSides(sides: string, scale: int, minStroke: int): string {
 // rectangles means nothing visible changed.
 fun oneEpaperRender(var app: OneApp, theme: Theme, var state: OneEpaperState, icons: OneIconSource): OneEpaperUpdate {
     val o = state.options
+    oneAppRoutes.start("/")
+    oneRoutesDrain(app, oneAppRoutes)
     if (state.boxes.size == 1 && state.scrolled && state.boxRevision == oneRevision()) oneLayoutRescroll(state.boxes[0], state.scroll, "r")
     else {
         var ui = oneUiSized("epaper", theme, oneEpaperLogicalWidth(o))
         val built = app.render(ui)
-        oneEpaperLayOut(built, theme, state)
+        oneEpaperLayOut(oneRouteStamp(built, oneAppRoutes), theme, state)
     }
     oneEpaperDraw(state, icons)
 }
@@ -239,6 +243,11 @@ fun oneEpaperRenderTree(tree: Node, theme: Theme, var state: OneEpaperState, ico
 
 fun oneEpaperLayOut(tree: Node, theme: Theme, var state: OneEpaperState): void {
     val o = state.options
+    // A route opens at the top, or where it was left. The keyboard belonged to the last one.
+    if (tree.has("one.entry") && state.routeScrolls.moved(tree.attr("one.entry"), state.scroll)) {
+        state.typingEvent = 0
+        state.typed = ""
+    }
     val shown = if (state.typingEvent != 0) column(style().fill(), [tree.styled(style().set("height", "fill")), oneEpaperKeyboard(state.keyLayer)]) else tree
     val laid = oneLayoutCached(shown, theme, "epaper", oneEpaperLogicalWidth(o), oneEpaperLogicalHeight(o), state.scroll, state.layoutCache)
     state.boxes.clear()

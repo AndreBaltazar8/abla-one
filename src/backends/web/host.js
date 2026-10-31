@@ -13,6 +13,10 @@
   let socket = null;
   let retry = 0;
   const queue = [];
+  // Relative URLs mean the app's root on every route: the page's <base> is fixed
+  // when it loads, whatever pushState does later.
+  const base = document.baseURI;
+  const basePath = new URL(base).pathname;
 
   let local = null;
   const send = (message) => {
@@ -29,8 +33,23 @@
 
   // --- events -------------------------------------------------------------
   root.addEventListener('click', (e) => {
+    // With a <base>, "#section" would leave a page that isn't at the root.
+    const anchor = e.target.closest('a[href^="#"]');
+    if (anchor && new URL(anchor.href).pathname !== location.pathname) {
+      e.preventDefault();
+      const hash = anchor.getAttribute('href');
+      history.replaceState(history.state, '', location.pathname + location.search + hash);
+      const place = hash.length > 1 && document.getElementById(hash.slice(1));
+      if (place) place.scrollIntoView();
+      else scrollTo(0, 0);
+    }
     const target = e.target.closest('[data-one-press]');
     if (!target || target.getAttribute('aria-disabled') === 'true') return;
+    // A link to a route: a plain click moves here; the others open a tab as usual.
+    if (target.hasAttribute('data-one-route')) {
+      if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+    }
     const id = target.getAttribute('data-one-press');
     if (id && id !== '0') event(id, '');
   });
@@ -130,6 +149,102 @@
     while (from.childNodes.length > next.length) from.lastChild.remove();
   };
 
+  // --- routes ----------------------------------------------------------------
+  // The browser holds the history. Each entry remembers its place (`i`) and an id
+  // (`e`) from the session, which decides when a move is to a new entry: only then
+  // does the scroll reset. Positions are saved per entry on leaving it, and in
+  // sessionStorage so that a reload finds them.
+  const here = () => (location.pathname.startsWith(basePath) ? '/' + location.pathname.slice(basePath.length) : location.pathname) + location.search + location.hash;
+  const urlOf = (path) => new URL('.' + path, base).href;
+  const noHash = (route) => route.split('#')[0];
+  let entry = history.state && history.state.one ? history.state : {one: 1, i: 0, e: Date.now()};
+  let shown = here();
+  let asked = 0;
+  let answered = 0;
+  const positions = new Map();
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  history.replaceState(entry, '', boot.route ? urlOf(boot.route) : location.href);
+  shown = here();
+  const scrollers = () => root.querySelectorAll('.k-scroll,.k-feed');
+  const saveScroll = () => {
+    const areas = {};
+    for (const area of scrollers()) if (area.scrollTop) areas[area.getAttribute('data-one')] = area.scrollTop;
+    const place = {x: scrollX, y: scrollY, areas};
+    positions.set(entry.e, place);
+    try { sessionStorage.setItem(`one:scroll:${entry.e}`, JSON.stringify(place)); } catch (_) {}
+  };
+  const savedScroll = (id) => {
+    if (positions.has(id)) return positions.get(id);
+    try { return JSON.parse(sessionStorage.getItem(`one:scroll:${id}`)); } catch (_) { return null; }
+  };
+  // Back at an entry, or at a new one with nothing saved: at the top, feeds at their anchor.
+  const placeScroll = (place) => {
+    scrollTo(place ? place.x : 0, place ? place.y : 0);
+    for (const area of scrollers()) {
+      const top = place && place.areas[area.getAttribute('data-one')];
+      area.__oneAnchored = !!top;
+      area.scrollTop = top || 0;
+    }
+    if (!place && location.hash.length > 1) {
+      const target = document.getElementById(location.hash.slice(1));
+      if (target) target.scrollIntoView();
+    }
+  };
+  // The screen is about to change under whatever has the focus.
+  const leaveScreen = () => {
+    if (root.contains(document.activeElement)) document.activeElement.blur();
+    visible.clear();
+  };
+  const follow = (move) => {
+    if (move.e === entry.e) {
+      if (move.p !== here()) history.replaceState(entry, '', urlOf(move.p));
+      return false;
+    }
+    saveScroll();
+    entry = {one: 1, i: move.x ? entry.i : entry.i + 1, e: move.e};
+    if (move.x) history.replaceState(entry, '', urlOf(move.p));
+    else history.pushState(entry, '', urlOf(move.p));
+    return true;
+  };
+  // The session's answer: moves it made, then the screen. With no question of ours
+  // open, the URL ends up at the route the session says it's at.
+  const patched = (message) => {
+    let moved = false;
+    for (const move of message.nav || []) if (follow(move)) moved = true;
+    if (moved) leaveScreen();
+    apply(message);
+    if (message.ack) answered = message.ack;
+    if (message.at && answered === asked && noHash(message.at) !== noHash(here())) history.replaceState(entry, '', urlOf(message.at));
+    shown = here();
+    if (moved) placeScroll(null);
+    else if (message.ack && message.ack === asked) placeScroll(savedScroll(entry.e));
+    watchFeeds();
+  };
+  const ask = (path, id) => {
+    leaveScreen();
+    asked++;
+    send({t: 'route', p: path, e: id, n: asked});
+  };
+  addEventListener('popstate', (e) => {
+    const route = here();
+    // A fragment within the page isn't a move.
+    if (noHash(route) === noHash(shown)) { shown = route; return; }
+    saveScroll();
+    entry = e.state && e.state.one ? e.state : {one: 1, i: 0, e: Date.now()};
+    if (!(e.state && e.state.one)) history.replaceState(entry, '', location.href);
+    shown = route;
+    ask(route, entry.e);
+  });
+  const goBack = (to) => {
+    if (entry.i > 0) return history.back();
+    if (!to) return;
+    saveScroll();
+    entry = {one: 1, i: 0, e: Date.now()};
+    history.replaceState(entry, '', urlOf(to));
+    shown = here();
+    ask(to, entry.e);
+  };
+
   const apply = (message) => {
     if (message.css) style.appendChild(document.createTextNode(message.css));
     if (message.title && document.title !== message.title) document.title = message.title;
@@ -137,11 +252,13 @@
     for (const feed of root.querySelectorAll('[data-one-feed]')) {
       feeds.set(feed.getAttribute('data-one'), feed.scrollHeight - feed.scrollTop - feed.clientHeight < 24);
     }
-    const template = document.createElement('template');
-    template.innerHTML = message.html;
-    const fresh = template.content.firstElementChild;
-    if (root.firstElementChild && fresh) morph(root.firstElementChild, fresh);
-    else if (fresh) root.replaceChildren(fresh);
+    if (message.html != null) {
+      const template = document.createElement('template');
+      template.innerHTML = message.html;
+      const fresh = template.content.firstElementChild;
+      if (root.firstElementChild && fresh) morph(root.firstElementChild, fresh);
+      else if (fresh) root.replaceChildren(fresh);
+    }
     revision = message.r;
     for (const feed of root.querySelectorAll('[data-one-feed]')) {
       const atBottom = feeds.get(feed.getAttribute('data-one'));
@@ -229,7 +346,9 @@
 
   // --- connection -------------------------------------------------------------
   const receive = (message) => {
-    if (message.t === 'patch') apply(message);
+    if (message.t === 'patch') patched(message);
+    else if (message.t === 'back') goBack(message.to);
+    else if (message.t === 'forward') history.forward();
     else if (message.t === 'pick') pick(message);
     else if (message.t === 'cookies') fetch(`one/cookies?s=${encodeURIComponent(boot.s)}`, {method: 'POST', credentials: 'same-origin'});
     else if (message.t === 'reload') location.reload();
@@ -246,7 +365,7 @@
     const timer = r.timeoutMs > 0 ? setTimeout(() => abort.abort(), r.timeoutMs) : 0;
     let payload;
     try {
-      const response = await fetch(new URL(r.url, location.href), {method: r.method, headers: r.headers,
+      const response = await fetch(new URL(r.url, base), {method: r.method, headers: r.headers,
         body: r.method === 'GET' || r.method === 'HEAD' ? undefined : (r.bodyBase64 ? bytes(r.bodyBase64) : r.body),
         credentials: 'same-origin', signal: abort.signal});
       const headers = {};
@@ -257,7 +376,7 @@
         let text = '';
         for (let i = 0; i < data.length; i += 32768) text += String.fromCharCode.apply(null, data.subarray(i, i + 32768));
         payload.bodyBase64 = btoa(text);
-        payload.name = decodeURIComponent(new URL(r.url, location.href).pathname.split('/').pop() || '');
+        payload.name = decodeURIComponent(new URL(r.url, base).pathname.split('/').pop() || '');
       } else payload.body = await response.text();
     } catch (error) {
       payload = {requestId: id, status: 0, body: '', error: String(error && error.message || error)};
@@ -292,7 +411,7 @@
       exit: (code) => { throw new Error(`Abla One app exited (${code})`); },
       random: (data, length) => { crypto.getRandomValues(new Uint8Array(memory.buffer, data, length)); return length; }
     };
-    const response = await fetch(new URL(boot.wasm, location.href));
+    const response = await fetch(new URL(boot.wasm, base));
     const {instance} = await WebAssembly.instantiate(await response.arrayBuffer(), {abla_host: host});
     memory = instance.exports.memory;
     const encoder = new TextEncoder();
@@ -305,7 +424,7 @@
       const text = decoder.decode(new Uint8Array(memory.buffer, Number(packed >> 32n), Number(packed & 0xffffffffn)));
       for (const message of JSON.parse(text)) receive(message);
     };
-    local({t: 'hello', r: revision, w: innerWidth, h: innerHeight, storage: stored()});
+    local({t: 'hello', r: revision, w: innerWidth, h: innerHeight, e: entry.e, p: noHash(here()), storage: stored()});
     // Taps before the module was ready, against the revision now shown.
     while (queue.length) {
       const message = queue.shift();
@@ -318,12 +437,12 @@
   const connect = () => {
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Relative to the page, so the app also works under a path prefix.
-    const url = new URL(`one/live?s=${encodeURIComponent(boot.s)}`, location.href);
+    const url = new URL(`one/live?s=${encodeURIComponent(boot.s)}`, base);
     socket = new WebSocket(`${scheme}//${url.host}${url.pathname}${url.search}`);
     socket.onopen = () => {
       retry = 0;
       document.documentElement.removeAttribute('data-one-offline');
-      socket.send(JSON.stringify({t: 'hello', r: revision, w: innerWidth}));
+      socket.send(JSON.stringify({t: 'hello', r: revision, w: innerWidth, e: entry.e}));
       while (queue.length) socket.send(queue.shift());
     };
     socket.onmessage = (e) => receive(JSON.parse(e.data));
@@ -335,24 +454,28 @@
     };
   };
   // Layout follows the viewport width; the cookie gives the next first paint
-  // the right layout.
+  // the right layout. Cookies are for the whole app, whatever route set them.
   let resizing = 0;
   const viewport = () => {
-    document.cookie = `one_width=${innerWidth}; max-age=31536000; samesite=lax`;
+    document.cookie = `one_width=${innerWidth}; path=${basePath}; max-age=31536000; samesite=lax`;
     send({t: 'viewport', w: innerWidth});
   };
   addEventListener('resize', () => { clearTimeout(resizing); resizing = setTimeout(viewport, 150); });
-  document.cookie = `one_width=${innerWidth}; max-age=31536000; samesite=lax`;
+  document.cookie = `one_width=${innerWidth}; path=${basePath}; max-age=31536000; samesite=lax`;
+  document.cookie = `one_resume=; path=${basePath}; max-age=0; samesite=lax`;
   // A reload resumes this tab's session: the next page request carries it.
   // beforeunload runs before the browser requests the next page; pagehide
   // covers navigations that skip it.
-  const resume = () => { document.cookie = `one_resume=${boot.s}; max-age=15; samesite=lax`; };
+  const resume = () => { document.cookie = `one_resume=${boot.s}; path=${basePath}; max-age=15; samesite=lax`; };
   if (!boot.wasm) {
     addEventListener('beforeunload', resume);
     addEventListener('pagehide', resume);
   }
+  addEventListener('pagehide', saveScroll);
   for (const area of root.querySelectorAll('textarea')) grow(area);
   watchFeeds();
+  const left = savedScroll(entry.e);
+  if (left) placeScroll(left);
   if (boot.wasm) run().catch((error) => { console.error(error); document.documentElement.setAttribute('data-one-offline', ''); });
   else connect();
 })();

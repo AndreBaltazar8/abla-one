@@ -5,20 +5,27 @@ import "../../src/backends/web_document.ab"
 
 // Server-side renders both gallery tabs to HTML files for review.
 fun main: int {
-    var app = Gallery()
+    var app = Gallery(OneNoServices())
     val t = oneDefaultTheme()
     val out = "build/gallery"
     var ui = oneUi("web-document", t)
     Path("$out/icons").createDirectories()
     Path("$out/components.html").writeText(oneWebDocument("Abla One · Componentes", "pt-PT", app.render(ui), t, "icons", "#ffffff"))
-    app.tab = 1
+    app.receive("route", "/people")
     var ui2 = oneUi("web-document", t)
     Path("$out/people.html").writeText(oneWebDocument("Abla One · Pessoas", "pt-PT", app.render(ui2), t, "icons", "#ffffff"))
-    // The Wasm client page: the same first paint, then the app runs in the
-    // browser (build with `make gallery-client`).
-    app.tab = 0
+    // The Wasm client pages: the same first paint, then the app runs in the
+    // browser (build with `make gallery-client`). One page per route, so a static
+    // server can answer a direct link with that route's first paint.
+    app.receive("route", "/")
     var ui3 = oneUi("web-document", t)
     Path("$out/client.html").writeText(oneWebClientDocument("Abla One", "pt-PT", app.render(ui3), t, "icons", "#ffffff", "one/host.js", "gallery.wasm"))
+    Path("$out/routes/form").createDirectories()
+    for (route in ["/people", "/form/1", "/form/2"]) {
+        app.receive("route", route)
+        var page = oneUi("web-document", t)
+        Path("$out/routes$route.html").writeText(oneWebClientDocument("Abla One", "pt-PT", app.render(page), t, "icons", "#ffffff", "one/host.js", "gallery.wasm", route))
+    }
     println("wrote $out")
     0
 }

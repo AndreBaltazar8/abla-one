@@ -14,7 +14,7 @@ fun galleryThin(request: HttpRequest): HttpResponse {
 }
 
 fun main: int {
-    galleryHosts.append(oneThinHost(Gallery(), oneDefaultTheme(), "epaper", 360, { request -> httpText("no in-process routes", 404) }))
+    galleryHosts.append(oneThinHost(Gallery(oneLiveServices("thin")), oneDefaultTheme(), "epaper", 360, { request -> httpText("no in-process routes", 404) }))
     val router = httpRouter()
     router.get("/one/thin/tree", galleryThin)
     router.post("/one/thin/event", galleryThin)

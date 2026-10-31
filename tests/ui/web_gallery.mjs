@@ -43,6 +43,13 @@ try {
       await tab.close();
     }
   }
+  // Each route has its own first paint.
+  for (const [route, text] of [['people', 'Maya Townsend'], ['form/1', 'Formulário 1']]) {
+    const direct = await browser.newPage({javaScriptEnabled: false});
+    await direct.goto(`${base}/routes/${route}.html`);
+    check(await direct.getByText(text).count() === 1, `routes/${route}: rendered for that route`);
+    await direct.close();
+  }
   const tab = await browser.newPage({viewport: {width: 390, height: 844}});
   await tab.goto(`${base}/components.html`);
   const box = await tab.locator('button', {hasText: 'Todas'}).boundingBox();

@@ -11,7 +11,8 @@ import "web_live.ab"
 // then presented. Input goes through the frame's hit regions; a focused text
 // field takes typed text, Backspace and Enter. Services use the same session
 // queue as live web sessions (`oneLiveServices(session)`), with absolute
-// http(s) URLs sent over the network.
+// http(s) URLs sent over the network. Routes are the queue's, a stack here; a window
+// has no back button of its own, so going back is the app's (`services.back`).
 
 class OneDesktopOptions(
     val title: string,
@@ -87,11 +88,17 @@ class OneDesktopState(
     var focusKey: string,
     var dirty: bool,
     val scroll: Map<string, int>,
-    val delivered: Map<int, int>
+    val delivered: Map<int, int>,
+    val routes: OneRoutes,
+    val routeScrolls: OneRouteScrolls = oneRouteScrolls(),
+    // The route epoch of the frame on screen: a press on it is for that route.
+    var routeEpoch: int = 0
 )
 
 // One frame: render, lay out, paint. Visible feed rows are delivered first.
 fun oneDesktopFrame(var app: OneApp, theme: Theme, var state: OneDesktopState): OneFrame {
+    state.routeScrolls.moved("${state.routes.entry()}", state.scroll)
+    state.routeEpoch = state.routes.epoch
     var ui = oneUiSized("desktop", theme, state.width)
     val frame = onePaintFrame(oneLayout(app.render(ui), theme, "desktop", state.width, state.height, state.scroll), state.width, state.height)
     var again = false
@@ -106,6 +113,12 @@ fun oneDesktopFrame(var app: OneApp, theme: Theme, var state: OneDesktopState): 
     if (!again) return frame
     var ui2 = oneUiSized("desktop", theme, state.width)
     onePaintFrame(oneLayout(app.render(ui2), theme, "desktop", state.width, state.height, state.scroll), state.width, state.height)
+}
+
+// An input event for the frame on screen; dropped when the route has moved since.
+fun oneDesktopDeliver(var app: OneApp, theme: Theme, var state: OneDesktopState, event: int, value: string): bool {
+    if (state.routes.epoch != state.routeEpoch) return false
+    oneDispatch(app, "desktop", theme, event, value, state.width)
 }
 
 fun oneDesktopHit(frame: OneFrame, x: int, y: int, kind: string): int {
@@ -131,7 +144,7 @@ fun oneDesktopInput(frame: OneFrame, key: string): int {
 fun oneDesktopPump(var app: OneApp, session: string): bool {
     val index = oneLiveQueueIndex(session)
     oneLiveQueueList[index].fireTimers(monotonicMilliseconds())
-    var worked = false
+    var worked = oneRoutesDrain(app, oneLiveQueueList[index].routes)
     for (item in oneLiveQueueList[index].takeRequests()) {
         oneLiveQueueList[index].complete(oneDesktopExecute(item))
     }
@@ -139,7 +152,7 @@ fun oneDesktopPump(var app: OneApp, session: string): bool {
         app.receive("result", payload)
         worked = true
     }
-    worked
+    oneRoutesDrain(app, oneLiveQueueList[index].routes) || worked
 }
 
 // Copies the rasterized frame into the window's pixel buffer.
@@ -176,7 +189,8 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
     )
     if (!window.valid()) return 1
     val icons = OneIconSource({ name -> linuxReadFile("${options.iconDir}/$name.svg", 65536) })
-    var state = OneDesktopState(options.width, options.height, 0, 0, 0, 0, false, "", 0, "", true, Map(), Map())
+    oneLiveQueueList[oneLiveQueueIndex(session)].routes.start("/")
+    var state = OneDesktopState(options.width, options.height, 0, 0, 0, 0, false, "", 0, "", true, Map(), Map(), oneLiveQueueList[oneLiveQueueIndex(session)].routes)
     var pixels = pixelBuffer(state.width, state.height)
     var frame = OneFrame([], [], [], 0, 0)
     var running = true
@@ -226,7 +240,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                         if (i >= 0) state.focusKey = frame.hits[i].key
                         else {
                             state.focusKey = ""
-                            if (p >= 0) oneDispatch(app, "desktop", theme, frame.hits[p].event, "", state.width)
+                            if (p >= 0) oneDesktopDeliver(app, theme, state, frame.hits[p].event, "")
                         }
                         state.dirty = true
                     }
@@ -242,7 +256,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
             } else if (event.kind == windowEventText && state.focusKey != "") {
                 val i = oneDesktopInput(frame, state.focusKey)
                 if (i >= 0) {
-                    oneDispatch(app, "desktop", theme, frame.hits[i].event, "${frame.hits[i].value}${oneUtf8(event.codepoint())}", state.width)
+                    oneDesktopDeliver(app, theme, state, frame.hits[i].event, "${frame.hits[i].value}${oneUtf8(event.codepoint())}")
                     state.dirty = true
                 }
             } else if (event.kind == windowEventKey && event.keyPressed() && state.focusKey != "") {
@@ -251,10 +265,10 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     var value = frame.hits[i].value
                     var end = value.size - 1
                     while (end > 0 && value[end] >= 128 && value[end] < 192) end = end - 1
-                    oneDispatch(app, "desktop", theme, frame.hits[i].event, value.slice(0, end), state.width)
+                    oneDesktopDeliver(app, theme, state, frame.hits[i].event, value.slice(0, end))
                     state.dirty = true
                 } else if (i >= 0 && event.key() == keyEnter && frame.hits[i].submit > 0) {
-                    oneDispatch(app, "desktop", theme, frame.hits[i].submit, "", state.width)
+                    oneDesktopDeliver(app, theme, state, frame.hits[i].submit, "")
                     state.dirty = true
                 } else if (event.key() == keyEscape) {
                     state.focusKey = ""

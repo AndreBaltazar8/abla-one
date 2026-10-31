@@ -1,11 +1,14 @@
 import "../../src/one_kit.ab"
 
 // The gallery: every kit component with live state. Shared by all targets;
-// see android.ab and web.ab for the entry files.
+// see android.ab and web.ab for the entry files. Its screens have paths: "/" and
+// "/people" (with ?q= for the search), and "/form/<n>". Handlers only say where to
+// go; `show` is the one place that turns a route into a screen.
 
 class Person(val name: string, val role: string, val seed: string)
 
 class Gallery(
+    val services: OneServices,
     var tab: int by State(0),
     var count: int by State(0),
     var filter: int by State(0),
@@ -15,7 +18,8 @@ class Gallery(
     var formName: string by State(""),
     var formAmount: string by State(""),
     var formNotes: string by State(""),
-    var linkPresses: int by State(0)
+    var linkPresses: int by State(0),
+    var page: string = "/"
 ) : OneApp {
     fun people(): array<Person> = [
         Person("Sofia Costa", "Proprietária", "u1"), Person("André Silva", "Membro", "u2"),
@@ -23,12 +27,25 @@ class Gallery(
         Person("Tiago Mendes", "Membro", "u5")
     ]
 
-    fun render(var ui: Ui): Node = if (form > 0) formScreen(ui).keyed("form-$form") else column(style().fill().background("@surface"), [
+    fun render(var ui: Ui): Node = screen(ui).set("page.title", if (form > 0) "Formulário $form · Abla One" else if (tab == 1) "Pessoas · Abla One" else "Abla One")
+
+    fun search(): string = if (query != "") "?q=${oneRouteEncode(query)}" else ""
+
+    fun show(route: string): void {
+        page = oneRoutePagePath(route)
+        val parts = oneRouteSegments(route)
+        if (oneRouteHasParam(route, "q")) query = oneRouteParam(route, "q")
+        form = if (parts.size == 2 && parts[0] == "form") oneParseInt(parts[1], 0) else 0
+        tab = if (parts.size == 1 && parts[0] == "people") 1 else 0
+        return
+    }
+
+    fun screen(var ui: Ui): Node = if (form > 0) formScreen(ui).keyed("form-$form") else column(style().fill().background("@surface"), [
         topBar(ui, [], text("Abla One", style().text("title")), [iconButton(ui, "icon_bell", "Avisos", ui.press { count = 0 }, style())]),
         scroll(style().grow(1), [
             if (tab == 0) components(ui) else peopleList(ui)
         ]),
-        tabBar(ui, [TabItem("nav_home", "Componentes", ui.press { tab = 0 }), TabItem("nav_team", "Pessoas", ui.press { tab = 1 })], tab)
+        tabBar(ui, [TabItem("nav_home", "Componentes", ui.press { services.navigate("/${search()}") }), TabItem("nav_team", "Pessoas", ui.press { services.navigate("/people${search()}") })], tab)
     ])
 
     fun components(var ui: Ui): Node = column(style().gap(4), [
@@ -43,7 +60,10 @@ class Gallery(
         ]),
         sectionHeader(ui, "PESQUISA E FILTROS", badge(ui, "$count", "muted")),
         column(style().paddingX(16).gap(12), [
-            searchField(ui, query, "Pesquisar pessoas", ui.change { value -> query = value }),
+            searchField(ui, query, "Pesquisar pessoas", ui.change { value ->
+                query = value
+                services.navigate("$page${search()}", true)
+            }),
             row(style().gap(8), [
                 chip(ui, "Todas", filter == 0, ui.press { filter = 0 }),
                 chip(ui, "Não lidas", filter == 1, ui.press { filter = 1 }),
@@ -58,7 +78,10 @@ class Gallery(
                 text(if (opened != "") "Última pessoa aberta: $opened" else "Ainda não abriu ninguém.", style().text("caption").color("@subtle"))
             ], style())
         ]),
-        column(style().paddingX(16).paddingTop(12), [button(ui, "Abrir formulário", "secondary", ui.press { form = 1 }, style())]),
+        column(style().paddingX(16).paddingTop(12).gap(8), [
+            button(ui, "Abrir formulário", "secondary", ui.press { services.navigate("/form/1") }, style()),
+            routeLink("/people", ui.press { services.navigate("/people${search()}") }, style().paddingY(6), [text("Ver pessoas", style().text("label"))])
+        ]),
         spacer(24)
     ])
 
@@ -70,7 +93,7 @@ class Gallery(
         while (work < 40000000) work = work + 1
         val following = form + 1
         column(style().fill().background("@surface"), [
-            topBar(ui, [button(ui, "Voltar", "plain", ui.press { form = 0 }, style())], text("Formulário $form", style().text("title")), []),
+            topBar(ui, [button(ui, "Voltar", "plain", ui.press { services.back("/") }, style())], text("Formulário $form", style().text("title")), []),
             scroll(style().grow(1), [
                 column(style().padding(16).gap(12), [
                     textField(ui, formName, "Nome", ui.change { value -> formName = value }, style()),
@@ -81,7 +104,7 @@ class Gallery(
                     spacer(2400),
                     textField(ui, formNotes, "Notas", ui.change { value -> formNotes = value }, style()),
                     text("Notas: $formNotes", style().text("caption")),
-                    button(ui, "Formulário seguinte", "secondary", ui.press { form = following }, style())
+                    button(ui, "Formulário seguinte", "secondary", ui.press { services.navigate("/form/$following") }, style())
                 ])
             ])
         ])
@@ -100,6 +123,7 @@ class Gallery(
     }
 
     fun receive(kind: string, value: string): void {
+        if (kind == "route") show(value)
         return
     }
 }

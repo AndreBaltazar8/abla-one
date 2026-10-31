@@ -26,18 +26,25 @@ val onePlatformEvent = 2147483647
 // Runs an app until the process ends: render, publish, wait, dispatch. UI
 // events are delivered by a dispatch render (see Ui). An event from one of the
 // last few trees is translated to the current tree's id at the same place
-// (oneEventMap); older ones are dropped. Platform completions always reach
-// `receive`. `background` paints behind the system bars.
+// (oneEventMap); older ones are dropped, and so is one from before a move to another
+// route, whatever its age. Platform completions always reach `receive`. The system's
+// back button walks the route stack, and leaves the app at its first entry. A link
+// that opens the app reaches it as "openUrl" with the whole URL, then as a route.
+// `background` paints behind the system bars.
 fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
     mobileConfigureRuntime(268435456)
     var revision = 0
     var running = true
     val recent: array<OneEventMap> = []
+    val fence = oneRouteFence()
+    oneAppRoutes.start("/")
     while (running) {
+        oneRoutesDrain(app, oneAppRoutes)
         var ui = oneUi("android", theme)
         val root = app.render(ui)
         revision = revision + 1
-        mobilePublishTree(mobileEncodeStyledTree(revision, "", false, oneAndroidNode(root, theme, "root"), false, background))
+        fence.rendered(oneAppRoutes, revision)
+        mobilePublishTree(mobileEncodeStyledTree(revision, "", false, oneAndroidNode(oneRouteStamp(root, oneAppRoutes), theme, "root"), false, background))
         recent.append(oneEventMap(root))
         if (recent.size > 8) {
             val kept: array<OneEventMap> = []
@@ -55,8 +62,14 @@ fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
         val payload = mobileEventPayload()
         if (event == 0) running = false
         else if (event == oneCompletionEvent) app.receive("result", payload)
-        else if (event == onePlatformEvent) app.receive(oneAndroidPlatformKind(payload), payload)
-        else if (event > 0) {
+        else if (event == onePlatformEvent) {
+            val kind = oneAndroidPlatformKind(payload)
+            if (kind == "back") oneAppRoutes.back("")
+            else {
+                app.receive(kind, payload)
+                if (kind == "openUrl") oneAppRoutes.navigate(oneRouteFromUrl(jsonParse(payload).value.getString("url")), false)
+            }
+        } else if (event > 0 && !fence.stale(oneAppRoutes, eventRevision)) {
             val age = revision - eventRevision
             if (age == 0) oneDispatch(app, "android", theme, event, payload)
             else if (age > 0 && age < recent.size) {
@@ -99,4 +112,16 @@ class OneAndroidServices() : OneServices {
         else if (kind == "openUrl") mobileOpenUrl(payload)
         else if (kind == "haptic") mobileHaptic()
         else false
+    fun navigate(path: string, replace: bool = false): void {
+        oneAppRoutes.navigate(path, replace)
+        return
+    }
+    fun back(fallback: string = ""): void {
+        oneAppRoutes.back(fallback)
+        return
+    }
+    fun forward(): void {
+        oneAppRoutes.forward()
+        return
+    }
 }

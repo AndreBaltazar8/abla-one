@@ -170,7 +170,7 @@ trusted fun onePaperMonoRunThin(theme: Theme, icons: OneIconSource, config: OneT
                 draw = true
             }
             if (tap.event > 0) {
-                draw = app.update(oneThinRequest(config, "POST", "/one/thin/event?id=${tap.event}&value=${oneThinEscape(tap.value)}")) || draw
+                draw = app.update(oneThinRequest(config, "POST", "/one/thin/event?id=${tap.event}&value=${oneThinEscape(tap.value)}&r=${app.revision}")) || draw
                 lastPoll = onePaperMonoMilliseconds()
             }
         } else if (gesture == paperMonoGestureSwipe) {

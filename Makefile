@@ -55,6 +55,7 @@ services-client:
 # services demo (against tests/ui/echo.py).
 ui-web-client: gallery-client services-client
 	node tests/ui/web_client_gallery.mjs
+	node tests/ui/web_client_routes.mjs
 	node tests/ui/web_client_services.mjs
 
 # The gallery's app for thin devices, on this host (:8954), and a device's requests.

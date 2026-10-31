@@ -1,0 +1,154 @@
+import "abla/test"
+import "abla/json"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_session.ab"
+import "../../src/backends/web_live.ab"
+import "../../src/backends/web_client.ab"
+
+// A session with two screens whose first button sits at the same place.
+class Pages(val services: OneServices, var page: string, var at: string, var aHits: int, var bHits: int, var text: string) : OneApp {
+    fun render(var ui: Ui): Node = if (page == "/b") column(style(), [
+        pressable(ui.press { bHits += 1 }, style(), [Node("text", "", style(), [Attr("text", "on b")], [])])
+    ]).set("page.title", "B") else column(style(), [
+        pressable(ui.press { aHits += 1 }, style(), [Node("text", "", style(), [Attr("text", "on a")], [])]),
+        pressable(ui.press { services.navigate("/b") }, style(), []),
+        pressable(ui.press { services.back("/fallback") }, style(), []),
+        input(text, "", ui.change { v ->
+            text = v
+            services.navigate("/a?q=$v", true)
+        }, style())
+    ]).set("page.title", "A")
+    fun receive(kind: string, value: string): void {
+        if (kind == "route") {
+            at = value
+            page = oneRoutePagePath(value)
+            if (page == "/redirect") services.navigate("/b", true)
+        }
+        return
+    }
+}
+
+fun pagesApp(name: string): OneApp = Pages(oneLiveServices(name), "", "", 0, 0, "")
+
+val latest: array<Pages> = []
+
+fun session(name: string, route: string): OneLiveSession {
+    val index = oneLiveQueueIndex(name)
+    oneLiveQueueList[index].browser = true
+    oneLiveQueueList[index].routes.start(route)
+    val app = Pages(oneLiveServices(name), "", "", 0, 0, "")
+    latest.clear()
+    latest.append(app)
+    oneSession(name, app, oneLiveQueueList[index])
+}
+
+fun update(var s: OneLiveSession, t: Theme): Json {
+    s.deliverRoutes()
+    val text = oneSessionUpdate(s, t, "/i")
+    if (text == "") jsonNull() else jsonParse(text).value
+}
+
+fun has(haystack: string, needle: string): bool {
+    var i = 0
+    while (i + needle.size <= haystack.size) {
+        if (haystack.slice(i, i + needle.size) == needle) return true
+        i = i + 1
+    }
+    false
+}
+
+fun main: int {
+    val t = oneDefaultTheme()
+    var s = session("one", "/a")
+    val first = update(s, t)
+    expectEqual(first.getString("title"), "A", "the first render is at the start route")
+    expect(!first.has("nav"), "no move to report")
+    val shownAtA = s.revision
+
+    // The move comes back with the patch.
+    s.event(t, shownAtA, 2, "")
+    val moved = update(s, t)
+    expectEqual(moved.getString("title"), "B", "the screen follows the route")
+    val move = moved.get("nav").at(0)
+    expectEqual(move.getString("p"), "/b", "the page is told the path")
+    expect(!move.get("x").asBoolean(), "a push")
+    expectEqual(move.get("e").asInt(), s.queue.routes.entry(), "with the entry")
+    expectEqual(moved.getString("at"), "/b", "where the session is")
+    expectEqual(s.queue.moves.size, 0, "moves go out once")
+
+    // A press made on A, delivered after the move, stays off B: position 1 is B's button.
+    s.event(t, shownAtA, 1, "")
+    expectEqual(latest[0].bHits, 0, "a stale press doesn't reach the new screen")
+    expectEqual(latest[0].aHits, 0, "nor the old one")
+
+    // Back: the browser moved; the answer comes even if nothing else changed.
+    s.queue.routes.arrive("/a", 77)
+    s.routeAnswer = 9
+    s.changed = true
+    val back = update(s, t)
+    expectEqual(back.get("ack").asInt(), 9, "answers the page")
+    expectEqual(back.getString("title"), "A", "route delivered")
+    expectEqual(s.queue.routes.entry(), 77, "at the browser's entry")
+    val quiet = update(s, t)
+    expect(quiet.isNull(), "nothing more to say")
+
+    // The same page: a raced event is translated, and typing that changes the query
+    // isn't a new screen.
+    val before = s.revision
+    s.event(t, before, 1000001, "x")
+    val typed = update(s, t)
+    expectEqual(typed.get("nav").at(0).getString("p"), "/a?q=x", "a query move")
+    expect(typed.get("nav").at(0).get("x").asBoolean(), "replacing")
+    expectEqual(typed.get("nav").at(0).get("e").asInt(), 77, "in the same entry")
+    s.event(t, before, 1000001, "xy")
+    update(s, t)
+    expectEqual(latest[0].text, "xy", "a keystroke racing a query change arrives")
+    s.event(t, before, 1, "")
+    expectEqual(latest[0].aHits, 1, "and so does a press")
+
+    // Going back from the app is the page's to do.
+    s.event(t, s.revision, 3, "")
+    val out = s.queue.takeOutbox()
+    expectEqual(jsonParse(out[0]).value.getString("t"), "back", "asks the page")
+    expectEqual(jsonParse(out[0]).value.getString("to"), "/fallback", "with its fallback")
+    expectEqual(s.queue.routes.current(), "/a?q=xy", "and doesn't move by itself")
+
+    // A redirect while starting: reported as a move.
+    var r = session("two", "/redirect")
+    val redirected = update(r, t)
+    expectEqual(redirected.getString("title"), "B", "the screen it went to")
+    expect(redirected.get("nav").at(0).get("x").asBoolean(), "replacing the entry")
+
+    // Message handling, as both servers do it.
+    var m = session("three", "/a")
+    update(m, t)
+    oneSessionMessage(m, t, jsonParse("{\"t\":\"hello\",\"e\":5000}").value)
+    expectEqual(m.queue.routes.entry(), 5000, "hello brings the entry id")
+    update(m, t)
+    oneSessionMessage(m, t, jsonParse("{\"t\":\"route\",\"p\":\"/b\",\"e\":6000,\"n\":4}").value)
+    val answered = update(m, t)
+    expectEqual(answered.get("ack").asInt(), 4, "the page's route message is answered")
+    expectEqual(answered.getString("title"), "B", "with the route's screen")
+    // Same screen, no change in markup: the patch has no html, but still answers.
+    oneSessionMessage(m, t, jsonParse("{\"t\":\"route\",\"p\":\"/b\",\"e\":6000,\"n\":5}").value)
+    val same = update(m, t)
+    expect(!same.has("html"), "no markup")
+    expectEqual(same.get("ack").asInt(), 5, "still answered")
+
+    // The Wasm module: starts at the page's path, moves with its messages.
+    val hello = oneClientMessage("{\"t\":\"hello\",\"r\":1,\"w\":400,\"e\":9000,\"p\":\"/b\"}", { name -> pagesApp(name) }, t, "/i")
+    expect(has(hello, "\"title\":\"B\""), "a direct link's route is rendered first")
+    expectEqual(oneLiveQueueList[oneLiveQueueIndex("client")].routes.entry(), 9000, "at the page's entry")
+    val popped = oneClientMessage("{\"t\":\"route\",\"p\":\"/a\",\"e\":8000,\"n\":1}", { name -> pagesApp(name) }, t, "/i")
+    expect(has(popped, "\"title\":\"A\"") && has(popped, "\"ack\":1"), "back in the module")
+
+    // Claimed paths
+    val claim = oneLivePaths(["/", "/form/:n"])
+    expect(claim(HttpRequest("GET", "/", "", [], "", [], [])), "root claimed")
+    expect(claim(HttpRequest("GET", "/form/3", "x=1", [], "", [], [])), "pattern claimed")
+    expect(!claim(HttpRequest("GET", "/nope", "", [], "", [], [])), "not claimed")
+    expect(oneLiveReserved("/one/live") && oneLiveReserved("/one") && !oneLiveReserved("/oneness"), "/one/* is reserved")
+    expectEqual(oneLiveRoute(HttpRequest("GET", "/a", "x=1", [], "", [], [])), "/a?x=1", "a request's route")
+    expectEqual(oneLiveScriptString("/a</script>"), "\"/a\\u003c/script>\"", "a route can't end the script")
+    testsPassed()
+}

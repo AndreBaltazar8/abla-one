@@ -1,0 +1,181 @@
+import "abla/test"
+import "../../src/one.ab"
+
+class Shown(val seen: array<string>, val redirect: string, val services: OneServices) : OneApp {
+    fun render(var ui: Ui): Node = none()
+    fun receive(kind: string, value: string): void {
+        if (kind == "route") {
+            seen.append(value)
+            if (value == "/old") services.navigate(redirect, true)
+        }
+        return
+    }
+}
+
+fun main: int {
+    // Paths
+    expectEqual(oneRoutePath(""), "/", "empty is the root")
+    expectEqual(oneRoutePath("people"), "/people", "gets its slash")
+    expectEqual(oneRoutePath("//evil.example/x"), "/evil.example/x", "no other origin")
+    expectEqual(oneRoutePath("/\\evil.example"), "/evil.example", "no other origin by backslash")
+    expectEqual(oneRouteFromUrl("https://a.example/form/3?x=1#top"), "/form/3?x=1", "URL's route")
+    expectEqual(oneRouteFromUrl("gallery://open/people"), "/people", "custom scheme")
+    expectEqual(oneRouteFromUrl("https://a.example"), "/", "URL without a path")
+    expectEqual(oneRoutePagePath("/a/b?x=1#y"), "/a/b", "page path")
+    expectEqual(oneRouteQuery("/a?x=1&y=2#z"), "x=1&y=2", "query")
+    expectEqual(oneRouteParam("/a?q=a%20b+c&e", "q"), "a b c", "decoded parameter")
+    expect(oneRouteHasParam("/a?q=a&e", "e"), "parameter without a value")
+    expect(!oneRouteHasParam("/a?qq=a", "q"), "whole names only")
+    expectEqual(oneRouteParam("/a?x=1", "q"), "", "absent parameter")
+    val parts = oneRouteSegments("/form/a%2Fb/?x=/y")
+    expectEqual(parts.size, 2, "segments")
+    expectEqual(parts[1], "a/b", "decoded segment")
+    expectEqual(oneRouteEncode("a b/ç&"), "a%20b%2F%C3%A7%26", "encoded")
+    expectEqual(oneRouteDecode(oneRouteEncode("a b/ç&"), false), "a b/ç&", "encoding round trip")
+
+    // Claims
+    expect(oneRouteMatches("/", "/"), "root")
+    expect(!oneRouteMatches("/", "/x"), "root only")
+    expect(oneRouteMatches("/people", "/people/"), "trailing slash")
+    expect(oneRouteMatches("/people", "/people?q=1"), "query ignored")
+    expect(!oneRouteMatches("/people", "/people/1"), "exact")
+    expect(oneRouteMatches("/form/:n", "/form/3"), "one segment")
+    expect(!oneRouteMatches("/form/:n", "/form"), "the segment is needed")
+    expect(!oneRouteMatches("/form/:n", "/form/3/4"), "only one segment")
+    expect(oneRouteMatches("/docs/*", "/docs"), "wildcard with nothing")
+    expect(oneRouteMatches("/docs/*", "/docs/a/b"), "wildcard")
+
+    // Relative way to the root
+    expectEqual(oneRouteBase("/"), "./", "base at the root")
+    expectEqual(oneRouteBase("/people?a=/b/c"), "./", "base one level down")
+    expectEqual(oneRouteBase("/form/3"), "../", "base two levels down")
+    expectEqual(oneRouteBase("/a/b/c"), "../../", "base three levels down")
+
+    // The stack
+    var r = oneRoutes()
+    r.start("/")
+    r.start("/other")
+    expectEqual(r.current(), "/", "only the first start counts")
+    val first = r.entry()
+    expectEqual(r.takePending().size, 1, "the start reaches the app")
+    expect(!r.canGoBack(), "nothing behind the start")
+    r.back("")
+    expectEqual(r.current(), "/", "back with nothing and no fallback stays")
+    expectEqual(r.takePending().size, 0, "and moves nothing")
+    r.navigate("/a", false)
+    r.navigate("/b", false)
+    val b = r.entry()
+    expectEqual(r.entries.size, 3, "pushes")
+    expectEqual(r.epoch, 2, "each new page is an epoch")
+    r.back("")
+    expectEqual(r.current(), "/a", "back")
+    expect(r.canGoForward(), "forward possible")
+    r.forward()
+    expectEqual(r.current(), "/b", "forward")
+    expectEqual(r.entry(), b, "the same entry, for its scroll")
+    r.back("")
+    r.navigate("/c", false)
+    expect(!r.canGoForward(), "a push drops what was ahead")
+    expectEqual(r.entries.size, 3, "stack after the push")
+    r.takePending()
+    val c = r.entry()
+    r.navigate("/c", false)
+    expectEqual(r.entries.size, 3, "a push of the same route adds nothing")
+    expectEqual(r.entry(), c, "and keeps the entry")
+    expectEqual(r.takePending().size, 1, "but the app still hears it")
+    val epoch = r.epoch
+    r.navigate("/c?q=a", true)
+    expectEqual(r.epoch, epoch, "a query change stays on the page")
+    expectEqual(r.entry(), c, "and in its entry")
+    r.navigate("/c?q=b", false)
+    expectEqual(r.epoch, epoch, "a pushed query change stays on the page")
+    expect(r.entry() != c, "in a new entry")
+    r.navigate("/d", true)
+    expectEqual(r.epoch, epoch + 1, "replacing with another page moves")
+    expectEqual(r.current(), "/d", "replaced")
+    var fresh = oneRoutes()
+    fresh.start("/form/1")
+    val before = fresh.entry()
+    fresh.back("/")
+    expectEqual(fresh.current(), "/", "a shared link's back goes to the fallback")
+    expect(!fresh.canGoBack() && fresh.entry() != before, "replacing its entry")
+    var long = oneRoutes()
+    long.start("/")
+    var n = 0
+    while (n < 100) {
+        long.navigate("/p$n", false)
+        n = n + 1
+    }
+    expectEqual(long.entries.size, 64, "the stack is bounded")
+    expectEqual(long.current(), "/p99", "and stays at the top")
+    expectEqual(long.index, 63, "index follows")
+
+    // What the browser moved to
+    var web = oneRoutes()
+    web.start("/a")
+    web.adopt(5000)
+    expectEqual(web.entry(), 5000, "the browser's entry id")
+    web.navigate("/b", false)
+    expectEqual(web.entry(), 5001, "ids go on from it")
+    val at = web.epoch
+    web.arrive("/a", 5000)
+    expectEqual(web.current(), "/a", "arrived")
+    expectEqual(web.entry(), 5000, "with the browser's entry")
+    expectEqual(web.epoch, at + 1, "another page")
+
+    // A press from before a move doesn't count
+    var fenced = oneRoutes()
+    fenced.start("/")
+    val fence = oneRouteFence()
+    fence.rendered(fenced, 1)
+    fence.rendered(fenced, 2)
+    expect(!fence.stale(fenced, 1), "same page, older render: translated, not dropped")
+    fenced.navigate("/a", false)
+    expect(fence.stale(fenced, 2), "moved, not rendered yet")
+    fence.rendered(fenced, 3)
+    expect(fence.stale(fenced, 2), "from the page before")
+    expect(!fence.stale(fenced, 3), "from this page")
+
+    // Scroll per entry
+    val scrolls = oneRouteScrolls()
+    var offsets: Map<string, int> = Map()
+    expect(scrolls.moved("1", offsets), "first entry")
+    offsets.set("r/scroll0", 300)
+    expect(!scrolls.moved("1", offsets), "same entry")
+    expectEqual(offsets.get("r/scroll0") ?? -1, 300, "keeps its scroll")
+    expect(scrolls.moved("2", offsets), "new entry")
+    expectEqual(offsets.keys().size, 0, "opens at the top")
+    offsets.set("r/scroll0", 50)
+    scrolls.moved("1", offsets)
+    expectEqual(offsets.get("r/scroll0") ?? -1, 300, "back where it was left")
+
+    // Delivery, with a redirect
+    oneAppRoutes.start("/")
+    val seen: array<string> = []
+    val services = oneRecordedServices()
+    var app: OneApp = Shown(seen, "/new", services)
+    expect(oneRoutesDrain(app, oneAppRoutes), "the start is delivered")
+    expect(!oneRoutesDrain(app, oneAppRoutes), "only once")
+    services.navigate("/old")
+    expectEqual(services.last(), "1 NAVIGATE /old false", "recorded")
+    expect(oneRoutesDrain(app, oneAppRoutes), "a move is delivered")
+    expectEqual(seen.size, 3, "and what the app did about it")
+    expectEqual(seen[2], "/new", "the redirect")
+    expect(!oneAppRoutes.canGoForward() && oneAppRoutes.current() == "/new", "replaced")
+    services.back()
+    oneRoutesDrain(app, oneAppRoutes)
+    expectEqual(seen[3], "/", "back")
+    services.forward()
+    oneRoutesDrain(app, oneAppRoutes)
+    expectEqual(seen[4], "/new", "forward")
+    val none = OneNoServices()
+    none.navigate("/quiet", true)
+    expectEqual(oneAppRoutes.current(), "/quiet", "no services: routes still work")
+
+    // Stamp
+    val stamped = oneRouteStamp(column(style(), []), oneAppRoutes)
+    expectEqual(stamped.attr("one.back"), "true", "back is the app's")
+    expectEqual(stamped.attr("one.entry"), "${oneAppRoutes.entry()}", "entry")
+    expect(routeLink("/x", 3, style(), []).attr("href") == "./x", "route link works from any base")
+    testsPassed()
+}

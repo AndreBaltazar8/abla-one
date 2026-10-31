@@ -12,4 +12,4 @@ trusted fun alloc(length: u32): u32 = oneClientAlloc(length)
 trusted fun message(pointer: u32, length: u32): int =
     oneClientRespond(pointer, length, { session -> galleryClientApp() }, oneDefaultTheme(), "icons")
 
-fun galleryClientApp(): OneApp = Gallery()
+fun galleryClientApp(): OneApp = Gallery(oneLiveServices("client"))

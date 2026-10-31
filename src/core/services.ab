@@ -1,4 +1,5 @@
 import "abla/json"
+import "routes.ab"
 
 // Platform effects (SPEC §9). Calls that produce a result return a request
 // id; the completion reaches the app as `receive("result", payload)` and
@@ -171,6 +172,16 @@ interface OneServices {
     fun clearImageCache(): void
     // kind: "toast", "copy", "openUrl" or "haptic".
     fun effect(kind: string, payload: string): bool
+    // Soft navigation: gives the current screen a new path ("/people?q=ma") with no
+    // page load. The app hears every move as `receive("route", path)` before the next
+    // render, and that is the one place to change screens. `replace` changes the
+    // current history entry instead of adding one.
+    fun navigate(path: string, replace: bool = false): void
+    // Back one entry, as the browser's or the system's button does. With nothing to go
+    // back to (a shared link, a fresh start), replaces this entry with `fallback`,
+    // or stays when that is "".
+    fun back(fallback: string = ""): void
+    fun forward(): void
 }
 
 // The value of a secure read. Values written before typed storage existed
@@ -181,7 +192,8 @@ fun oneStored(response: OneResponse): Json {
     if (parsed.succeeded) parsed.value else jsonString(response.body)
 }
 
-// Services that do nothing, for previews: every request gets id 0.
+// Services that do nothing, for previews: every request gets id 0. Moves between
+// routes still happen, so an app that needs no other service can run with these.
 class OneNoServices() : OneServices {
     fun send(request: OneRequest): int = 0
     fun secureRead(key: string): int = 0
@@ -194,6 +206,18 @@ class OneNoServices() : OneServices {
     fun pickImage(kind: string): int = 0
     fun clearImageCache(): void { return }
     fun effect(kind: string, payload: string): bool = false
+    fun navigate(path: string, replace: bool = false): void {
+        oneAppRoutes.navigate(path, replace)
+        return
+    }
+    fun back(fallback: string = ""): void {
+        oneAppRoutes.back(fallback)
+        return
+    }
+    fun forward(): void {
+        oneAppRoutes.forward()
+        return
+    }
 }
 
 // Records calls and hands out increasing ids, for tests. Tests deliver
@@ -223,6 +247,21 @@ class OneRecordedServices(var next: int, val log: array<string>, val requests: a
     fun effect(kind: string, payload: string): bool {
         record("EFFECT $kind $payload")
         true
+    }
+    fun navigate(path: string, replace: bool = false): void {
+        record("NAVIGATE $path $replace")
+        oneAppRoutes.navigate(path, replace)
+        return
+    }
+    fun back(fallback: string = ""): void {
+        record("BACK $fallback")
+        oneAppRoutes.back(fallback)
+        return
+    }
+    fun forward(): void {
+        record("FORWARD")
+        oneAppRoutes.forward()
+        return
     }
     fun last(): string = if (log.size == 0) "" else log[log.size - 1]
     fun lastRequest(): OneRequest = requests[requests.size - 1]

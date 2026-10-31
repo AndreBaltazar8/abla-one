@@ -96,7 +96,7 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
         val event = oneParseInt(box.node.attr("onPress"), 0)
         if (event > 0 && box.node.attr("enabled") != "false") frame.hits.append(OneHit("press", x, y, box.w, box.h, event, 0, path, box.node.attr("label"), "", false))
     }
-    if (kind == "link") frame.hits.append(OneHit("link", x, y, box.w, box.h, 0, 0, path, box.node.attr("href"), "", false))
+    if (kind == "link" && box.node.attr("route") != "true") frame.hits.append(OneHit("link", x, y, box.w, box.h, 0, 0, path, box.node.attr("href"), "", false))
     val scrolls = kind == "scroll" || kind == "feed"
     var ncx = cx
     var ncy = cy

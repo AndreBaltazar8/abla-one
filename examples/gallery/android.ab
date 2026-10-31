@@ -4,7 +4,7 @@ import "../../src/backends/android.ab"
 
 // Android entry: the shared gallery on the abla-mobile Compose host.
 fun galleryApplication(): int {
-    var app = Gallery()
+    var app = Gallery(OneAndroidServices())
     oneAndroidRun(app, oneDefaultTheme(), "#FFFFFF")
 }
 val exported = #exportFunction("galleryApplication", "abla_mobile_run")

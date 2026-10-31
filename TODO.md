@@ -18,6 +18,15 @@
       injected taps took 216 and 260 ms; the others 62-89 ms, against 111-133 ms with
       arrays). The idle collection in `onePaperMonoLoop` does not always run first.
 
+## Routes
+
+- [ ] Android: a link that starts the app shows `/` for about half a second first. The host
+      delivers it after the first tree; it could reach the first render instead.
+- [ ] Desktop: no keyboard or mouse shortcut for back and forward (abla-graphics reports no
+      modifier keys, and no back button). Only `services.back`.
+- [ ] PaperMono: routes are covered by host tests and the firmware builds, in both modes;
+      not yet run on the device.
+
 ## Toolchain
 
 - [ ] `tools/check-native-buffer-host` in abla-embedded runs all its fixtures and reports

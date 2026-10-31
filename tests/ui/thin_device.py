@@ -49,6 +49,17 @@ try:
     after = json.loads(body)
     check("an event answers with the new tree", status == 200 and after["revision"] == tree["revision"] + 1)
     check("and the app ran", find(after["root"], "Adicionar (1)") > 0)
+    # A press made on a screen the app has left: the id means something else now.
+    stale = find(after["root"], "Adicionar (1)")
+    shown = after["revision"]
+    _, body = call(f"/event?id={find(after['root'], 'Pessoas')}&r={shown}", "POST")
+    people = json.loads(body)
+    check("a move answers with the new screen", find(people["root"], "Maya Townsend") > 0)
+    check("the tree says its entry", "one.entry" in people["root"][3])
+    _, body = call(f"/event?id={stale}&r={shown}", "POST")
+    check("a press from the previous route is dropped", json.loads(body)["revision"] == people["revision"])
+    _, body = call(f"/event?id={find(people['root'], 'Componentes')}&r={people['revision']}", "POST")
+    check("and did nothing on the way", find(json.loads(body)["root"], "Adicionar (1)") > 0)
 finally:
     server.terminate()
 print("PASS tests/ui/thin_device.py" if failures == 0 else f"{failures} failed")

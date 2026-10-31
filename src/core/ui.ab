@@ -1,5 +1,7 @@
 import "theme.ab"
 import "node.ab"
+import "routes.ab"
+import "state.ab"
 
 val oneChangeBase = 1000000
 
@@ -137,6 +139,26 @@ interface OneApp {
     fun render(var ui: Ui): Node
     fun receive(kind: string, value: string): void
 }
+
+// Tells the app about moves between routes. What it does in response can move
+// again (a redirect), so this runs until there are none, within reason. Whether
+// there were any; a plain field may have changed, so the next render must not be skipped.
+fun oneRoutesDrain(var app: OneApp, var routes: OneRoutes): bool {
+    var moved = false
+    var rounds = 0
+    while (rounds < 16 && routes.pending.size > 0) {
+        for (path in routes.takePending()) app.receive("route", path)
+        moved = true
+        rounds = rounds + 1
+    }
+    if (moved) oneInvalidate()
+    moved
+}
+
+// What a tree says about its route to whoever shows it: which entry it belongs to
+// (scroll positions go with it) and whether the system's back button is the app's.
+fun oneRouteStamp(root: Node, routes: OneRoutes): Node =
+    root.setInt("one.entry", routes.entry()).set("one.back", if (routes.canGoBack()) "true" else "false")
 
 // Delivers one event by rendering in dispatch mode. Returns whether a handler
 // with that id was found. The returned tree is discarded by callers.

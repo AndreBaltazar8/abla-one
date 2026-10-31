@@ -83,7 +83,7 @@ fun main: int {
 
     // The whole gallery, for visual comparison with the other backends.
     val t = oneDefaultTheme()
-    var app = Gallery()
+    var app = Gallery(OneNoServices())
     var ui = oneUi("desktop", t)
     val frame = onePaintFrame(oneLayout(app.render(ui), t, "desktop", 390, 844, Map()), 390, 844)
     val icons = OneIconSource({ name -> linuxReadFile("build/gallery/icons/$name.svg", 65536) })

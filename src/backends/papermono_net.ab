@@ -248,6 +248,18 @@ class OnePaperMonoServices() : OneServices {
     fun pickImage(kind: string): int = onePaperMonoAdd("none", "", "", none(), 0)
     fun clearImageCache(): void { return }
     fun effect(kind: string, payload: string): bool = false
+    fun navigate(path: string, replace: bool = false): void {
+        oneAppRoutes.navigate(path, replace)
+        return
+    }
+    fun back(fallback: string = ""): void {
+        oneAppRoutes.back(fallback)
+        return
+    }
+    fun forward(): void {
+        oneAppRoutes.forward()
+        return
+    }
 }
 
 // Runs one job that is due, and returns its completion ("" if none was).

@@ -4,6 +4,6 @@ import "../../../src/backends/desktop.ab"
 // The gallery as a Linux desktop app (abla-graphics window, one-layout,
 // one-raster). Run from the abla-one root after `make gallery-web` (icons).
 trusted fun main: int {
-    var app = Gallery()
+    var app = Gallery(oneLiveServices("desktop"))
     oneDesktopRun(app, oneDefaultTheme(), "desktop", OneDesktopOptions("Abla One", 420, 760, "#ffffff", "build/gallery/icons"))
 }

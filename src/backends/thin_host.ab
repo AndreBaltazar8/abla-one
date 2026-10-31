@@ -8,7 +8,8 @@ import "web_live.ab"
 // itself, so scrolling never waits on the network. Mount on any server:
 //
 //   GET  /one/thin/tree?have=<revision>     → 200 tree (core/wire.ab), or 204
-//   POST /one/thin/event?id=<event>&value=<text>       → 200 the tree after it, and `value` for an input
+//   POST /one/thin/event?id=<event>&value=<text>&r=<revision the device showed>
+//                                           → 200 the tree after it, and `value` for an input
 //
 // The app's services are a session queue ("thin"): timers run on each request, and
 // its requests go to `handler` (relative URLs, in process).
@@ -21,10 +22,12 @@ class OneThinHost(
     val handler: (HttpRequest) -> HttpResponse,
     var revision: int,
     var seen: int,
-    var tree: string
+    var tree: string,
+    val fence: OneRouteFence = oneRouteFence()
 )
 
 fun oneThinHost(app: OneApp, theme: Theme, target: string, width: int, handler: (HttpRequest) -> HttpResponse): OneThinHost {
+    oneLiveQueueList[oneLiveQueueIndex("thin")].routes.start("/")
     var host = OneThinHost(app, theme, target, width, handler, 0, -1, "")
     host.refresh()
     host
@@ -33,24 +36,27 @@ fun oneThinHost(app: OneApp, theme: Theme, target: string, width: int, handler: 
 // Platform work, then a render when the app's state changed.
 fun OneThinHost.refresh(): void {
     val index = oneLiveQueueIndex("thin")
+    oneRoutesDrain(app, oneLiveQueueList[index].routes)
     var rounds = 0
     while (rounds < 8) {
         oneLiveQueueList[index].fireTimers(monotonicMilliseconds())
         for (item in oneLiveQueueList[index].takeRequests()) oneLiveQueueList[index].complete(oneLiveExecute(handler, item))
         val completions = oneLiveQueueList[index].takeCompletions()
         for (payload in completions) app.receive("result", payload)
+        oneRoutesDrain(app, oneLiveQueueList[index].routes)
         if (completions.size == 0) rounds = 8
         rounds = rounds + 1
     }
     if (seen == oneRevision() && tree != "") return
     seen = oneRevision()
     var ui = oneUiSized(target, theme, width)
-    val text = oneTreeJson(app.render(ui), revision + 1)
+    val text = oneTreeJson(oneRouteStamp(app.render(ui), oneLiveQueueList[index].routes), revision + 1)
     // The same tree keeps its revision: the device has nothing to do.
     if (text.size != tree.size || oneThinBody(text) != oneThinBody(tree)) {
         revision = revision + 1
         tree = text
     }
+    fence.rendered(oneLiveQueueList[index].routes, revision)
     return
 }
 
@@ -72,7 +78,10 @@ fun OneThinHost.handle(request: HttpRequest): HttpResponse? {
         return oneThinAnswer(if (oneParseInt(request.queryParameter("have"), -1) == revision) "" else tree)
     }
     if (request.path == "/one/thin/event" && request.method == "POST") {
-        oneDispatch(app, target, theme, oneParseInt(request.queryParameter("id"), 0), request.queryParameter("value"), width)
+        // Made for a route the app has left: the id means something else here.
+        val shown = oneParseInt(request.queryParameter("r"), -1)
+        if (shown < 0 || !fence.stale(oneLiveQueueList[oneLiveQueueIndex("thin")].routes, shown))
+            oneDispatch(app, target, theme, oneParseInt(request.queryParameter("id"), 0), request.queryParameter("value"), width)
         // A handler can change what state can't see (plain fields).
         oneInvalidate()
         refresh()

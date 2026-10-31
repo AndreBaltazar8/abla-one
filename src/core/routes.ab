@@ -1,0 +1,351 @@
+import "abla/bytes"
+
+// Soft navigation (SPEC §9): where the app is, as plain data. A route is a path
+// with an optional query, "/people?q=ma". `services.navigate` moves here; each move
+// reaches the app as `receive("route", path)` before the next render, on every
+// target, and so do back, forward, deep links and the path the app starts at.
+//
+// On the web the browser holds the history, and only the current entry here
+// matters. Everywhere else this is the history.
+
+class OneRouteEntry(val id: int, val path: string)
+
+// `epoch` counts moves to another page (a different path; the query can change as
+// someone types). Events made for an older epoch never reach the app (OneRouteFence).
+class OneRoutes(val entries: array<OneRouteEntry>, var index: int, var lastId: int, var epoch: int, val pending: array<string>) {
+    fun current(): string = if (entries.size == 0) "" else entries[index].path
+    // Scroll positions belong to an entry: a new visit to the same path has its own.
+    fun entry(): int = if (entries.size == 0) 0 else entries[index].id
+    fun canGoBack(): bool = index > 0
+    fun canGoForward(): bool = index + 1 < entries.size
+    fun fresh(): int {
+        lastId = lastId + 1
+        lastId
+    }
+    // The path the app starts at. Only the first call counts.
+    fun start(path: string): void {
+        if (entries.size > 0) return
+        val target = oneRoutePath(path)
+        entries.append(OneRouteEntry(fresh(), target))
+        pending.append(target)
+        return
+    }
+    // A push of the current route adds no entry, as a link to the same page doesn't.
+    fun navigate(path: string, replace: bool): void {
+        val target = oneRoutePath(path)
+        if (entries.size == 0) {
+            start(target)
+            return
+        }
+        val samePage = oneRoutePagePath(current()) == oneRoutePagePath(target)
+        if (!samePage) epoch = epoch + 1
+        if (replace) entries[index] = OneRouteEntry(if (samePage) entry() else fresh(), target)
+        else if (target != current()) {
+            entries.truncate(index + 1)
+            entries.append(OneRouteEntry(fresh(), target))
+            index = index + 1
+            oneRoutesBound(this)
+        }
+        pending.append(target)
+        return
+    }
+    fun moveTo(next: int): void {
+        if (oneRoutePagePath(current()) != oneRoutePagePath(entries[next].path)) epoch = epoch + 1
+        index = next
+        pending.append(current())
+        return
+    }
+    // Back one entry; with nothing to go back to, replaces this one with `fallback`
+    // (a shared link's back button goes to its parent), or stays when that is "".
+    fun back(fallback: string): void {
+        if (canGoBack()) moveTo(index - 1)
+        else if (fallback != "") navigate(fallback, true)
+        return
+    }
+    fun forward(): void {
+        if (canGoForward()) moveTo(index + 1)
+        return
+    }
+    // The browser moved (back, forward, a typed URL): this entry is now `path`.
+    fun arrive(path: string, id: int): void {
+        val target = oneRoutePath(path)
+        if (entries.size == 0) {
+            start(target)
+            adopt(id)
+            return
+        }
+        if (oneRoutePagePath(current()) != oneRoutePagePath(target)) epoch = epoch + 1
+        entries[index] = OneRouteEntry(id, target)
+        if (id > lastId) lastId = id
+        pending.append(target)
+        return
+    }
+    // The browser's id for the current entry.
+    fun adopt(id: int): void {
+        if (entries.size == 0) return
+        entries[index] = OneRouteEntry(id, current())
+        if (id > lastId) lastId = id
+        return
+    }
+    fun takePending(): array<string> {
+        val out: array<string> = []
+        for (item in pending) out.append(item)
+        pending.clear()
+        out
+    }
+}
+
+fun oneRoutes(): OneRoutes = OneRoutes([], 0, 0, 0, [])
+
+// The oldest entries go first.
+fun oneRoutesBound(var routes: OneRoutes): void {
+    if (routes.entries.size <= 64) return
+    val kept: array<OneRouteEntry> = []
+    var i = 1
+    while (i < routes.entries.size) {
+        kept.append(routes.entries[i])
+        i = i + 1
+    }
+    routes.entries.clear()
+    for (item in kept) routes.entries.append(item)
+    routes.index = routes.index - 1
+    return
+}
+
+// The routes of a target with one app per process (Android, PaperMono, tests).
+val oneAppRoutes = oneRoutes()
+
+// Keeps a press from landing on a screen it wasn't made for. Ids are positions in
+// a render, so an id from the previous page could name anything on this one.
+class OneRouteFence(var epoch: int, var from: int) {
+    fun rendered(routes: OneRoutes, revision: int): void {
+        if (routes.epoch != epoch) {
+            epoch = routes.epoch
+            from = revision
+        }
+        return
+    }
+    // An event shown at `revision`: older than this page, or the route has moved
+    // since the last render.
+    fun stale(routes: OneRoutes, revision: int): bool = revision < from || routes.epoch != epoch
+}
+
+fun oneRouteFence(): OneRouteFence = OneRouteFence(0, 0)
+
+// Scroll positions per route entry, for targets whose scroll offsets live in a map.
+class OneRouteScrolls(var entry: string, val saved: Map<string, Map<string, int>>, val order: array<string>) {
+    // The tree on screen now belongs to `next`. Whether that's another entry.
+    fun moved(next: string, var scroll: Map<string, int>): bool {
+        if (next == entry) return false
+        if (entry == "") {
+            entry = next
+            return true
+        }
+        val keep: Map<string, int> = Map()
+        for (key in scroll.keys()) {
+            val value = scroll.get(key)
+            if (value != null) keep.set(key, value)
+        }
+        if (!saved.has(entry)) order.append(entry)
+        saved.set(entry, keep)
+        if (order.size > 16) {
+            saved.remove(order[0])
+            val rest: array<string> = []
+            var i = 1
+            while (i < order.size) {
+                rest.append(order[i])
+                i = i + 1
+            }
+            order.clear()
+            for (item in rest) order.append(item)
+        }
+        entry = next
+        for (key in scroll.keys()) scroll.remove(key)
+        val found = saved.get(next)
+        if (found != null) for (key in found.keys()) {
+            val value = found.get(key)
+            if (value != null) scroll.set(key, value)
+        }
+        true
+    }
+}
+
+fun oneRouteScrolls(): OneRouteScrolls = OneRouteScrolls("", Map(), [])
+
+// A route as the browser could hold it: starts with one "/", and can't name
+// another origin ("//host/x" and "/\host/x" would).
+fun oneRoutePath(path: string): string {
+    var out = ""
+    var start = 0
+    var i = 0
+    while (i < path.size) {
+        if (path[i] == 92) {
+            out = "$out${path.slice(start, i)}/"
+            start = i + 1
+        }
+        i = i + 1
+    }
+    out = "$out${path.slice(start, path.size)}"
+    var first = 0
+    while (first < out.size && out[first] == 47) first = first + 1
+    "/${out.slice(first, out.size)}"
+}
+
+// The route of a full URL (a deep link), whatever its scheme. The fragment stays out.
+fun oneRouteFromUrl(url: string): string {
+    var i = 0
+    var rest = url
+    while (i + 2 < url.size) {
+        if (url[i] == 58 && url[i + 1] == 47 && url[i + 2] == 47) {
+            var slash = i + 3
+            while (slash < url.size && url[slash] != 47 && url[slash] != 63 && url[slash] != 35) slash = slash + 1
+            rest = url.slice(slash, url.size)
+            i = url.size
+        }
+        i = i + 1
+    }
+    oneRoutePath(oneRouteWithoutHash(rest))
+}
+
+fun oneRouteWithoutHash(route: string): string {
+    var i = 0
+    while (i < route.size) {
+        if (route[i] == 35) return route.slice(0, i)
+        i = i + 1
+    }
+    route
+}
+
+// The part before the query and the fragment.
+fun oneRoutePagePath(route: string): string {
+    var i = 0
+    while (i < route.size) {
+        if (route[i] == 63 || route[i] == 35) return route.slice(0, i)
+        i = i + 1
+    }
+    route
+}
+
+// The raw query, without "?".
+fun oneRouteQuery(route: string): string {
+    val plain = oneRouteWithoutHash(route)
+    var i = 0
+    while (i < plain.size) {
+        if (plain[i] == 63) return plain.slice(i + 1, plain.size)
+        i = i + 1
+    }
+    ""
+}
+
+fun oneRouteHasParam(route: string, name: string): bool {
+    for (pair in oneRouteSplit(oneRouteQuery(route), 38)) if (oneRoutePairName(pair) == name) return true
+    false
+}
+
+// A query parameter, decoded; "" when absent.
+fun oneRouteParam(route: string, name: string): string {
+    for (pair in oneRouteSplit(oneRouteQuery(route), 38)) {
+        if (oneRoutePairName(pair) == name) return if (pair.size > name.size) oneRouteDecode(pair.slice(name.size + 1, pair.size), true) else ""
+    }
+    ""
+}
+
+fun oneRoutePairName(pair: string): string {
+    var i = 0
+    while (i < pair.size) {
+        if (pair[i] == 61) return pair.slice(0, i)
+        i = i + 1
+    }
+    pair
+}
+
+// The path's segments, decoded: "/form/3?x=1" is ["form", "3"].
+fun oneRouteSegments(route: string): array<string> {
+    val out: array<string> = []
+    for (part in oneRouteSplit(oneRoutePagePath(route), 47)) out.append(oneRouteDecode(part, false))
+    out
+}
+
+// The non-empty pieces between `separator` bytes.
+fun oneRouteSplit(value: string, separator: int): array<string> {
+    val out: array<string> = []
+    var start = 0
+    var i = 0
+    while (i <= value.size) {
+        if (i == value.size || value[i] == separator) {
+            if (i > start) out.append(value.slice(start, i))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    out
+}
+
+// Whether a route is one a pattern declares: "/people", "/form/:n" (one segment),
+// "/docs/*" (anything below, or nothing).
+fun oneRouteMatches(pattern: string, route: string): bool {
+    val want = oneRouteSplit(oneRoutePagePath(pattern), 47)
+    val have = oneRouteSplit(oneRoutePagePath(route), 47)
+    var i = 0
+    while (i < want.size) {
+        if (want[i] == "*" && i == want.size - 1) return true
+        if (i >= have.size) return false
+        if (want[i].size == 0 || (want[i][0] != 58 && want[i] != have[i])) return false
+        i = i + 1
+    }
+    i == have.size
+}
+
+// From a page at this route, the relative way back to the app's root: what a
+// document's <base> says, so its relative URLs mean the same on every route and
+// after any pushState, also under a path prefix a proxy strips.
+fun oneRouteBase(route: string): string {
+    val path = oneRoutePagePath(route)
+    var slashes = 0
+    for (byte in path) if (byte == 47) slashes = slashes + 1
+    if (slashes <= 1) return "./"
+    var out = ""
+    while (slashes > 1) {
+        out = "$out../"
+        slashes = slashes - 1
+    }
+    out
+}
+
+fun oneRouteHexValue(b: int): int = if (b >= 48 && b <= 57) b - 48 else if (b >= 97 && b <= 102) b - 87 else if (b >= 65 && b <= 70) b - 55 else -1
+
+fun oneRouteDecode(value: string, plusIsSpace: bool): string {
+    var out = ""
+    var start = 0
+    var i = 0
+    while (i < value.size) {
+        if (plusIsSpace && value[i] == 43) {
+            out = "$out${value.slice(start, i)} "
+            start = i + 1
+        } else if (value[i] == 37 && i + 2 < value.size && oneRouteHexValue(value[i + 1]) >= 0 && oneRouteHexValue(value[i + 2]) >= 0) {
+            out = "$out${value.slice(start, i)}${byteEncode(oneRouteHexValue(value[i + 1]) * 16 + oneRouteHexValue(value[i + 2]))}"
+            i = i + 2
+            start = i + 1
+        }
+        i = i + 1
+    }
+    "$out${value.slice(start, value.size)}"
+}
+
+// A value for a path segment or a query parameter.
+fun oneRouteEncode(value: string): string {
+    val hex = "0123456789ABCDEF"
+    var out = ""
+    var start = 0
+    var i = 0
+    while (i < value.size) {
+        val b = value[i]
+        val plain = (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 45 || b == 46 || b == 95 || b == 126
+        if (!plain) {
+            out = "$out${value.slice(start, i)}%${hex.slice(b / 16, b / 16 + 1)}${hex.slice(b % 16, b % 16 + 1)}"
+            start = i + 1
+        }
+        i = i + 1
+    }
+    "$out${value.slice(start, value.size)}"
+}

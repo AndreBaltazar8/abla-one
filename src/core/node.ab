@@ -1,4 +1,5 @@
 import "style.ab"
+import "routes.ab"
 
 // Nodes are plain data: a kind from the closed set every backend implements,
 // a key, a style, string attributes and children. Event handlers are not
@@ -80,6 +81,12 @@ fun page(title: string, lang: string, meta: Map<string, string>, content: Node):
 fun link(href: string, look: Style, children: array<Node>): Node = oneNode("link", look, oneVisible(children)).set("href", href)
 // A link that also delivers an event (`ui.press`) as it is followed.
 fun linkPress(href: string, event: int, look: Style, children: array<Node>): Node = link(href, look, children).setInt("onPress", event)
+
+// A link to one of the app's own routes: a real link on the web (it can open in a
+// new tab, and works without JavaScript), a press everywhere else. `event` should
+// call `services.navigate(path)`.
+fun routeLink(path: string, event: int, look: Style, children: array<Node>): Node =
+    linkPress(".${oneRoutePath(path)}", event, look, children).set("route", "true")
 
 fun spacer(amount: int): Node = oneNode("spacer", style(), []).setInt("size", amount)
 fun grower(): Node = oneNode("spacer", style().grow(1), [])

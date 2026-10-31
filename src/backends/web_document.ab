@@ -131,11 +131,12 @@ fun oneWebDocument(title: string, lang: string, root: Node, theme: Theme, iconBa
 // A server-rendered page whose app then runs in the browser (Wasm client
 // mode): web/host.js at `hostUrl` loads the module at `wasmUrl`, which
 // renders the same tree and takes over without replacing the markup.
-fun oneWebClientDocument(title: string, lang: string, root: Node, theme: Theme, iconBase: string, background: string, hostUrl: string, wasmUrl: string): string {
+// `route` is the path the page is served at, so a site can write one page per route.
+fun oneWebClientDocument(title: string, lang: string, root: Node, theme: Theme, iconBase: string, background: string, hostUrl: string, wasmUrl: string, route: string = "/"): string {
     val page = oneWebRender(root, theme, iconBase)
     val fill = if (root.attr("page.flow") == "document") "min-height:100%" else "height:100%"
     val boot = jsonStringify(jsonObject(["s", "r", "icons", "wasm"], [jsonString(""), jsonInteger(1), jsonString(iconBase), jsonString(wasmUrl)]))
-    "<!doctype html><html lang=\"${oneHtmlEscape(oneWebPageLang(root, lang))}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(oneWebPageTitle(root, title))}</title>${oneWebPageMeta(root)}" +
+    "<!doctype html><html lang=\"${oneHtmlEscape(oneWebPageLang(root, lang))}\"><head><meta charset=\"utf-8\"><base href=\"${oneRouteBase(route)}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(oneWebPageTitle(root, title))}</title>${oneWebPageMeta(root)}" +
         "<style>html,body{margin:0;height:100%;background:$background}#one-root{$fill}#one-root>.one{$fill}\n${oneWebBaseCss()}</style><style id=\"one-css\">${page.css.slice(oneWebBaseCss().size, page.css.size)}</style>" +
         "<script>window.__one=$boot</script><script src=\"${oneHtmlEscape(hostUrl)}\" defer></script></head><body><div id=\"one-root\">${page.html}</div></body></html>"
 }
@@ -181,6 +182,8 @@ fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string,
     for (state in oneWebViewports(resolved)) {
         for (declaration in oneWebDeclarations(node, resolved, state, parentKind)) classes = "$classes ${css.use(state, declaration)}"
     }
+    // A spacer's size runs along its parent's axis.
+    if (node.kind == "spacer" && oneParseInt(node.attr("size"), 0) > 0) classes = "$classes ${css.use("", "flex:0 0 ${node.attr("size")}px")}"
     val own = if (node.key != "") node.key else path
     val key = oneHtmlEscape(own)
     var inner = ""
@@ -202,7 +205,7 @@ fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string,
     val tag = if (node.attr("tag") == "p" && node.kind != "text" && node.kind != "rich" && !oneWebPhrasing(node)) "" else oneWebTag(node.attr("tag"))
     when (node.kind) {
         "text" -> "<${if (tag != "") tag else "span"} $common$selected>${oneHtmlEscape(node.attr("text"))}</${if (tag != "") tag else "span"}>"
-        "link" -> "<a $common href=\"${oneHtmlEscape(node.attr("href"))}\"${if (node.attr("onPress") != "") " data-one-press=\"${node.attr("onPress")}\"" else ""}$selected${if (node.attr("external") == "true") " target=\"_blank\" rel=\"noopener\"" else ""}>$inner</a>"
+        "link" -> "<a $common href=\"${oneHtmlEscape(node.attr("href"))}\"${if (node.attr("onPress") != "") " data-one-press=\"${node.attr("onPress")}\"" else ""}${if (node.attr("route") == "true") " data-one-route" else ""}$selected${if (node.attr("external") == "true") " target=\"_blank\" rel=\"noopener\"" else ""}>$inner</a>"
         "rich" -> "<span $common>${oneWebRuns(node.attr("runs"))}</span>"
         "icon" -> "<span $common role=\"img\" aria-label=\"${oneHtmlEscape(node.attr("label"))}\" style=\"--i:url('${oneHtmlEscape(iconBase)}/${oneHtmlEscape(node.attr("name"))}.svg')\"></span>"
         "image" -> "<img $common src=\"${oneHtmlEscape(oneWebImageSource(node, iconBase))}\" alt=\"${oneHtmlEscape(node.attr("label"))}\">"

@@ -4,6 +4,9 @@ val galleryAndroid = #mobileBuildAndroid(MobileAndroidConfiguration(
     "abla-one-gallery", "android.ab", "android/android-app", "debug",
     mobileAndroidApplication("dev.abla.one.gallery", "Abla One", 1, "0.0.1"),
     MobileAndroidBranding("@drawable/gallery_mark", "@drawable/gallery_mark", "#FFFFFF", "@drawable/gallery_mark", "@android:style/Theme.Material.Light.NoActionBar"),
-    [], [mobileAndroidLauncher()], true, false
+    [], [
+        mobileAndroidLauncher(),
+        MobileAndroidIntentFilter(["android.intent.action.VIEW"], ["android.intent.category.DEFAULT", "android.intent.category.BROWSABLE"], "abla-one-gallery", "open", "", "", false)
+    ], true, false
 ))
 fun main: int = if (galleryAndroid) 0 else 1
