@@ -15,8 +15,6 @@
 - [ ] A collection during a tap still costs about 200 ms (2 of 12 screen-changing
       injected taps took 216 and 260 ms; the others 62-89 ms, against 111-133 ms with
       arrays). The idle collection in `onePaperMonoLoop` does not always run first.
-- [ ] Check grey fills on the real panel, especially after several fast refreshes:
-      keep them, use a lighter shade, or go back to outlines.
 
 ## Toolchain
 
