@@ -31,38 +31,24 @@
 
 ## Toolchain
 
-- [ ] `tools/check-native-buffer-host` in abla-embedded runs all its fixtures and reports
-      failures: 1177 of 1207 pass, 30 fail for reasons outside the tool.
-      - 22 do not compile: `method.argument:M5BoardId.imuAxisOrder` in
-        `src/m5stack/imu_orientation.ab`: bmi270-frame, corematrix-imu-wire, imu-board-orientation,
-        imu-control, imu-measurement, imu-owner, imu-owner-clock, imu-owner-clock-wire,
-        imu-owner-control-wire, imu-owner-temperature, imu-owner-update, imu-prepared, imu-probe,
-        imu-temperature, nesso-devices-wire, nesso-imu-wire, p4-hardware-imu-owner,
-        pm1-board-imu, pm1-imu-owner, pm1-imu-owner-wire, sensors-begin, sensors-update
-        (each `-native`).
-      - 8 build and return a failure (exit code): pm1-wake-pins-s3 (2), rtc-input-s3 (2),
-        pm1-digital-s3 (2), s3-psram-cold (1), pm1-external-read (1), sdmmc-pin-snapshot (7),
-        battery-current-driver (1), spi-s3-exchange (1) (each `-native`).
+- [x] `tools/check-native-buffer-host` in abla-embedded: all 1207 fixtures pass (097ae16). Nine
+      fixtures were stale; the IMU compile failure has a helper until ablac's `fixes` is merged.
+      The PM1 fixture's boost bit now follows the drivers (M5IOE1 pin 3): not checked on hardware.
 
 ## ablac bugs seen (worked around, not fixed)
 
-- `when` whose arms return globals fails with `ownership.managed-return-borrow-contract`,
-  though `if` compiles: `val A = [1]`, `val B = [2]`,
-  `fun pick(n: string): array<int> = when (n) { "a" -> A` newline `else -> B }`.
-- An import alias doesn't reach a facade's `export import` (`E_IMPORT_ALIAS_MEMBER_UNKNOWN`),
-  so abla-pdf must be imported without `as`.
-- A named-argument call to a method through implicit `this` gives `E_NAMED_ARGUMENT_TARGET`,
-  though the docs don't rule it out.
-- A nominal `type X = int` can't be an array index (`index.type`), though the docs say it's
-  accepted where an int is. `generator` is reserved, and its error doesn't say so.
-- A method named `transform` looks taken for a compile-time transform:
-  `compile.effect-denied:filesystem.write:PdfPage.transform->PdfPage.op->Path.appendText`,
-  once a project imports `src/server/remote.ab`.
+- Fixed on ablac's `fixes` branch (708d7c90), not merged yet: `when` arms returning globals, an import
+  alias through `export import`, a named call through implicit `this`, a nominal `type X = int` as
+  an index, a clear error for reserved `generator`, a method named `transform` taking on compile
+  effects, and a method capturing a call its nominal parameter can't take (imuAxisOrder).
+- A named argument for a top-level function is lost before receiver names resolve: inside a method
+  `f(a: int)`, `f(top = 5)` calls the method, though docs say a method must have that parameter.
+- `abla/tls/hosted` and `httpsClient` still set no socket timeouts and don't guard SIGPIPE: any user
+  but abla-s3 (which now avoids them) can die on a reset peer or hang on a silent one.
+- `test-codegen-cache` can hit the same thread limit under load; it passes alone.
 - A `when` over an f32 gives `when.match` for literal cases (documented).
-- `test-codegen-units` failed in a full `make test` with "Resource temporarily unavailable"
-  while LLVM started threads; it passes alone. Probably load, not confirmed.
-- ablac's own `make test` hasn't had a clean full run since the contract and f32 changes
-  apart from known failures: rerun it.
+- `test-codegen-units` can hit "Resource temporarily unavailable" under load; passes alone.
+- ablac `make test` on `fixes`: 240 of 241 pass; only test-math-v8 fails (needs Node 22.14).
 
 ## Abla One bugs seen
 
