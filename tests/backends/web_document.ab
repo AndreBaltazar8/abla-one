@@ -52,6 +52,7 @@ fun main: int {
     expect(has(html, "aria-label=\"Abrir conversa\""), "accessible label")
     expect(has(html, "data-one-change=\"1000001\""), "change event id")
     expect(has(html, "type=\"email\""), "email keyboard")
+    expect(has(oneWebRender(input("1,5", "Valor", 3, style()).set("keyboard", "decimal"), t, "/icons").html, "inputmode=\"decimal\""), "decimal keyboard")
     expect(has(html, "<textarea"), "multiline input")
     expect(has(html, "--i:url('/icons/bell.svg')"), "icon mask url")
     expect(has(html, "<video></video>"), "web native node renders raw html")

@@ -211,7 +211,7 @@ component ConversationRow(room: Room, onOpen: () -> void) = $one
 | `image` | raster/vector image, local or remote with auth | src, fallback, label |
 | `pressable` | anything tappable; a container with press/long-press | onPress, onLongPress, enabled |
 | `link` | a container that navigates: an `<a>` on the web, the browser elsewhere | href, onPress (optional) |
-| `input` | single or multi-line text field | value, placeholder, keyboard, secure, onChange, onSubmit |
+| `input` | single or multi-line text field | value, placeholder, keyboard (`number`, `decimal`, `email`), secure, onChange, onSubmit |
 | `toggle` | switch or checkbox | checked, onChange |
 | `spacer`, `divider` | space and rules | size |
 | `portal` | sheet, dialog, menu or toast layered above the screen | kind, onDismiss |

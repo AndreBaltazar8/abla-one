@@ -30,5 +30,11 @@ fun main: int {
     expectEqual(gap.key, "gap", "explicit keys")
     expectEqual(gap.properties.getString("a.size"), "12", "attribute size doesn't collide with style size")
     expectEqual(root.children[2].properties.getString("ripple"), "none", "android passthrough property")
+    expectEqual(oneAndroidNode(column(style(), []).keyed("form-2"), t, "root").key, "form-2", "a keyed root keeps its key, so a new one is a new screen")
+    val linked = oneAndroidNode(link("https://example.com/a", style(), [text("a", style())]), t, "root")
+    expectEqual(linked.kind, "one.link", "link kind")
+    expectEqual(linked.properties.getString("a.href"), "https://example.com/a", "link target")
+    val amount = oneAndroidNode(input("1,5", "Valor", 3, style()).set("keyboard", "decimal"), t, "root")
+    expectEqual(amount.properties.getString("a.keyboard"), "decimal", "decimal keyboard")
     testsPassed()
 }
