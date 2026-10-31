@@ -174,29 +174,47 @@ fun oneDispatch(var app: OneApp, target: string, theme: Theme, event: int, value
 // among siblings of that kind (so inserting a button doesn't move an input). An event that arrives from a slightly
 // older tree is translated to the id at the same place in the current tree,
 // so a tap that races a re-render (a poll, a completion) is not lost. Keyed
-// list rows keep their place when other rows come and go.
-class OneEventMap(val byId: Map<int, string>, val byPlace: Map<string, int>) {
+// list rows keep their place when other rows come and go. The control there must
+// still say what it said (`says`) and be enabled: a press was made for what the person
+// read, so on another control or another amount it's dropped.
+class OneEventMap(val byId: Map<int, string>, val byPlace: Map<string, int>, val says: Map<string, string>) {
     fun translate(older: OneEventMap, id: int): int {
         val place = older.byId.get(id)
         if (place == null) return 0
         val current = byPlace.get(place)
-        if (current != null) current else 0
+        if (current == null || says.get(place) != older.says.get(place)) return 0
+        current
+    }
+    fun same(other: OneEventMap): bool {
+        val places = byPlace.keys()
+        if (places.size != other.byPlace.keys().size) return false
+        for (place in places) if (byPlace.get(place) != other.byPlace.get(place) || says.get(place) != other.says.get(place)) return false
+        true
     }
 }
 
 fun oneEventMap(root: Node): OneEventMap {
-    var map = OneEventMap(Map(), Map())
+    var map = OneEventMap(Map(), Map(), Map())
     oneCollectEvents(root, "r", map)
     map
+}
+
+// What a control shows: its kind and the text and icons in it, not a field's value.
+fun oneEventSays(node: Node): string {
+    var out = "${node.kind}|${node.attr("text")}|${node.attr("label")}|${node.attr("name")}|${node.attr("placeholder")}|${node.attr("runs")}"
+    for (child in node.children) out = "$out/${oneEventSays(child)}"
+    out
 }
 
 fun oneCollectEvents(node: Node, place: string, var map: OneEventMap): void {
     for (item in node.attrs) {
         if (item.name == "onPress" || item.name == "onChange" || item.name == "onSubmit" || item.name == "onVisible") {
             val id = oneParseInt(item.value, 0)
-            if (id > 0) {
+            if (id > 0 && node.attr("enabled") != "false") {
                 map.byId.set(id, "$place#${item.name}")
                 map.byPlace.set("$place#${item.name}", id)
+                // What's read on a feed changes all the time, and reporting what's in view commits to nothing.
+                map.says.set("$place#${item.name}", if (item.name == "onVisible") "" else oneEventSays(node))
             }
         }
     }

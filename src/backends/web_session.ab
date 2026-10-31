@@ -316,20 +316,29 @@ class OneLiveSession(
     var routeAnswer: int,
     val scrolls: OneRouteScrolls,
     // A page has had a socket to this session.
-    var connected: bool
+    var connected: bool,
+    // The last change event the session handled, answered with the next patch.
+    var changeAnswer: int,
+    // A press has run since the last render.
+    var pressed: bool
 ) {
-    // Renders the current state; returns the markup and records the event map.
-    fun render(theme: Theme, iconBase: string): string {
-        oneMemoScope = id
+    // The tree of the current state, with its event map: a new revision.
+    fun tree(theme: Theme): Node {
         var ui = oneUiSized(if (canvas) "web-canvas" else "web-document", theme, width)
         val root = app.render(ui)
+        pressed = false
         title = root.attr("page.title")
         lang = root.attr("page.lang")
         meta = oneWebPageMeta(root)
         document = root.attr("page.flow") == "document"
-        revision = revision + 1
+        // The same controls keep their revision: a screen that re-renders with no change to them (a
+        // poll, a clock) doesn't age what's on the page, which gets no patch for it.
+        val map = oneEventMap(root)
+        if (maps.size == 0 || queue.routes.epoch != fence.epoch || !map.same(maps[maps.size - 1])) {
+            revision = revision + 1
+            maps.append(map)
+        }
         fence.rendered(queue.routes, revision)
-        maps.append(oneEventMap(root))
         if (maps.size > 8) {
             val kept: array<OneEventMap> = []
             var i = maps.size - 8
@@ -340,6 +349,12 @@ class OneLiveSession(
             maps.clear()
             for (item in kept) maps.append(item)
         }
+        root
+    }
+    // Renders the current state; returns the markup and records the event map.
+    fun render(theme: Theme, iconBase: string): string {
+        oneMemoScope = id
+        val root = tree(theme)
         if (canvas) {
             scrolls.moved("${queue.routes.entry()}", scroll)
             val frame = onePaintFrame(oneLayout(root, theme, "web-canvas", if (width > 0) width else 390, if (height > 0) height else 844, scroll), if (width > 0) width else 390, if (height > 0) height else 844)
@@ -360,13 +375,19 @@ class OneLiveSession(
     fun event(theme: Theme, eventRevision: int, eventId: int, value: string): void {
         oneMemoScope = id
         if (fence.stale(queue.routes, eventRevision)) return
+        // Ids are positions in a render, and several events can arrive before the next one. After a
+        // press the screen may be another, and a press needs the screen as it is now. Typing doesn't
+        // move a field, and each key would cost a render.
+        val change = eventId > oneChangeBase
+        if (pressed || (changed && !change)) tree(theme)
         val age = revision - eventRevision
         var target = 0
-        if (age == 0) target = eventId
+        if (age == 0 && maps[maps.size - 1].byId.has(eventId)) target = eventId
         else if (age > 0 && age < maps.size) target = maps[maps.size - 1].translate(maps[maps.size - 1 - age], eventId)
         if (target > 0) {
             oneDispatch(app, if (canvas) "web-canvas" else "web-document", theme, target, value, width)
             changed = true
+            if (!change) pressed = true
         }
         return
     }
@@ -389,7 +410,13 @@ class OneLiveSession(
 // A message from the page: hello, event, route (the browser moved), viewport, scroll.
 fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void {
     val kind = m.getString("t")
-    if (kind == "event") session.event(theme, m.get("r").asInt(), m.get("id").asInt(), m.getString("v"))
+    if (kind == "event") {
+        session.event(theme, m.get("r").asInt(), m.get("id").asInt(), m.getString("v"))
+        if (m.get("c").intAvailable()) {
+            session.changeAnswer = m.get("c").asInt()
+            session.changed = true
+        }
+    }
     else if (kind == "hello") {
         session.htmlSent = ""
         session.cssSent = 0
@@ -423,7 +450,9 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
     session.routeAnswer = 0
     val same = markup == session.htmlSent
     // A move goes out even when the screen looks the same: the URL still changes.
-    if (same && moves.size == 0 && answer == 0) return ""
+    val typed = session.changeAnswer
+    session.changeAnswer = 0
+    if (same && moves.size == 0 && answer == 0 && typed == 0) return ""
     val css = session.css.since(session.cssSent)
     session.cssSent = session.css.rules.size
     session.htmlSent = markup
@@ -441,10 +470,14 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
         keys.append("at")
         values.append(jsonString(session.queue.routes.current()))
     }
+    if (typed > 0) {
+        keys.append("c")
+        values.append(jsonInteger(typed))
+    }
     val text = jsonStringify(jsonObject(keys, values))
     if (session.canvas && !same) "${text.slice(0, text.size - 1)},\"frame\":$markup}" else text
 }
 
 fun oneSession(id: string, app: OneApp, queue: OneLiveQueue): OneLiveSession {
-    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), 0, oneRouteScrolls(), false)
+    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), 0, oneRouteScrolls(), false, 0, false)
 }

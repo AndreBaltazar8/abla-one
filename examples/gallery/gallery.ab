@@ -19,6 +19,12 @@ class Gallery(
     var formAmount: string by State(""),
     var formNotes: string by State(""),
     var linkPresses: int by State(0),
+    var moment: string by State(""),
+    var issued: int by State(0),
+    var voided: int by State(0),
+    var tallied: int by State(0),
+    var draft: string by State(""),
+    var sent: string by State(""),
     var page: string = "/"
 ) : OneApp {
     fun people(): array<Person> = [
@@ -37,10 +43,11 @@ class Gallery(
         if (oneRouteHasParam(route, "q")) query = oneRouteParam(route, "q")
         form = if (parts.size == 2 && parts[0] == "form") oneParseInt(parts[1], 0) else 0
         tab = if (parts.size == 1 && parts[0] == "people") 1 else 0
+        moment = if (parts.size == 1 && parts[0] == "moment") "ask" else ""
         return
     }
 
-    fun screen(var ui: Ui): Node = if (form > 0) formScreen(ui).keyed("form-$form") else column(style().fill().background("@surface"), [
+    fun screen(var ui: Ui): Node = if (moment != "") momentScreen(ui) else if (form > 0) formScreen(ui).keyed("form-$form") else column(style().fill().background("@surface"), [
         topBar(ui, [], text("Abla One", style().text("title")), [iconButton(ui, "icon_bell", "Avisos", ui.press { count = 0 }, style())]),
         scroll(style().grow(1), [
             if (tab == 0) components(ui) else peopleList(ui)
@@ -83,6 +90,21 @@ class Gallery(
             routeLink("/people", ui.press { services.navigate("/people${search()}") }, style().paddingY(6), [text("Ver pessoas", style().text("label"))])
         ]),
         spacer(24)
+    ])
+
+    // A screen that changes within its path, unkeyed, with another handler at the same place and
+    // controls that come alive with a draft (tests/ui/web_live_events.mjs).
+    fun momentScreen(var ui: Ui): Node = column(style().fill().padding(16).gap(12).background("@surface"), [
+        if (moment == "ask") button(ui, "Emitir", "primary", ui.press { issued += 1; moment = "done" }, style())
+        else button(ui, "Anular", "danger", ui.press { voided += 1; moment = "ask" }, style()),
+        text("Emitidas: $issued, anuladas: $voided", style()),
+        button(ui, "Contar", "secondary", ui.press { tallied += 1 }, style()),
+        text("Contadas: $tallied", style()),
+        textField(ui, draft, "Rascunho", ui.change { value -> draft = value }, style()),
+        button(ui, "Enviar", "primary", if (draft != "") ui.press { sent = draft; draft = "" } else 0, style()),
+        button(ui, "Guardar", "secondary", ui.press { sent = "guardado:$draft" }, style()).set("enabled", if (draft != "") "true" else "false"),
+        button(ui, "Só com três", "secondary", ui.press { sent = "três:$draft" }, style()).set("enabled", if (draft.size >= 3) "true" else "false"),
+        text("Enviado: $sent", style())
     ])
 
     // A long form, keyed by its number as an app keys its screens. Each one

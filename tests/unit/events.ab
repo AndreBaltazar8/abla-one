@@ -1,5 +1,5 @@
 import "abla/test"
-import "../../src/one.ab"
+import "../../src/one_kit.ab"
 
 fun tree(var ui: Ui, rows: array<string>, extra: bool): Node {
     val items: array<Node> = []
@@ -23,5 +23,27 @@ fun main: int {
     expectEqual(removed.translate(before, 1), 0, "a removed row's event is dropped")
     expectEqual(before.translate(before, 2), 2, "same tree, same id")
     expectEqual(after.translate(before, 99), 0, "unknown ids are dropped")
+    // The same place, on another control or another amount: it wasn't made for this one.
+    var d = oneUi("t", theme())
+    val pay = oneEventMap(button(d, "Pagar 100 €", "primary", d.press { }, style()))
+    var e = oneUi("t", theme())
+    val payMore = oneEventMap(button(e, "Pagar 200 €", "primary", e.press { }, style()))
+    var f = oneUi("t", theme())
+    val samePay = oneEventMap(button(f, "Pagar 100 €", "primary", f.press { }, style()))
+    var g = oneUi("t", theme())
+    val offPay = oneEventMap(button(g, "Pagar 100 €", "primary", g.press { }, style()).set("enabled", "false"))
+    expectEqual(payMore.translate(pay, 1), 0, "a different label at the same place")
+    expectEqual(samePay.translate(pay, 1), 1, "the same label")
+    expectEqual(offPay.translate(pay, 1), 0, "a control disabled since")
+    expectEqual(samePay.translate(offPay, 1), 0, "an event of a control that was disabled")
+    // A field's value changes as it's typed in; its placeholder says what it is.
+    var h = oneUi("t", theme())
+    val typed = oneEventMap(input("a", "Nome", h.change { v -> }, style()))
+    var i = oneUi("t", theme())
+    val typedMore = oneEventMap(input("ab", "Nome", i.change { v -> }, style()))
+    var j = oneUi("t", theme())
+    val otherField = oneEventMap(input("a", "NIF", j.change { v -> }, style()))
+    expectEqual(typedMore.translate(typed, oneChangeBase + 1), oneChangeBase + 1, "a field keeps its events as its value changes")
+    expectEqual(otherField.translate(typed, oneChangeBase + 1), 0, "another field at the same place")
     testsPassed()
 }

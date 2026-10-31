@@ -20,6 +20,9 @@
 
 ## Routes
 
+- [ ] Thin devices: an event of an older revision within one route runs by its id, untranslated, so it can
+      reach another control after a view change that isn't a route (`OneThinHost.handle` only has
+      the route fence; web sessions and Android use `OneEventMap`).
 - [ ] Android: a link that starts the app shows `/` for about half a second first. The host
       delivers it after the first tree; it could reach the first render instead.
 - [ ] Desktop: no keyboard or mouse shortcut for back and forward (abla-graphics reports no

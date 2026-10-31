@@ -139,7 +139,17 @@ An event from one of the last few renders is translated to the current
 render's id at the same place in the tree (`OneEventMap`): node keys at each
 level, else kind and position among siblings of that kind. A tap that races a
 re-render (a poll, a push) still reaches the right control. Use keys on list
-rows.
+rows. Each event carries the revision it was made for. It's dropped when that revision is too
+old, when the place is gone or disabled, or when the control there no longer says the same (its
+kind, text, label, icon, placeholder; a field's value doesn't count): a press lands on what the
+person read or nowhere, so a double press on a button showing a changing amount counts once.
+A render with the same controls keeps its revision, so a screen that re-renders often ages nothing.
+Web sessions render before a press when an earlier event of the same batch may have changed
+the screen.
+
+On the web a press on a control that isn't live yet, while typing is on its way to the session,
+waits for the answer (`c` in the patch) and lands then if the same control is there, says the same
+and now takes it: a send button that comes alive with its draft. Typing again or moving cancels it.
 
 Platform completions (HTTP, storage, timers, pickers) arrive as
 `receive("result", payload)`, pushes from the live server as
@@ -495,10 +505,10 @@ the whole URL, then as a route (`oneRouteFromUrl`: path and query, whatever the 
 fragment). The app declares its links with a `MobileAndroidIntentFilter`. A cold start shows
 the `/` route until the link arrives, about half a second later, and back then goes to it.
 
-**Protocol.** Page to session: `{t:"route", p, e, n}` when the browser moves, and `e` in
-`hello`. Session to page, with the next patch or frame (sent even when the markup is the
+**Protocol.** Page to session: `{t:"event", r, id, v}`, with `c`, a running number, for typing;
+`{t:"route", p, e, n}` when the browser moves, and `e` in `hello`. Session to page, with the next patch or frame (sent even when the markup is the
 same): `nav: [{p, x, e}]`, the moves; `ack: n`, the last route message handled; `at`, the
-route it's at. `{t:"back", to}` and `{t:"forward"}` ask the browser. The session decides what
+route it's at; `c`, the last typing handled. `{t:"back", to}` and `{t:"forward"}` ask the browser. The session decides what
 is a new entry (`e`). Thin devices send `r`, the revision they showed, with an event.
 
 ### Test and preview implementations

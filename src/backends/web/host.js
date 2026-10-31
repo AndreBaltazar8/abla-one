@@ -30,6 +30,28 @@
     else queue.push(text);
   };
   const event = (id, value) => send({t: 'event', r: revision, id: Number(id), v: value == null ? '' : String(value)});
+  // Typing the session hasn't answered yet, and a press waiting for it: a control may only come
+  // alive once the text reaches the session (a send button on a draft).
+  let typed = 0;
+  let typedSeen = 0;
+  let held = null;
+  const change = (id, value) => {
+    held = null;
+    send({t: 'event', r: revision, id: Number(id), v: String(value), c: ++typed});
+  };
+  const live = (target) => {
+    const id = target.getAttribute('data-one-press');
+    return id && id !== '0' && target.getAttribute('aria-disabled') !== 'true' ? id : null;
+  };
+  // The press lands if the same control is there, saying the same, and now takes it.
+  const release = () => {
+    if (!held || typedSeen !== typed) return;
+    const {key, says} = held;
+    held = null;
+    const target = root.querySelector(`[data-one="${CSS.escape(key)}"]`);
+    const id = target && target.textContent === says && live(target);
+    if (id) event(id, '');
+  };
 
   // --- events -------------------------------------------------------------
   root.addEventListener('click', (e) => {
@@ -44,7 +66,12 @@
       else scrollTo(0, 0);
     }
     const target = e.target.closest('[data-one-press]');
-    if (!target || target.getAttribute('aria-disabled') === 'true') return;
+    if (!target) return;
+    if (!live(target) && !target.hasAttribute('data-one-route')) {
+      if (typedSeen !== typed) held = {key: target.getAttribute('data-one'), says: target.textContent};
+      return;
+    }
+    if (target.getAttribute('aria-disabled') === 'true') return;
     // A link to a route: a plain click moves here; the others open a tab as usual.
     if (target.hasAttribute('data-one-route')) {
       if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
@@ -55,7 +82,7 @@
   });
   root.addEventListener('input', (e) => {
     const id = e.target.getAttribute && e.target.getAttribute('data-one-change');
-    if (id) event(id, e.target.value);
+    if (id) change(id, e.target.value);
     if (e.target.tagName === 'TEXTAREA') grow(e.target);
   });
   root.addEventListener('keydown', (e) => {
@@ -194,6 +221,7 @@
   const leaveScreen = () => {
     if (root.contains(document.activeElement)) document.activeElement.blur();
     visible.clear();
+    held = null;
   };
   const follow = (move) => {
     if (move.e === entry.e) {
@@ -219,6 +247,8 @@
     if (moved) placeScroll(null);
     else if (message.ack && message.ack === asked) placeScroll(savedScroll(entry.e));
     watchFeeds();
+    if (message.c) typedSeen = message.c;
+    release();
   };
   const ask = (path, id) => {
     leaveScreen();
