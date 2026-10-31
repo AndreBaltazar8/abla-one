@@ -141,6 +141,77 @@ try {
     check(await page.getByText('Enviado: x').count() === 0, 'a press waiting doesn\'t survive a move');
     await page.close();
   }
+  {
+    // Typing raced with a move: the field that says it's the same on both routes keeps it, and
+    // the focus; the one that only looks the same doesn't get it.
+    const page = await browser.newPage({viewport: {width: 390, height: 844}});
+    await page.goto(base + '/field/1');
+    await page.getByText('Campos em /field/1').waitFor();
+    await page.waitForTimeout(200);
+    await page.getByPlaceholder('Mantido').focus();
+    await page.evaluate(`(() => {
+      ${button('Mudar')}.click();
+      const put = (name, value) => { const f = document.querySelector('input[placeholder="' + name + '"]'); f.value = value; f.dispatchEvent(new Event('input', {bubbles: true})); };
+      put('Outro', 'xyz');
+      put('Mantido', 'abc');
+    })()`);
+    await page.getByText('Campos em /field/2').waitFor({timeout: 5000});
+    await settled(page);
+    check(await page.getByText('Mantido: abc, outro: ', {exact: true}).count() === 1, 'typing raced with a move reaches the same field, and no other');
+    check(await page.getByPlaceholder('Mantido').inputValue() === 'abc', 'the field shows it');
+    check(await page.getByPlaceholder('Outro').inputValue() === '', 'the other field shows it was dropped');
+    check(await page.evaluate(() => document.activeElement.placeholder) === 'Mantido', 'the field keeps the focus across the move');
+    await page.keyboard.type('d');
+    await page.getByText('Mantido: abcd, outro: ', {exact: true}).waitFor({timeout: 5000});
+    check(true, 'and typing goes on');
+    await page.close();
+  }
+  {
+    // A move that changes nothing on the screen: what the person does on it isn't dropped or disturbed.
+    const page = await browser.newPage({viewport: {width: 390, height: 844}});
+    await page.goto(base + '/same/1');
+    await page.getByText('O mesmo ecrã').waitFor();
+    await page.waitForTimeout(200);
+    await page.getByPlaceholder('Outro').focus();
+    await page.evaluate(`(() => {
+      ${button('Mudar')}.click();
+      ${button('Contar')}.click();
+      const f = document.querySelector('input[placeholder="Outro"]'); f.value = 'ok'; f.dispatchEvent(new Event('input', {bubbles: true}));
+    })()`);
+    await page.waitForURL('**/same/2', {timeout: 5000});
+    await settled(page);
+    check(await page.evaluate(() => document.activeElement.placeholder) === 'Outro', 'the focus stays');
+    check(await page.getByPlaceholder('Outro').inputValue() === 'ok', 'and the text');
+    await page.goto(base + '/moment');
+    await page.getByText('Contadas: 1').waitFor({timeout: 5000}).then(() => check(true, 'a press raced with such a move lands'), () => check(false, 'a press raced with such a move lands'));
+    await page.close();
+  }
+  {
+    // A link followed from the page starts that page's own session; a reload keeps this one.
+    const page = await browser.newPage({viewport: {width: 390, height: 844}});
+    await page.goto(base + '/moment');
+    await page.getByText('Emitidas: 0').waitFor();
+    await page.waitForTimeout(200);
+    const session = await page.evaluate(() => window.__one.s);
+    await page.reload();
+    check(await page.evaluate(() => window.__one.s) === session, 'a reload resumes');
+    await page.waitForTimeout(200);
+    await page.getByText('Outra página').click();
+    await page.getByText('Maya Townsend').waitFor({timeout: 5000});
+    const followed = await page.evaluate(() => window.__one.s);
+    check(followed !== session, 'a followed link starts a new session');
+    await page.waitForTimeout(200);
+    await page.goBack();
+    await page.getByText('Emitidas: 0').waitFor({timeout: 5000});
+    await page.waitForTimeout(200);
+    const popup = page.context().waitForEvent('page');
+    await page.getByText('Outra página').click({modifiers: ['Control']});
+    await (await popup).close();
+    const here = await page.evaluate(() => window.__one.s);
+    await page.reload();
+    check(await page.evaluate(() => window.__one.s) === here, 'a link opened in another tab leaves this one resuming');
+    await page.close();
+  }
 } finally {
   await browser.close();
 }

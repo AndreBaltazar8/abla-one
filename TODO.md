@@ -19,9 +19,6 @@
 
 ## Routes
 
-- [ ] Thin devices: an event of an older revision within one route runs by its id, untranslated, so it can
-      reach another control after a view change that isn't a route (`OneThinHost.handle` only has
-      the route fence; web sessions and Android use `OneEventMap`).
 - [ ] Android: a link that starts the app shows `/` for about half a second first. The host
       delivers it after the first tree; it could reach the first render instead.
 - [ ] Desktop: no keyboard or mouse shortcut for back and forward (abla-graphics reports no
@@ -49,8 +46,4 @@
 
 ## Abla One bugs seen
 
-- `$remote` routes: a `@server` function named `live`, `upload`, `cookies` or similar collides
-  with the live server's own `/one/*` paths, and nothing guards against it.
-- A live session loses the screen it was on when the server restarts (the page reloads to
-  the start). Soft navigation should fix this; check.
 - Thin mode wasn't linked or run after the compact storage change.

@@ -219,7 +219,8 @@
   };
   // The screen is about to change under whatever has the focus.
   const leaveScreen = () => {
-    if (root.contains(document.activeElement)) document.activeElement.blur();
+    const active = document.activeElement;
+    if (root.contains(active) && !(active.getAttribute && active.getAttribute('data-one-field'))) active.blur();
     visible.clear();
     held = null;
   };
@@ -239,8 +240,20 @@
   const patched = (message) => {
     let moved = false;
     for (const move of message.nav || []) if (follow(move)) moved = true;
+    // A move that changes nothing on the screen (only the URL catches up) disturbs nothing.
+    if (message.kept) moved = false;
     if (moved) leaveScreen();
+    const carried = moved && document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-one-field');
+    const typing = carried ? document.activeElement.value : '';
     apply(message);
+    // The same field on this route: it keeps the focus, and what's still on its way to the session.
+    if (carried) {
+      const field = root.querySelector(`[data-one-field="${CSS.escape(carried)}"]`);
+      if (field) {
+        if ((message.c || typedSeen) !== typed) field.value = typing;
+        field.focus();
+      }
+    }
     if (message.ack) answered = message.ack;
     if (message.at && answered === asked && noHash(message.at) !== noHash(here())) history.replaceState(entry, '', urlOf(message.at));
     shown = here();
@@ -496,8 +509,19 @@
   document.cookie = `one_resume=; path=${basePath}; max-age=0; samesite=lax`;
   // A reload resumes this tab's session: the next page request carries it.
   // beforeunload runs before the browser requests the next page; pagehide
-  // covers navigations that skip it.
-  const resume = () => { document.cookie = `one_resume=${boot.s}; path=${basePath}; max-age=15; samesite=lax`; };
+  // covers navigations that skip it. A link followed from the page goes to another
+  // page, which starts its own session, so the session isn't offered. The mark is short: the browser
+  // asks for the page right after the click, and a link that turns out to be a download stays here.
+  let followed = 0;
+  const resume = () => { if (!followed) document.cookie = `one_resume=${boot.s}; path=${basePath}; max-age=15; samesite=lax`; };
+  document.addEventListener('click', (e) => {
+    const link = !e.defaultPrevented && e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && e.target.closest && e.target.closest('a[href]');
+    if (!link || link.hasAttribute('download') || (link.target && link.target !== '_self')) return;
+    const to = new URL(link.href);
+    if (to.pathname === location.pathname && to.search === location.search && to.hash) return;
+    clearTimeout(followed);
+    followed = setTimeout(() => { followed = 0; }, 1000);
+  });
   if (!boot.wasm) {
     addEventListener('beforeunload', () => { leaving = true; resume(); });
     addEventListener('pagehide', resume);

@@ -9,6 +9,13 @@ fun tree(var ui: Ui, rows: array<string>, extra: bool): Node {
     column(style(), items)
 }
 
+fun landingScreen(title: string, field: string, kept: string): OneEventMap {
+    var u = oneUi("t", theme())
+    val named = input("", "Código", u.change { v -> }, style())
+    val other = input("", field, u.change { v -> }, style())
+    oneEventMap(column(style(), [text(title, style()), other, if (kept != "") named.sameField(kept) else named, button(u, "Guardar", "primary", u.press { }, style())]))
+}
+
 fun main: int {
     var a = oneUi("t", theme())
     val before = oneEventMap(tree(a, ["geral", "design"], false))
@@ -45,5 +52,20 @@ fun main: int {
     val otherField = oneEventMap(input("a", "NIF", j.change { v -> }, style()))
     expectEqual(typedMore.translate(typed, oneChangeBase + 1), oneChangeBase + 1, "a field keeps its events as its value changes")
     expectEqual(otherField.translate(typed, oneChangeBase + 1), 0, "another field at the same place")
+    // Across a move to another route.
+    val before2 = landingScreen("Fatura 1", "Nome", "code")
+    val elsewhere = landingScreen("Fatura 2", "Nome", "code")
+    val unnamed = landingScreen("Fatura 2", "Nome", "")
+    val alike = landingScreen("Fatura 1", "Nome", "code")
+    val changes = oneChangeBase + 1
+    val press = 1
+    expectEqual(oneEventLanding([before2, elsewhere], 1, changes, false), changes, "within a route, as ever")
+    expectEqual(oneEventLanding([before2, elsewhere], 1, changes + 1, true), 0, "a field that only looks the same, on another screen")
+    expectEqual(oneEventLanding([before2, elsewhere], 1, press, true), 0, "a press on another screen")
+    expectEqual(oneEventLanding([before2, elsewhere], 1, changes, true), changes, "the field the app says is the same")
+    expectEqual(oneEventLanding([before2, unnamed], 1, changes, true), 0, "not if the new route doesn't")
+    expectEqual(oneEventLanding([before2, alike], 1, press, true), press, "a move with nothing changed on the screen")
+    expectEqual(oneEventLanding([before2, alike], 5, press, false), 0, "too old")
+    expectEqual(oneEventLanding([before2, alike], -1, press, false), 0, "from the future")
     testsPassed()
 }

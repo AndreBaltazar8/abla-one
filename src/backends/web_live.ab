@@ -407,11 +407,11 @@ fun oneLiveFontName(name: string): bool = name == "Inter-400.ttf" || name == "In
 
 // A live page. Each tab has its own session: a reload resumes the session
 // its tab just left (the host sets a short-lived `one_resume` cookie when the
-// page hides), and any other request starts a new session seeded from the
-// request. The page is rendered with the session's current state, at the route
-// the request names: a new session starts there, and one resumed at another route
-// (a typed URL, a link followed from the page) moves there. Resuming asks
-// `storage.resumes` first.
+// page hides, unless a link was followed from it), and any other request starts a
+// new session seeded from the request. The page is rendered with the session's
+// current state, at the route the request names: a new session starts there, and
+// one resumed at another route (a URL typed in the same tab) moves there. Resuming
+// asks `storage.resumes` first.
 fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val route = oneLiveRoute(request)
     var index = resumable(request, oneLiveCookie(request, "one_resume"))
@@ -445,6 +445,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     // canvas takes over); a canvas session switches after.
     sessions[index].canvas = false
     val markup = sessions[index].render(theme, options.iconBase)
+    sessions[index].shown = sessions[index].maps[sessions[index].maps.size - 1].screen
     sessions[index].canvas = canvas
     // A redirect while settling: the page starts at where the app went.
     sessions[index].queue.takeMoves()

@@ -125,6 +125,7 @@
   };
 
   // --- input --------------------------------------------------------------------
+  let followed = false;
   const hitAt = (px, py, kinds) => {
     if (!frame) return null;
     for (let i = frame.hits.length - 1; i >= 0; i--) {
@@ -178,7 +179,7 @@
     if (moved) return;
     const hit = hitAt(e.clientX, e.clientY, ['press', 'input', 'link']);
     if (!hit) { if (editor) editor.blur(); return; }
-    if (hit[0] === 'link') { if (!hit[8].startsWith('#')) location.href = new URL(hit[8], base).href; return; }
+    if (hit[0] === 'link') { if (!hit[8].startsWith('#')) { followed = true; setTimeout(() => { followed = false; }, 1000); location.href = new URL(hit[8], base).href; } return; }
     if (hit[0] === 'input') openEditor(hit);
     else if (hit[5]) event(hit[5], '');
   });
@@ -257,7 +258,8 @@
       setTimeout(connect, Math.min(1000 * 2 ** retry++, 10000));
     };
   };
-  const resume = () => { document.cookie = `one_resume=${boot.s}; path=${basePath}; max-age=15; samesite=lax`; };
+  // A link followed from the page starts its own session there (host.js).
+  const resume = () => { if (!followed) document.cookie = `one_resume=${boot.s}; path=${basePath}; max-age=15; samesite=lax`; };
   document.cookie = `one_resume=; path=${basePath}; max-age=0; samesite=lax`;
   addEventListener('beforeunload', resume);
   addEventListener('pagehide', resume);

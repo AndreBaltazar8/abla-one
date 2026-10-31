@@ -177,7 +177,10 @@ fun oneDispatch(var app: OneApp, target: string, theme: Theme, event: int, value
 // list rows keep their place when other rows come and go. The control there must
 // still say what it said (`says`) and be enabled: a press was made for what the person
 // read, so on another control or another amount it's dropped.
-class OneEventMap(val byId: Map<int, string>, val byPlace: Map<string, int>, val says: Map<string, string>) {
+//
+// Across a move to another route an id is translated only when nothing the person reads changed
+// (`screen`), or for a field the app says is the same field on both (`Node.sameField`).
+class OneEventMap(val byId: Map<int, string>, val byPlace: Map<string, int>, val says: Map<string, string>, val fieldIds: Map<string, int>, val fieldOf: Map<int, string>, var screen: int) {
     fun translate(older: OneEventMap, id: int): int {
         val place = older.byId.get(id)
         if (place == null) return 0
@@ -194,9 +197,54 @@ class OneEventMap(val byId: Map<int, string>, val byPlace: Map<string, int>, val
 }
 
 fun oneEventMap(root: Node): OneEventMap {
-    var map = OneEventMap(Map(), Map(), Map())
+    var map = OneEventMap(Map(), Map(), Map(), Map(), Map(), 0)
     oneCollectEvents(root, "r", map)
+    map.screen = oneEventScreen(root, 7)
     map
+}
+
+// The id in the newest of `maps` for an event made `age` renders ago, or 0 for nowhere. `moved`: a
+// move to another route happened since.
+fun oneEventLanding(maps: array<OneEventMap>, age: int, id: int, moved: bool): int {
+    if (age < 0 || age >= maps.size) return 0
+    val current = maps[maps.size - 1]
+    val older = maps[maps.size - 1 - age]
+    if (moved && older.screen != current.screen) {
+        val field = older.fieldOf.get(id)
+        return if (field != null) current.fieldIds.get(field) ?? 0 else 0
+    }
+    if (age == 0) return if (current.byId.has(id)) id else 0
+    current.translate(older, id)
+}
+
+// Keeps the last `most`, oldest out first.
+fun oneEventMapsBound(var maps: array<OneEventMap>, most: int): void {
+    if (maps.size <= most) return
+    val kept: array<OneEventMap> = []
+    var i = maps.size - most
+    while (i < maps.size) {
+        kept.append(maps[i])
+        i = i + 1
+    }
+    maps.clear()
+    for (item in kept) maps.append(item)
+    return
+}
+
+fun oneEventMix(hash: int, text: string): int {
+    var h = (hash ^ text.size) * 1099511628211
+    for (b in text) h = (h ^ b) * 1099511628211
+    h
+}
+
+// What a screen says, as `oneEventSays` for a control: a field's value doesn't count.
+fun oneEventScreen(node: Node, hash: int): int {
+    var h = oneEventMix(oneEventMix(hash, node.kind), node.key)
+    for (name in ["text", "label", "name", "placeholder", "runs", "src", "cells"]) {
+        if (node.has(name)) h = oneEventMix(h, node.attr(name))
+    }
+    for (child in node.children) h = oneEventScreen(child, h)
+    h
 }
 
 // What a control shows: its kind and the text and icons in it, not a field's value.
@@ -208,13 +256,17 @@ fun oneEventSays(node: Node): string {
 
 fun oneCollectEvents(node: Node, place: string, var map: OneEventMap): void {
     for (item in node.attrs) {
-        if (item.name == "onPress" || item.name == "onChange" || item.name == "onSubmit" || item.name == "onVisible") {
+        if (item.name == "onPress" || item.name == "onChange" || item.name == "onSubmit" || item.name == "onVisible" || item.name == "onDismiss") {
             val id = oneParseInt(item.value, 0)
             if (id > 0 && node.attr("enabled") != "false") {
                 map.byId.set(id, "$place#${item.name}")
                 map.byPlace.set("$place#${item.name}", id)
                 // What's read on a feed changes all the time, and reporting what's in view commits to nothing.
                 map.says.set("$place#${item.name}", if (item.name == "onVisible") "" else oneEventSays(node))
+                if (item.name == "onChange" && node.has("sameField")) {
+                    map.fieldIds.set(node.attr("sameField"), id)
+                    map.fieldOf.set(id, node.attr("sameField"))
+                }
             }
         }
     }

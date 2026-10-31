@@ -320,7 +320,9 @@ class OneLiveSession(
     // The last change event the session handled, answered with the next patch.
     var changeAnswer: int,
     // A press has run since the last render.
-    var pressed: bool
+    var pressed: bool,
+    // What the screen on the page says (OneEventMap.screen).
+    var shown: int
 ) {
     // The tree of the current state, with its event map: a new revision.
     fun tree(theme: Theme): Node {
@@ -339,16 +341,7 @@ class OneLiveSession(
             maps.append(map)
         }
         fence.rendered(queue.routes, revision)
-        if (maps.size > 8) {
-            val kept: array<OneEventMap> = []
-            var i = maps.size - 8
-            while (i < maps.size) {
-                kept.append(maps[i])
-                i = i + 1
-            }
-            maps.clear()
-            for (item in kept) maps.append(item)
-        }
+        oneEventMapsBound(maps, 8)
         root
     }
     // Renders the current state; returns the markup and records the event map.
@@ -374,16 +367,14 @@ class OneLiveSession(
     // An event from the page; `eventRevision` is the revision it was shown at.
     fun event(theme: Theme, eventRevision: int, eventId: int, value: string): void {
         oneMemoScope = id
-        if (fence.stale(queue.routes, eventRevision)) return
         // Ids are positions in a render, and several events can arrive before the next one. After a
         // press the screen may be another, and a press needs the screen as it is now. Typing doesn't
-        // move a field, and each key would cost a render.
+        // move a field, and each key would cost a render, unless the route has moved.
         val change = eventId > oneChangeBase
-        if (pressed || (changed && !change)) tree(theme)
-        val age = revision - eventRevision
-        var target = 0
-        if (age == 0 && maps[maps.size - 1].byId.has(eventId)) target = eventId
-        else if (age > 0 && age < maps.size) target = maps[maps.size - 1].translate(maps[maps.size - 1 - age], eventId)
+        val moving = queue.routes.epoch != fence.epoch
+        if (moving) deliverRoutes()
+        if (moving || pressed || (changed && !change)) tree(theme)
+        val target = oneEventLanding(maps, revision - eventRevision, eventId, eventRevision < fence.from)
         if (target > 0) {
             oneDispatch(app, if (canvas) "web-canvas" else "web-document", theme, target, value, width)
             changed = true
@@ -453,6 +444,9 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
     val typed = session.changeAnswer
     session.changeAnswer = 0
     if (same && moves.size == 0 && answer == 0 && typed == 0) return ""
+    val screen = session.maps[session.maps.size - 1].screen
+    val kept = moves.size > 0 && screen == session.shown
+    session.shown = screen
     val css = session.css.since(session.cssSent)
     session.cssSent = session.css.rules.size
     session.htmlSent = markup
@@ -470,6 +464,10 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
         keys.append("at")
         values.append(jsonString(session.queue.routes.current()))
     }
+    if (kept) {
+        keys.append("kept")
+        values.append(jsonBoolean(true))
+    }
     if (typed > 0) {
         keys.append("c")
         values.append(jsonInteger(typed))
@@ -479,5 +477,5 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
 }
 
 fun oneSession(id: string, app: OneApp, queue: OneLiveQueue): OneLiveSession {
-    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), 0, oneRouteScrolls(), false, 0, false)
+    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), 0, oneRouteScrolls(), false, 0, false, 0)
 }

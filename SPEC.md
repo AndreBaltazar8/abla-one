@@ -472,9 +472,15 @@ if (kind == "route") {
 - **Entries and scroll.** A new entry opens at the top with focus and any keyboard
   gone, and going back finds it as it was left. A query change by `replace` stays in its
   entry, so a search field can write its text to the URL as someone types.
-- **A press that races a move** doesn't land on the new screen: an event from a render of
+- **An event that races a move** doesn't land on the new screen: an event from a render of
   an earlier page (a different path) is dropped (`OneRouteFence`). Within a page, events are
-  translated as usual (§4), including across query changes.
+  translated as usual (§4), including across query changes. Two exceptions can't reach the wrong
+  control. If the new route's screen says exactly what the old one did (`OneEventMap.screen`: every
+  kind, key, text, label; field values don't count), only the URL moved: events land as usual, and on
+  the web that move leaves focus and scroll alone (`kept` in the patch). And typing lands on a field
+  the app names as the same on both routes, `input(...).sameField("name")`, which on the web
+  also keeps its focus and what was still on its way. Typing in any other field is dropped, and the field
+  on the new screen shows that.
 
 | Target | History | Back | Scroll |
 |---|---|---|---|
@@ -487,7 +493,9 @@ if (kind == "route") {
 `oneLivePaths(["/", "/people", "/form/:n", "/docs/*"])`. A GET of a claimed path renders
 that route for first paint: a new session starts there, and a resumed one (a reload) moves
 there if it's elsewhere. Anything else still goes to the handler, and `/one/*` is the
-server's whatever a predicate says. A session doesn't outlive its credentials: a page load or
+server's whatever a predicate says. A reload continues the tab's session; a link followed from the page (a plain click on an `<a>`
+that isn't a route or a fragment) starts a new one at its target, as does opening a new tab. A URL typed
+in the tab counts as a reload and moves the session there. A session doesn't outlive its credentials: a page load or
 a new socket that would continue one first asks `OneLiveStorage.resumes` with the request and
 the session's stored values; refused, the session ends and the page starts a new one from the
 request. Pages carry `<base href>` pointing at the app's
@@ -508,8 +516,9 @@ the `/` route until the link arrives, about half a second later, and back then g
 **Protocol.** Page to session: `{t:"event", r, id, v}`, with `c`, a running number, for typing;
 `{t:"route", p, e, n}` when the browser moves, and `e` in `hello`. Session to page, with the next patch or frame (sent even when the markup is the
 same): `nav: [{p, x, e}]`, the moves; `ack: n`, the last route message handled; `at`, the
-route it's at; `c`, the last typing handled. `{t:"back", to}` and `{t:"forward"}` ask the browser. The session decides what
-is a new entry (`e`). Thin devices send `r`, the revision they showed, with an event.
+route it's at; `kept`, those moves left the screen as it was; `c`, the last typing handled. `{t:"back", to}` and `{t:"forward"}` ask the browser. The session decides what
+is a new entry (`e`). Thin devices send `r`, the revision they showed, with an event, which lands
+as on the web (§4).
 
 ### Test and preview implementations
 

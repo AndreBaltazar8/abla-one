@@ -11,6 +11,8 @@ import "web_live.ab"
 //   POST /one/thin/event?id=<event>&value=<text>&r=<revision the device showed>
 //                                           → 200 the tree after it, and `value` for an input
 //
+// An event from an older tree lands as on the web (SPEC §4): by its place, on what it said.
+//
 // The app's services are a session queue ("thin"): timers run on each request, and
 // its requests go to `handler` (relative URLs, in process).
 
@@ -23,7 +25,10 @@ class OneThinHost(
     var revision: int,
     var seen: int,
     var tree: string,
-    val fence: OneRouteFence = oneRouteFence()
+    val fence: OneRouteFence = oneRouteFence(),
+    // One per revision, as a web session keeps them: an event older than the tree on the server
+    // lands by place (SPEC §4).
+    val maps: array<OneEventMap> = []
 )
 
 fun oneThinHost(app: OneApp, theme: Theme, target: string, width: int, handler: (HttpRequest) -> HttpResponse): OneThinHost {
@@ -50,11 +55,14 @@ fun OneThinHost.refresh(): void {
     if (seen == oneRevision() && tree != "") return
     seen = oneRevision()
     var ui = oneUiSized(target, theme, width)
-    val text = oneTreeJson(oneRouteStamp(app.render(ui), oneLiveQueueList[index].routes), revision + 1)
+    val root = app.render(ui)
+    val text = oneTreeJson(oneRouteStamp(root, oneLiveQueueList[index].routes), revision + 1)
     // The same tree keeps its revision: the device has nothing to do.
     if (text.size != tree.size || oneThinBody(text) != oneThinBody(tree)) {
         revision = revision + 1
         tree = text
+        maps.append(oneEventMap(root))
+        oneEventMapsBound(maps, 8)
     }
     fence.rendered(oneLiveQueueList[index].routes, revision)
     return
@@ -78,10 +86,11 @@ fun OneThinHost.handle(request: HttpRequest): HttpResponse? {
         return oneThinAnswer(if (oneParseInt(request.queryParameter("have"), -1) == revision) "" else tree)
     }
     if (request.path == "/one/thin/event" && request.method == "POST") {
-        // Made for a route the app has left: the id means something else here.
-        val shown = oneParseInt(request.queryParameter("r"), -1)
-        if (shown < 0 || !fence.stale(oneLiveQueueList[oneLiveQueueIndex("thin")].routes, shown))
-            oneDispatch(app, target, theme, oneParseInt(request.queryParameter("id"), 0), request.queryParameter("value"), width)
+        refresh()
+        // Without `r`, made for the tree of now.
+        val shown = oneParseInt(request.queryParameter("r"), revision)
+        val event = oneEventLanding(maps, revision - shown, oneParseInt(request.queryParameter("id"), 0), shown < fence.from)
+        if (event > 0) oneDispatch(app, target, theme, event, request.queryParameter("value"), width)
         // A handler can change what state can't see (plain fields).
         oneInvalidate()
         refresh()

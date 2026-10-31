@@ -32,6 +32,9 @@ class Node(val kind: string, val key: string, val style: Style, val attrs: array
     fun styled(extra: Style): Node = Node(kind, key, style.with(extra), attrs, children)
     // Resolves this node and its subtree with a theme scope (`$theme` scope blocks).
     fun themed(scope: string): Node = set("theme", scope)
+    // This field is the same field on every route that shows it under this name: typing raced with
+    // a move between them still reaches it, and on the web it keeps the focus (SPEC §9).
+    fun sameField(name: string): Node = set("sameField", name)
 }
 
 fun oneNode(kind: string, value: Style, children: array<Node>): Node = Node(kind, "", value, [], children)

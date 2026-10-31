@@ -23,7 +23,7 @@ fun main: int {
     var server = oneLiveServer(
         Ipv4SocketAddress("127.0.0.1", 8950),
         { request -> router.dispatch(request) },
-        oneLivePaths(["/", "/people", "/form/:n", "/moment"]),
+        oneLivePaths(["/", "/people", "/form/:n", "/moment", "/field/:n", "/same/:n"]),
         galleryApp,
         oneDefaultTheme(),
         OneLiveOptions("Abla One", "pt-PT", "#ffffff", "/icons", "src/backends/web/host.js", ""),

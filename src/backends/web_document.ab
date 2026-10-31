@@ -276,7 +276,7 @@ fun oneWebBitmap(node: Node, common: string): string {
 
 fun oneWebInput(node: Node, common: string): string {
     val type = if (node.attr("secure") == "true") "password" else if (node.attr("keyboard") == "email") "email" else if (node.attr("keyboard") == "number") "text\" inputmode=\"numeric" else if (node.attr("keyboard") == "decimal") "text\" inputmode=\"decimal" else "text"
-    val events = "data-one-change=\"${node.attr("onChange")}\"${if (node.attr("onSubmit") != "") " data-one-submit=\"${node.attr("onSubmit")}\"" else ""}"
+    val events = "data-one-change=\"${node.attr("onChange")}\"${if (node.attr("onSubmit") != "") " data-one-submit=\"${node.attr("onSubmit")}\"" else ""}${if (node.attr("sameField") != "") " data-one-field=\"${oneHtmlEscape(node.attr("sameField"))}\"" else ""}"
     val placeholder = oneHtmlEscape(node.attr("placeholder"))
     if (node.attr("multiline") == "true")
         "<textarea $common $events rows=\"1\" placeholder=\"$placeholder\" aria-label=\"$placeholder\">${oneHtmlEscape(node.attr("value"))}</textarea>"

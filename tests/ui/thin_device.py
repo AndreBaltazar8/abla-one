@@ -60,6 +60,19 @@ try:
     check("a press from the previous route is dropped", json.loads(body)["revision"] == people["revision"])
     _, body = call(f"/event?id={find(people['root'], 'Componentes')}&r={people['revision']}", "POST")
     check("and did nothing on the way", find(json.loads(body)["root"], "Adicionar (1)") > 0)
+    # An event older than the tree, within a route, lands by its place and on what it said.
+    _, body = call("/tree?have=-1")
+    home = json.loads(body)
+    shown = home["revision"]
+    add = find(home["root"], "Adicionar (")
+    minus = find(home["root"], "Secundário")
+    _, body = call(f"/event?id={add}&r={shown}", "POST")
+    added = json.loads(body)
+    check("an event changes the view", added["revision"] > shown)
+    _, body = call(f"/event?id={add}&r={shown}", "POST")
+    check("a second press on what no longer says the same is dropped", json.loads(body)["revision"] == added["revision"])
+    _, body = call(f"/event?id={minus}&r={shown}", "POST")
+    check("an older event on a control that says the same runs", json.loads(body)["revision"] > added["revision"])
 finally:
     server.terminate()
 print("PASS tests/ui/thin_device.py" if failures == 0 else f"{failures} failed")

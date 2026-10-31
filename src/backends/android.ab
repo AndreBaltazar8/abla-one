@@ -27,7 +27,7 @@ val onePlatformEvent = 2147483647
 // events are delivered by a dispatch render (see Ui). An event from one of the
 // last few trees is translated to the current tree's id at the same place
 // (oneEventMap); older ones are dropped, and so is one from before a move to another
-// route, whatever its age. Platform completions always reach `receive`. The system's
+// route, whatever its age, unless it can only mean the same thing there (oneEventLanding). Platform completions always reach `receive`. The system's
 // back button walks the route stack, and leaves the app at its first entry. A link
 // that opens the app reaches it as "openUrl" with the whole URL, then as a route.
 // `background` paints behind the system bars.
@@ -47,16 +47,7 @@ fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
         mobilePublishTree(mobileEncodeStyledTree(revision, "", false, oneAndroidNode(oneRouteStamp(root, oneAppRoutes), theme, "root"), false, background))
         recent.append(oneEventMap(root))
         // Keys typed fast all carry the revision the host had: a short window lost the ninth.
-        if (recent.size > 64) {
-            val kept: array<OneEventMap> = []
-            var i = recent.size - 64
-            while (i < recent.size) {
-                kept.append(recent[i])
-                i = i + 1
-            }
-            recent.clear()
-            for (item in kept) recent.append(item)
-        }
+        oneEventMapsBound(recent, 64)
         mobileRuntimeSafepoint()
         val event = mobileWaitEvent()
         val eventRevision = mobileEventRevision()
@@ -70,12 +61,11 @@ fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
                 app.receive(kind, payload)
                 if (kind == "openUrl") oneAppRoutes.navigate(oneRouteFromUrl(jsonParse(payload).value.getString("url")), false)
             }
-        } else if (event > 0 && !fence.stale(oneAppRoutes, eventRevision)) {
+        } else if (event > 0) {
             val age = revision - eventRevision
             if (age == 0) oneDispatch(app, "android", theme, event, payload)
-            else if (age > 0 && age < recent.size) {
-                val current = recent[recent.size - 1]
-                val translated = current.translate(recent[recent.size - 1 - age], event)
+            else {
+                val translated = oneEventLanding(recent, age, event, eventRevision < fence.from)
                 if (translated > 0) oneDispatch(app, "android", theme, translated, payload)
             }
         }
