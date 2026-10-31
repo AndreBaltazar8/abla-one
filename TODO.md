@@ -37,10 +37,7 @@
 
 ## ablac bugs seen (worked around, not fixed)
 
-- Fixed on ablac's `fixes` branch (708d7c90), not merged yet: `when` arms returning globals, an import
-  alias through `export import`, a named call through implicit `this`, a nominal `type X = int` as
-  an index, a clear error for reserved `generator`, a method named `transform` taking on compile
-  effects, and a method capturing a call its nominal parameter can't take (imuAxisOrder).
+- abla-embedded's `src/m5stack/imu_orientation.ab` calls `imuAxisOrder` through a private helper to avoid a compiler bug fixed in ablac a7e1675d: drop it once a release has the fix.
 - A named argument for a top-level function is lost before receiver names resolve: inside a method
   `f(a: int)`, `f(top = 5)` calls the method, though docs say a method must have that parameter.
 - `abla/tls/hosted` and `httpsClient` still set no socket timeouts and don't guard SIGPIPE: any user
