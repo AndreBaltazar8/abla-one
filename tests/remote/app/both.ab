@@ -1,0 +1,23 @@
+import "abla/http"
+import "abla/io"
+import "../server/shop.ab" as shop
+import "../../../src/core/services.ab"
+import "../../../src/server/remote.ab"
+import "../../../src/server/http.ab"
+import "../../../src/backends/web_session.ab"
+import "../../../src/backends/web_live.ab"
+import "both_client.ab"
+
+// A server that runs its client code too: the call goes through the route, in
+// process as the live server sends it, and the types are the server's own.
+fun main: int {
+    val router = httpRouter()
+    router.post("/one/:route", oneServerHandler)
+    var services = oneRecordedServices()
+    val remote = bothOrders(services, ".")
+    val payload = oneLiveExecute({ request -> router.dispatch(request) }, OneLiveRequest(remote.id, services.requests[0]))
+    println(bothSku(remote, payload))
+    println(shop.orders("open", 3).items[0].lines[0].sku)
+    println(shop.secret())
+    0
+}

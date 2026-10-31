@@ -13,6 +13,24 @@ import "remote.ab"
 //   compile fun lock(): void { oneServerLock("server.lock"); return }
 //   #compiler.transform(lock)
 
+// `line` without module prefixes: they hold a checkout's path, and the file is committed.
+compile fun oneLockPortable(line: string): string {
+    val prefix = "__abla_module_"
+    var out = ""
+    var i = 0
+    while (i < line.size) {
+        if (line.slice(i, line.size).startsWith(prefix)) {
+            i = i + prefix.size
+            while (!line.slice(i, line.size).startsWith("__")) i = i + 1
+            i = i + 2
+        } else {
+            out = "$out${line.slice(i, i + 1)}"
+            i = i + 1
+        }
+    }
+    out
+}
+
 compile fun oneLockRouteLine(function: int): string {
     var parameters = ""
     var index = 0
@@ -21,7 +39,7 @@ compile fun oneLockRouteLine(function: int): string {
         parameters = if (parameters == "") entry else "$parameters, $entry"
         index = index + 1
     }
-    "route ${oneRemoteRoute(compiler.functionName(function))}($parameters) -> ${oneRemoteNormal(compiler.resultType(function))}"
+    oneLockPortable("route ${oneRemoteRoute(compiler.functionName(function))}($parameters) -> ${oneRemoteNormal(compiler.resultType(function))}")
 }
 
 // `class Name a: T, b: U` for each class a type reaches, once.
@@ -45,7 +63,7 @@ compile fun oneLockClasses(type: string, var seen: array<string>, var lines: arr
         oneLockClasses(fieldType, seen, lines)
         index = index + 1
     }
-    lines.append("class $head$fields")
+    lines.append(oneLockPortable("class $head$fields"))
     return
 }
 

@@ -664,6 +664,12 @@ A client imports the same file as a contract, and calls through `$remote`:
   (`E_CONTRACT_CALL_NOT_CONSUMED`).
 - **Server build:** imports the module normally, and adds the generated handler:
   `router.post("/one/:route", oneServerHandler)`.
+- **A server that also runs a client** (the live web app): the same client source
+  builds. Client code keeps its `import contract` and `$remote`, and the program imports
+  the server module normally too; both sides share its classes. The call goes through
+  the services layer and the route as on any client, and same-origin requests on the live
+  server run in process, with no socket: one path to test, with the same authentication
+  and serialization, instead of a second, direct one that could behave differently.
 - **Any value:** parameters and results can be any plain data: numbers, strings,
   booleans, nullable values, arrays, maps and classes, nested and generic.
   Serializers are generated at compile time by walking the type, on both sides from

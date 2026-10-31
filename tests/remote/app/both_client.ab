@@ -1,0 +1,12 @@
+import contract "../server/shop.ab" as shop
+import "../../../src/core/services.ab"
+import "../../../src/server/remote.ab"
+
+// Client code: both.ab has it next to the server, both_client_main.ab on its own.
+fun bothOrders(var services: OneServices, base: string): OneRemote<shop.Page<shop.Order>> =
+    $remote(services, base, shop.orders("open", 3))
+
+fun bothSku(remote: OneRemote<shop.Page<shop.Order>>, payload: string): string {
+    val result = remote.result(oneResponse(payload))
+    if (result.ok()) result.value().items[0].lines[0].sku else "failed: ${result.message}"
+}

@@ -1,0 +1,4 @@
+import "../server/shop.ab" as shop
+import "both_unconsumed_client.ab"
+
+fun main: int = shop.orders("open", 3).items.size + bothUnconsumed()

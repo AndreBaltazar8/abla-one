@@ -1,0 +1,3 @@
+import contract "../server/shop.ab" as shop
+
+fun bothUnconsumed(): int = shop.orders("open", 3).items.size

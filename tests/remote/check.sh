@@ -16,6 +16,7 @@ copy
 build server.ab server > "$work/log" || { cat "$work/log"; exit 1; }
 lock="$work/p/tests/remote/app/server.lock"
 check "lock is written" "$(grep -c '^route orders' "$lock")" 1
+check "lock holds no checkout paths" "$(grep -c __abla_module "$lock")" 0
 "$work/server" & pid=$!
 sleep 1
 post() { curl -s -m 5 -o "$work/out" -w '%{http_code}' -X POST -d "$2" "http://127.0.0.1:8977/one/$1"; }
@@ -30,6 +31,15 @@ kill $pid; wait $pid 2>/dev/null; pid=0
 build client.ab client > "$work/log" || { cat "$work/log"; exit 1; }
 check "client runs" "$("$work/client")" 1
 check "no server code in the client" "$(grep -c SERVER_ONLY_MARKER "$work/client")" 0
+
+# A server that runs its client code too, from the same source as a client build.
+build both.ab both > "$work/log" || { cat "$work/log"; exit 1; }
+check "client code through the route" "$("$work/both" | tr '\n' ' ')" "a a SERVER_ONLY_MARKER "
+build both_client_main.ab both_client > "$work/log" || { cat "$work/log"; exit 1; }
+check "same client source runs alone" "$("$work/both_client")" 1
+check "and holds no server code" "$(grep -c SERVER_ONLY_MARKER "$work/both_client")" 0
+build both_unconsumed.ab both_unconsumed > "$work/log"; check "a contract call without \$remote fails" "$?" 1
+check "naming the error" "$(grep -c E_CONTRACT_CALL_NOT_CONSUMED "$work/log")" 1
 
 # The lock: adding passes, changing and removing fail, @retired is the way out.
 shop="$work/p/tests/remote/server/shop.ab"

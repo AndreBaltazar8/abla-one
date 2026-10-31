@@ -1,0 +1,9 @@
+import "abla/io"
+import "../../../src/core/services.ab"
+import "both_client.ab"
+
+fun main: int {
+    var services: OneServices = oneRecordedServices()
+    println("${bothOrders(services, "https://x.test").id}")
+    0
+}
