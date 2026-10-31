@@ -26,14 +26,7 @@
 ## ablac bugs seen (worked around, not fixed)
 
 - abla-embedded's `src/m5stack/imu_orientation.ab` calls `imuAxisOrder` through a private helper to avoid a compiler bug fixed in ablac a7e1675d: drop it once a release has the fix.
-- A named argument for a top-level function is lost before receiver names resolve: inside a method
-  `f(a: int)`, `f(top = 5)` calls the method, though docs say a method must have that parameter.
-- `abla/tls/hosted` and `httpsClient` still set no socket timeouts and don't guard SIGPIPE: any user
-  but abla-s3 (which now avoids them) can die on a reset peer or hang on a silent one.
-- `test-codegen-cache` can hit the same thread limit under load; it passes alone.
 - A `when` over an f32 gives `when.match` for literal cases (documented).
-- `test-codegen-units` can hit "Resource temporarily unavailable" under load; passes alone.
-- ablac `make test` on `fixes`: 240 of 241 pass; only test-math-v8 fails (needs Node 22.14).
 
 ## Abla One bugs seen
 
