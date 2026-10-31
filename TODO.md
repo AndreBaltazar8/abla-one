@@ -22,7 +22,7 @@
 
 ## Toolchain
 
-- [ ] `tools/check-native-buffer-host` in abla-embedded gets past `Oz` now, but its third
-      fixture, `atom-s3-native-init`, segfaults on a stack address truncated to 32 bits
-      (also with the earlier compiler). It likely belongs on `tests/native-low-stack.c`'s
-      runner list; the fixtures after it haven't run.
+- [ ] `tools/check-native-buffer-host` in abla-embedded gets through 18 of its 1205
+      fixtures, then stops on an undefined `abla_platform_panic` in
+      `p4-i2c-provider-jobs-native` (from the compiler's indirect-call checks). It had
+      not run this far for a while, so more fixtures may fail after it.
