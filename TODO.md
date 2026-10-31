@@ -22,10 +22,7 @@
 
 ## Toolchain
 
-- [ ] Better `f32` support in ablac: conversions, literals, math.
-- [ ] Fix `tools/optimize-embedded-size` in abla-embedded (LLVM rejects `Oz`), which
-      stops `tools/check-native-buffer-host` early.
-- [ ] Add an ablac regression test for the Wasm runtime's reclaim thresholds under a
-      memory limit (only covered by soak runs on the device so far).
-- [ ] Decide on export global roots: a reference global with a constant initializer
-      isn't rooted in a program entered only through exports.
+- [ ] `tools/check-native-buffer-host` in abla-embedded gets past `Oz` now, but its third
+      fixture, `atom-s3-native-init`, segfaults on a stack address truncated to 32 bits
+      (also with the earlier compiler). It likely belongs on `tests/native-low-stack.c`'s
+      runner list; the fixtures after it haven't run.
