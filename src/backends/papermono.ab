@@ -68,6 +68,10 @@ trusted fun onePaperMonoClear(): void {
     return
 }
 
+// Set before running: a tapped control shows its own pressed style (`pressed:background`)
+// first. Off by default: the extra refresh delays what the tap does by about 0.3 s.
+var onePaperMonoPressLook = false
+
 // Runs `app` until the device powers off.
 fun onePaperMonoRun(var app: OneApp, theme: Theme, icons: OneIconSource): void {
     onePaperMonoLoop(app, theme, icons, { "" })
@@ -101,10 +105,14 @@ fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var po
             started = onePaperMonoMilliseconds()
             val x = paperMonoGestureAtX()
             val y = paperMonoGestureAtY()
+            if (onePaperMonoPressLook && gesture == paperMonoGestureTap && oneEpaperPress(state, x, y)) {
+                onePaperMonoShow(session, oneEpaperRender(app, theme, state, icons))
+                oneEpaperRelease(state)
+            }
             val acted = if (gesture == paperMonoGestureTap) oneEpaperTouch(app, theme, state, x, y)
                 else oneEpaperScroll(state, x, y, paperMonoGestureTravel())
             // Nothing under the finger, or nothing left to scroll: nothing to draw.
-            if (acted) {
+            if (acted || state.scrolled) {
                 val update = oneEpaperRender(app, theme, state, icons)
                 println("papermono: ${if (gesture == paperMonoGestureTap) "tap" else "swipe"} at $x,$y, ${update.rects.size} rectangles, mode ${update.mode}, ${onePaperMonoMilliseconds() - started} ms")
                 onePaperMonoShow(session, update)

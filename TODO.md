@@ -19,11 +19,6 @@
       also speed up swipes (0.5 s of processing).
 - [ ] Check grey fills on the real panel, especially after several fast refreshes:
       keep them, use a lighter shade, or go back to outlines.
-- [ ] Offer a pressed look from a button's own pressed style (not an invert).
-
-## Design
-
-The design is in SPEC section 16; these build it.
 
 ## Toolchain
 

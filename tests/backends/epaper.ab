@@ -182,6 +182,7 @@ fun main: int {
     oneEpaperRender(shown, t, shownState, fileIcons())
     Path("build/ui/epaper-gallery-people.png").writeText(oneEpaperPreview(shownState))
     oneEpaperKeyboardTest()
+    oneEpaperPressTest()
     testsPassed()
 }
 
@@ -240,5 +241,32 @@ fun oneEpaperKeyboardTest(): void {
     keyTap(app, t, state, "OK")
     expectEqual(state.typingEvent, 0, "closed")
     expect(state.frame.hits.size == 1, "keys gone")
+    return
+}
+
+class Pressy(var n: int by State(0)) : OneApp {
+    fun render(var ui: Ui): Node = column(style().fill(), [
+        pressable(ui.press { n = n + 1 }, style().height(60).background("#ffffff").pressed(style().background("#000000")), [text("A", style())]),
+        pressable(ui.press { n = n + 10 }, style().height(60), [text("B", style())])
+    ])
+    fun receive(kind: string, value: string): void {
+        return
+    }
+}
+
+fun oneEpaperPressTest(): void {
+    val t = theme()
+    var app = Pressy()
+    var state = oneEpaperState(onePaperMonoOptions())
+    val icons = OneIconSource({ name -> "" })
+    oneEpaperRender(app, t, state, icons)
+    expect(!oneEpaperPress(state, 100, 100), "no pressed style: no look")
+    expect(oneEpaperPress(state, 100, 20), "its own pressed style")
+    val down = oneEpaperRender(app, t, state, icons)
+    expect(down.rects.size > 0, "the look is drawn")
+    expectEqual(oneEpaperPlaneLevel(state.planes, oneEpaperPhysicalX(100, 10), oneEpaperPhysicalY(100, 10, 480)), 0, "in its colour")
+    oneEpaperRelease(state)
+    expect(oneEpaperRender(app, t, state, icons).rects.size > 0, "released")
+    expectEqual(oneEpaperPlaneLevel(state.planes, oneEpaperPhysicalX(100, 10), oneEpaperPhysicalY(100, 10, 480)), 3, "back to white")
     return
 }

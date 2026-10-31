@@ -80,7 +80,9 @@ class OneEpaperState(
     // event, 0 when closed), that input's text, and its layer.
     var typingEvent: int = 0,
     var typed: string = "",
-    var keyLayer: int = 0
+    var keyLayer: int = 0,
+    // What shows its pressed style in the next render (a hit's key), "" for nothing.
+    var pressed: string = ""
 )
 
 fun oneEpaperBandSurface(options: OneEpaperOptions): OneSurface {
@@ -246,6 +248,7 @@ fun oneEpaperDraw(var state: OneEpaperState, icons: OneIconSource): OneEpaperUpd
     state.scrolled = false
     state.boxRevision = oneRevision()
     val frame = onePaintFrame(state.boxes[0], lw, lh)
+    if (state.pressed != "") oneEpaperShowPressed(state, frame)
     state.frame = frame
     val owners: array<string> = []
     val scaled = oneEpaperScaleFrame(frame, o.scale, o.width, o.height, o.minStroke, o.crisp, owners)
@@ -610,6 +613,81 @@ fun oneEpaperPlaneLevel(planes: array<int>, px: int, py: int): int {
 }
 
 fun oneEpaperBit(position: int): int = if (position == 0) 128 else if (position == 1) 64 else if (position == 2) 32 else if (position == 3) 16 else if (position == 4) 8 else if (position == 5) 4 else if (position == 6) 2 else 1
+
+// Marks what is pressable at a portrait panel pixel to show its own pressed style (its
+// `pressed:background`), for a device that wants a look before the app reacts. Whether
+// there is one, so a render and a refresh are worth it. The next render without
+// oneEpaperRelease keeps it.
+fun oneEpaperPress(var state: OneEpaperState, x: int, y: int): bool {
+    val lx = x * 100 / state.options.scale
+    val ly = y * 100 / state.options.scale
+    var i = state.frame.hits.size - 1
+    while (i >= 0) {
+        val h = state.frame.hits[i]
+        if (h.kind == "press" && lx >= h.x && lx < h.x + h.w && ly >= h.y && ly < h.y + h.h) {
+            if (state.boxes.size == 0 || oneEpaperPressedColor(state.boxes[0], "r", h.key) == "") return false
+            state.pressed = h.key
+            state.scrolled = true
+            return true
+        }
+        i = i - 1
+    }
+    false
+}
+
+fun oneEpaperRelease(var state: OneEpaperState): void {
+    state.pressed = ""
+    state.scrolled = true
+    return
+}
+
+fun oneEpaperPressedColor(box: OneBox, path: string, key: string): string {
+    if (path == key) return box.r.get("pressed:background")
+    var index = 0
+    for (child in box.children) {
+        val found = oneEpaperPressedColor(child, oneChildPath(path, child.node, index), key)
+        if (found != "") return found
+        index = index + 1
+    }
+    ""
+}
+
+// The pressed look: a fill behind what the pressed box draws.
+fun oneEpaperShowPressed(state: OneEpaperState, var frame: OneFrame): void {
+    val color = oneEpaperPressedColor(state.boxes[0], "r", state.pressed)
+    if (color == "") return
+    for (h in frame.hits) {
+        if (h.kind == "press" && h.key == state.pressed) {
+            var i = 0
+            while (i < frame.paints.size) {
+                val p = frame.paints[i]
+                if (p.op == "rect" && p.x == h.x && p.y == h.y && p.w == h.w && p.h == h.h) {
+                    frame.paints[i] = oneRect("rect", p.x, p.y, p.w, p.h, p.radius, color)
+                    return
+                }
+                i = i + 1
+            }
+            // No fill of its own: one goes first, under its contents.
+            var at = 0
+            while (at < frame.paints.size) {
+                val p = frame.paints[at]
+                if (p.x >= h.x && p.y >= h.y && p.x + p.w <= h.x + h.w && p.y + p.h <= h.y + h.h) {
+                    var k = frame.paints.size
+                    frame.paints.append(p)
+                    while (k > at) {
+                        frame.paints[k] = frame.paints[k - 1]
+                        k = k - 1
+                    }
+                    frame.paints[at] = oneRect("rect", h.x, h.y, h.w, h.h, 0, color)
+                    return
+                }
+                at = at + 1
+            }
+            return
+        }
+    }
+    return
+}
 
 // A tap's result for the app: an event to deliver (0: none) with its value. `redraw`
 // when the screen changes without one (the keyboard opening).
