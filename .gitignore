@@ -10,4 +10,3 @@ examples/*/papermono/sdkconfig*
 !examples/*/papermono/sdkconfig.thin
 build-thin/
 !examples/*/papermono/sdkconfig.defaults
-examples/*/papermono/build-secure/

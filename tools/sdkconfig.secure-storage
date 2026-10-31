@@ -1,6 +1,0 @@
-# ONE_SECURE_STORAGE: NVS encrypted, with the key from the app (papermono_net.ab). "None" leaves out
-# ESP-IDF's own key schemes: the HMAC one burns a new eFuse key by itself if it finds none, and the
-# other needs flash encryption, which burns eFuses too. This build can't do either.
-CONFIG_NVS_ENCRYPTION=y
-CONFIG_NVS_SEC_KEY_PROTECT_NONE=y
-# CONFIG_SECURE_FLASH_ENC_ENABLED is not set

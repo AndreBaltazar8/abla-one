@@ -8,7 +8,6 @@ TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab t
 # Unit, backend and integration tests (host only).
 test:
 	$(NIX) '$(ABLAC) test $(TESTS)'
-	python3 tests/papermono_storage_config.py
 
 # @server over real HTTP: the routes, server.lock, client binaries.
 test-remote:
