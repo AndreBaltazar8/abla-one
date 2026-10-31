@@ -23,13 +23,8 @@
 
 ## Design
 
-The design is in SPEC section 16 (proposed); these build it.
+The design is in SPEC section 16; these build it.
 
-- [ ] Spike: generate a serializer for a nested, generic data shape through
-      `import contract`, on the device and the server.
-- [ ] Build `@server`, `$remote` and the generated router in abla-one, with no ablac
-      changes (unless generic compile-time queries turn out to be missing).
-- [ ] `server.lock` and `@retired`: routes stay stable, and removal is deliberate.
 - [ ] Build thin embedded mode (the server sends the tree; the device does layout,
       scrolling and drawing), behind a compile flag with full mode, and retire the
       pixel link (`epaper_host.ab`).

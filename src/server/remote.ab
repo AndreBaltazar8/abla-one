@@ -1,0 +1,468 @@
+import "abla/compiler"
+import "abla/compiler/parser"
+import "abla/json"
+import "../core/services.ab"
+
+// `@server` functions, called from any client (SPEC §16). A client imports the
+// server module with `import contract`, so only signatures and data shapes reach
+// its binary, and calls through `$remote`:
+//
+//   import contract "../server/orders.ab" as orders
+//   pending = $remote(services, "https://example.com", orders.orders(session, "open"))
+//   ... in receive: val result = pending.result(oneResponse(payload))
+//
+// Encoders and decoders are generated at compile time by walking the types,
+// from the one declaration: numbers, strings, booleans, nullable values, arrays,
+// maps with string keys, and classes, nested and generic.
+
+// A call under way. `result` reads its completion.
+class OneRemote<T>(val id: int, val decode: (Json) -> T) {
+    fun matches(response: OneResponse): bool = response.requestId == id
+    fun result(response: OneResponse): OneRemoteResult<T> {
+        val values: array<T> = []
+        var kind = "failed"
+        var message = ""
+        if (response.status == 410) {
+            kind = "retired"
+            val reason = jsonParse(response.body)
+            message = if (reason.succeeded) reason.value.asString() else response.body
+        } else if (!response.ok()) message = if (response.error != "") response.error else response.body
+        else {
+            val parsed = jsonParse(response.body)
+            if (!parsed.succeeded) message = "not JSON"
+            else {
+                values.append(decode(parsed.value))
+                kind = "ok"
+            }
+        }
+        OneRemoteResult<T>(values, response.status, kind, message)
+    }
+}
+
+// `kind`: "ok" (`value()` is set), "retired" (the server dropped this route: this
+// build must update; `message` says why) or "failed".
+class OneRemoteResult<T>(val values: array<T>, val status: int, val kind: string, val message: string) {
+    fun ok(): bool = kind == "ok"
+    fun value(): borrow(this) T = values[0]
+}
+
+// What a route answers, on the server.
+class OneServerReply(val status: int, val body: string)
+
+fun <T> oneRemoteSend(services: OneServices, base: string, route: string, body: Json, decode: (Json) -> T): OneRemote<T> {
+    val slash = if (base.size > 0 && base[base.size - 1] == 47) "" else "/"
+    OneRemote<T>(services.send(oneRequest("POST", "$base${slash}one/$route").json(body)), decode)
+}
+
+// --- values to and from JSON (what the generated code calls) --------------------
+
+fun oneRemoteOutInt(value: int): Json = jsonInteger(value)
+fun oneRemoteInInt(json: Json): int = json.asInt()
+fun oneRemoteOutString(value: string): Json = jsonString(value)
+fun oneRemoteInString(json: Json): string = json.asString()
+fun oneRemoteOutBool(value: bool): Json = jsonBoolean(value)
+fun oneRemoteInBool(json: Json): bool = json.asBoolean()
+fun oneRemoteOutJson(value: Json): Json = value
+fun oneRemoteInJson(json: Json): Json = json
+fun oneRemoteField(json: Json, name: string): Json = json.get(name)
+
+fun <T> oneRemoteOutNullable(value: T?, out: (T) -> Json): Json = if (value != null) out(value) else jsonNull()
+fun <T> oneRemoteInNullable(json: Json, read: (Json) -> T): T? = if (json.isNull()) null else read(json)
+
+fun <T> oneRemoteOutArray(values: array<T>, out: (T) -> Json): Json {
+    val items: array<Json> = []
+    for (value in values) items.append(out(value))
+    jsonArray(items)
+}
+
+fun <T> oneRemoteInArray(json: Json, read: (Json) -> T): array<T> {
+    val items: array<T> = []
+    if (json.isArray()) for (item in json.values) items.append(read(item))
+    items
+}
+
+fun <V> oneRemoteOutMap(values: Map<string, V>, out: (V) -> Json): Json {
+    val keys: array<string> = []
+    val items: array<Json> = []
+    for (key in values.keys()) {
+        val value = values.get(key)
+        if (value != null) {
+            keys.append(key)
+            items.append(out(value))
+        }
+    }
+    jsonObject(keys, items)
+}
+
+fun <V> oneRemoteInMap(json: Json, read: (Json) -> V): Map<string, V> {
+    val out: Map<string, V> = Map()
+    if (json.isObject()) {
+        var i = 0
+        while (i < json.keys.size) {
+            out.set(json.keys[i], read(json.values[i]))
+            i = i + 1
+        }
+    }
+    out
+}
+
+fun oneRemoteOutF64(value: f64): Json = ablaJsonValue(value)
+fun oneRemoteInF64(json: Json): f64 = oneRemoteParseF64(json.asNumber().text)
+fun oneRemoteObjectEmpty(): Json = jsonObject([], [])
+
+fun oneRemoteParseF64(text: string): f64 {
+    var negative = false
+    var whole = 0.0
+    var scale = 1.0
+    var seenPoint = false
+    var exponent = 0
+    var exponentSign = 1
+    var i = 0
+    while (i < text.size) {
+        val b = text[i]
+        if (b == 45 && i == 0) negative = true
+        else if (b == 46) seenPoint = true
+        else if (b == 101 || b == 69) {
+            i = i + 1
+            while (i < text.size) {
+                if (text[i] == 45) exponentSign = -1
+                else if (text[i] != 43) exponent = exponent * 10 + text[i] - 48
+                i = i + 1
+            }
+        } else {
+            whole = whole * 10.0 + f64FromInt(b - 48)
+            if (seenPoint) scale = scale * 10.0
+        }
+        i = i + 1
+    }
+    var value = whole / scale
+    while (exponent > 0) {
+        value = if (exponentSign > 0) value * 10.0 else value / 10.0
+        exponent = exponent - 1
+    }
+    if (negative) 0.0 - value else value
+}
+
+// --- the generated code ------------------------------------------------------
+
+// A compile-time pass (a transform, the only place a generated module can be added
+// before analysis) writes plain Abla: one encoder and decoder per type, and for each
+// `@server` function either the client call (a contract) or a route (its real body).
+
+compile class OneRemoteSource(var code: string, val seen: array<string>, val problems: array<string>)
+
+compile fun oneRemoteHash(text: string): int {
+    var value = 17
+    for (b in text) value = (value * 257 + b + 1) % 1000000007
+    value
+}
+
+// `Name<A, B>`'s arguments, split at the top level.
+compile fun oneRemoteArguments(text: string): array<string> {
+    val out: array<string> = []
+    var start = 0
+    var depth = 0
+    var i = 0
+    while (i < text.size) {
+        if (text[i] == 60) depth = depth + 1
+        if (text[i] == 62) depth = depth - 1
+        if (text[i] == 44 && depth == 0) {
+            out.append(oneRemoteTrim(text.slice(start, i)))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    out.append(oneRemoteTrim(text.slice(start, text.size)))
+    out
+}
+
+compile fun oneRemoteTrim(text: string): string {
+    var a = 0
+    var b = text.size
+    while (a < b && text[a] == 32) a = a + 1
+    while (b > a && text[b - 1] == 32) b = b - 1
+    text.slice(a, b)
+}
+
+// A type as written with the compiler's spellings normalized and type parameters replaced.
+compile fun oneRemoteSubstitute(type: string, names: array<string>, values: array<string>): string {
+    if (type.endsWith("?")) return "${oneRemoteSubstitute(type.slice(0, type.size - 1), names, values)}?"
+    if (type.startsWith("nullable:")) return "${oneRemoteSubstitute(type.slice(9, type.size), names, values)}?"
+    if (type.startsWith("map:")) {
+        var colon = 4
+        while (colon < type.size && type[colon] != 58) colon = colon + 1
+        return "Map<${oneRemoteSubstitute(type.slice(4, colon), names, values)}, ${oneRemoteSubstitute(type.slice(colon + 1, type.size), names, values)}>"
+    }
+    if (type.startsWith("array:")) return "array<${oneRemoteSubstitute(type.slice(6, type.size), names, values)}>"
+    var open = 0
+    while (open < type.size && type[open] != 60) open = open + 1
+    if (open < type.size) {
+        var inner = ""
+        for (argument in oneRemoteArguments(type.slice(open + 1, type.size - 1))) {
+            val next = oneRemoteSubstitute(argument, names, values)
+            inner = if (inner == "") next else "$inner, $next"
+        }
+        return "${type.slice(0, open)}<$inner>"
+    }
+    var i = 0
+    while (i < names.size) {
+        if (names[i] == type) return values[i]
+        i = i + 1
+    }
+    if (type == "i64") "int" else type
+}
+
+// The name a class goes by here: one that came through an import alias carries its
+// module's prefix.
+compile fun oneRemoteClassName(name: string): string {
+    val modules: array<string> = []
+    val handle = compilerFindType(name)
+    if (handle >= 0) modules.append(compilerTypeModuleIdentity(handle))
+    for (function in compilerContractFunctionsAnnotated("server")) modules.append(compiler.functionModuleIdentity(function))
+    for (function in compiler.functionsAnnotated("server")) modules.append(compiler.functionModuleIdentity(function))
+    val digits = "0123456789abcdef"
+    for (module in modules) {
+        if (module != "") {
+            var hex = ""
+            for (b in module) hex = "$hex${digits.slice(b / 16, b / 16 + 1)}${digits.slice(b % 16, b % 16 + 1)}"
+            val full = "__abla_module_${hex}__$name"
+            if (compilerFindClass(full) >= 0) return full
+        }
+    }
+    name
+}
+
+// How to call a function here: under its module's prefix when it came through an alias.
+compile fun oneRemoteFunctionName(function: int, route: string): string {
+    val digits = "0123456789abcdef"
+    var hex = ""
+    for (b in compiler.functionModuleIdentity(function)) hex = "$hex${digits.slice(b / 16, b / 16 + 1)}${digits.slice(b % 16, b % 16 + 1)}"
+    val full = "__abla_module_${hex}__$route"
+    if (compilerFindFunction(full) >= 0) full else route
+}
+
+// A function's own name, without that prefix.
+compile fun oneRemoteRoute(name: string): string {
+    var start = 0
+    var i = 0
+    while (i + 1 < name.size) {
+        if (name[i] == 95 && name[i + 1] == 95) start = i + 2
+        i = i + 1
+    }
+    name.slice(start, name.size)
+}
+
+// `type` as this generated module spells it.
+compile fun oneRemoteSpell(type: string): string {
+    if (type.endsWith("?")) return "${oneRemoteSpell(type.slice(0, type.size - 1))}?"
+    if (type == "int" || type == "string" || type == "bool" || type == "f64" || type == "Json") return type
+    var open = 0
+    while (open < type.size && type[open] != 60) open = open + 1
+    var head = type.slice(0, open)
+    if (head != "array" && head != "Map") head = oneRemoteClassName(head)
+    if (open == type.size) return head
+    var inner = ""
+    for (argument in oneRemoteArguments(type.slice(open + 1, type.size - 1))) {
+        val next = oneRemoteSpell(argument)
+        inner = if (inner == "") next else "$inner, $next"
+    }
+    "$head<$inner>"
+}
+
+// The function that encodes (`out`) or decodes a `type`, written on first use.
+compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool, path: string): string {
+    if (type == "int") return if (out) "oneRemoteOutInt" else "oneRemoteInInt"
+    if (type == "string") return if (out) "oneRemoteOutString" else "oneRemoteInString"
+    if (type == "bool") return if (out) "oneRemoteOutBool" else "oneRemoteInBool"
+    if (type == "f64") return if (out) "oneRemoteOutF64" else "oneRemoteInF64"
+    if (type == "Json") return if (out) "oneRemoteOutJson" else "oneRemoteInJson"
+    val name = "oneRemote${if (out) "Out" else "In"}_${oneRemoteHash(type)}"
+    for (seen in source.seen) if (seen == name) return name
+    source.seen.append(name)
+    val spelled = oneRemoteSpell(type)
+    val signature = if (out) "fun $name(value: $spelled): Json" else "fun $name(json: Json): $spelled"
+    val argument = if (out) "value" else "json"
+    val helperKind = if (out) "Out" else "In"
+    if (type.endsWith("?")) {
+        val inner = oneRemoteCodec(source, type.slice(0, type.size - 1), out, path)
+        source.code = "${source.code}$signature = oneRemote${helperKind}Nullable($argument, $inner)\n"
+        return name
+    }
+    var open = 0
+    while (open < type.size && type[open] != 60) open = open + 1
+    val head = type.slice(0, open)
+    val arguments = if (open < type.size) oneRemoteArguments(type.slice(open + 1, type.size - 1)) else []
+    if (head == "array") {
+        val inner = oneRemoteCodec(source, arguments[0], out, "$path[]")
+        source.code = "${source.code}$signature = oneRemote${helperKind}Array($argument, $inner)\n"
+        return name
+    }
+    if (head == "Map") {
+        if (arguments[0] != "string") source.problems.append("$path: maps need string keys")
+        val inner = oneRemoteCodec(source, arguments[1], out, "$path{}")
+        source.code = "${source.code}$signature = oneRemote${helperKind}Map($argument, $inner)\n"
+        return name
+    }
+    val declaration = compilerFindClass(head)
+    if (declaration < 0 || type.contains("->") || compiler.isResource(compilerFindType(head))) {
+        source.problems.append("$path: $type can't cross the network (plain data only: no closures, resources or native handles)")
+        return name
+    }
+    val parameters: array<string> = []
+    var index = 0
+    while (index < compilerClassTypeParameterCount(declaration)) {
+        parameters.append(compilerClassTypeParameterName(declaration, index))
+        index = index + 1
+    }
+    var keys = ""
+    var values = ""
+    index = 0
+    while (index < compilerClassFieldCount(declaration)) {
+        val field = compilerClassFieldName(declaration, index)
+        val fieldType = oneRemoteSubstitute(compilerClassFieldType(declaration, index), parameters, arguments)
+        val codec = oneRemoteCodec(source, fieldType, out, "$path.$field")
+        keys = if (keys == "") "\"$field\"" else "$keys, \"$field\""
+        val read = if (out) "$codec(value.$field)" else "$codec(oneRemoteField(json, \"$field\"))"
+        values = if (values == "") read else "$values, $read"
+        index = index + 1
+    }
+    val body = if (out) (if (keys == "") "oneRemoteObjectEmpty()" else "jsonObject([$keys], [$values])")
+        else "$spelled($values)"
+    source.code = "${source.code}$signature = $body\n"
+    name
+}
+
+compile fun oneRemoteIsRetired(function: int): bool {
+    var index = 0
+    while (index < compiler.annotationCount(function)) {
+        if (compiler.annotation(function, index) == "retired") return true
+        index = index + 1
+    }
+    false
+}
+
+// An unknown function whose name spells a problem out: how a compile-time pass stops
+// a build with a message.
+compile fun oneRemoteErrorName(problem: string): string {
+    val letters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    var name = "ONE_ERROR__"
+    for (b in problem) {
+        var part = "_"
+        var i = 0
+        while (i < letters.size) {
+            if (letters[i] == b) part = letters.slice(i, i + 1)
+            i = i + 1
+        }
+        name = "$name$part"
+    }
+    name
+}
+
+compile fun oneRemoteRetiredReason(function: int): string {
+    var index = 0
+    while (index < compiler.annotationCount(function)) {
+        if (compiler.annotation(function, index) == "retired") {
+            return if (compiler.annotationArgumentCount(function, index) > 0) compiler.annotationArgumentText(function, index, 0) else ""
+        }
+        index = index + 1
+    }
+    ""
+}
+
+compile fun oneRemoteNormal(type: string): string {
+    val none: array<string> = []
+    oneRemoteSubstitute(type, none, none)
+}
+
+compile fun oneRemoteWriteClients(var source: OneRemoteSource): void {
+    for (function in compilerContractFunctionsAnnotated("server")) {
+        val route = oneRemoteRoute(compiler.functionName(function))
+        var parameters = "services: OneServices, base: string"
+        var keys = ""
+        var values = ""
+        var index = 0
+        while (index < compiler.parameterCount(function)) {
+            val name = compiler.parameterName(function, index)
+            val type = oneRemoteNormal(compiler.parameterType(function, index))
+            parameters = "$parameters, $name: ${oneRemoteSpell(type)}"
+            val encoded = "${oneRemoteCodec(source, type, true, "$route($name)")}($name)"
+            keys = if (keys == "") "\"$name\"" else "$keys, \"$name\""
+            values = if (values == "") encoded else "$values, $encoded"
+            index = index + 1
+        }
+        val result = oneRemoteNormal(compiler.resultType(function))
+        val spelled = oneRemoteSpell(result)
+        val decode = oneRemoteCodec(source, result, false, "$route: result")
+        val body = if (keys == "") "oneRemoteObjectEmpty()" else "jsonObject([$keys], [$values])"
+        source.code = "${source.code}fun oneRemoteCall_$route($parameters): OneRemote<$spelled> = oneRemoteSend<$spelled>(services, base, \"$route\", $body, $decode)\n"
+    }
+    return
+}
+
+compile fun oneRemoteWriteRoutes(var source: OneRemoteSource): void {
+    val functions = compiler.functionsAnnotated("server")
+    if (functions.size == 0) return
+    var cases = ""
+    for (function in functions) {
+        val route = oneRemoteRoute(compiler.functionName(function))
+        val full = oneRemoteFunctionName(function, route)
+        val retired = oneRemoteRetiredReason(function)
+        if (oneRemoteIsRetired(function)) cases = "$cases    if (route == \"$route\") return OneServerReply(410, jsonStringify(jsonString(\"$retired\")))\n"
+        else {
+            var arguments = ""
+            var index = 0
+            while (index < compiler.parameterCount(function)) {
+                val name = compiler.parameterName(function, index)
+                val read = "${oneRemoteCodec(source, oneRemoteNormal(compiler.parameterType(function, index)), false, "$route($name)")}(oneRemoteField(body, \"$name\"))"
+                arguments = if (arguments == "") read else "$arguments, $read"
+                index = index + 1
+            }
+            val encode = oneRemoteCodec(source, oneRemoteNormal(compiler.resultType(function)), true, "$route: result")
+            cases = "$cases    if (route == \"$route\") return OneServerReply(200, jsonStringify($encode($full($arguments))))\n"
+        }
+    }
+    source.code = "${source.code}fun oneServerDispatch(route: string, body: Json): OneServerReply {\n$cases    OneServerReply(404, jsonStringify(jsonString(\"no such route\")))\n}\n"
+    if (compilerFindFunction("oneServerAnswer") >= 0) source.code = "${source.code}fun oneServerHandler(request: HttpRequest): HttpResponse = oneServerAnswer(request, oneServerDispatch)\n"
+    return
+}
+
+compile fun oneRemoteGenerate(): void {
+    var source = OneRemoteSource("", [], [])
+    oneRemoteWriteClients(source)
+    oneRemoteWriteRoutes(source)
+    if (source.code == "") return
+    var problem = ""
+    for (p in source.problems) problem = "$problem    ${oneRemoteErrorName(p)}()\n"
+    if (problem != "") source.code = "${source.code}fun oneRemoteProblems(): void {\n$problem}\n"
+    compiler.generateModule("one_remote", source.code)
+    return
+}
+
+#compiler.transform(oneRemoteGenerate)
+
+// `$remote(services, base, contract.function(arguments))`.
+compile fun oneRemoteParse(cursor: ParserCursor): SyntaxExpression {
+    parserExpect(cursor, "(")
+    parserRawSkipWhitespace(cursor)
+    val services = parserParseAblaExpression(cursor)
+    parserRawSkipWhitespace(cursor)
+    parserExpect(cursor, ",")
+    parserRawSkipWhitespace(cursor)
+    val base = parserParseAblaExpression(cursor)
+    parserRawSkipWhitespace(cursor)
+    parserExpect(cursor, ",")
+    parserRawSkipWhitespace(cursor)
+    val call = parserParseAblaExpression(cursor)
+    parserRawSkipWhitespace(cursor)
+    parserExpect(cursor, ")")
+    if (syntaxKind(call) != "call" && syntaxKind(call) != "member.call") parserFail(cursor, "\$remote needs a direct call of a contract function")
+    val arguments: array<SyntaxExpression> = [services, base]
+    var index = 0
+    while (index < syntaxChildCount(call)) {
+        arguments.append(syntaxChild(call, index))
+        index = index + 1
+    }
+    syntaxCall("oneRemoteCall_${oneRemoteRoute(syntaxText(call))}", arguments)
+}
+
+#compilerRegisterSubparser("remote", oneRemoteParse)

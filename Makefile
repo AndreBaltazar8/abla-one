@@ -1,13 +1,17 @@
 # The current compiler (sibling checkout), with the export global-roots fix.
 ABLAC ?= $(abspath ../ablac/build/ablac)
 NIX := nix-shell ../ablac/shell.nix --run
-TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab)
+TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab tests/remote/client.ab tests/remote/routes.ab)
 
-.PHONY: papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-epaper ui-epaper ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
+.PHONY: test-remote papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-epaper ui-epaper ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
 
 # Unit, backend and integration tests (host only).
 test:
 	$(NIX) '$(ABLAC) test $(TESTS)'
+
+# @server over real HTTP: the routes, server.lock, client binaries.
+test-remote:
+	$(NIX) 'ABLAC=$(ABLAC) tests/remote/check.sh'
 
 # Server-rendered gallery pages and their icons.
 gallery-web:

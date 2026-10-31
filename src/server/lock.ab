@@ -1,0 +1,127 @@
+import "abla/compiler"
+import "abla/fs"
+import "remote.ab"
+
+// server.lock (SPEC §16): what deployed clients may rely on. Each build compares the
+// `@server` routes and their data shapes with the committed file: adding a route or a
+// field passes and is recorded; changing or removing what is recorded fails the build.
+// `@retired("reason")` on a route takes it out of the comparison (it answers 410).
+// A server's entry calls it from a transform:
+//
+//   #compilerGrant("filesystem.read")
+//   #compilerGrant("filesystem.write")
+//   compile fun lock(): void { oneServerLock("server.lock"); return }
+//   #compiler.transform(lock)
+
+compile fun oneLockRouteLine(function: int): string {
+    var parameters = ""
+    var index = 0
+    while (index < compiler.parameterCount(function)) {
+        val entry = "${compiler.parameterName(function, index)}: ${oneRemoteNormal(compiler.parameterType(function, index))}"
+        parameters = if (parameters == "") entry else "$parameters, $entry"
+        index = index + 1
+    }
+    "route ${oneRemoteRoute(compiler.functionName(function))}($parameters) -> ${oneRemoteNormal(compiler.resultType(function))}"
+}
+
+// `class Name a: T, b: U` for each class a type reaches, once.
+compile fun oneLockClasses(type: string, var seen: array<string>, var lines: array<string>): void {
+    if (type.endsWith("?")) return oneLockClasses(type.slice(0, type.size - 1), seen, lines)
+    var open = 0
+    while (open < type.size && type[open] != 60) open = open + 1
+    val head = type.slice(0, open)
+    if (open < type.size) for (argument in oneRemoteArguments(type.slice(open + 1, type.size - 1))) oneLockClasses(argument, seen, lines)
+    if (head == "array" || head == "Map" || head == "int" || head == "string" || head == "bool" || head == "f64" || head == "Json") return
+    for (name in seen) if (name == head) return
+    seen.append(head)
+    val declaration = compilerFindClass(head)
+    if (declaration < 0) return
+    val none: array<string> = []
+    var fields = ""
+    var index = 0
+    while (index < compilerClassFieldCount(declaration)) {
+        val fieldType = oneRemoteSubstitute(compilerClassFieldType(declaration, index), none, none)
+        fields = "$fields|${compilerClassFieldName(declaration, index)}: $fieldType"
+        oneLockClasses(fieldType, seen, lines)
+        index = index + 1
+    }
+    lines.append("class $head$fields")
+    return
+}
+
+compile fun oneLockSplit(text: string, separator: int): array<string> {
+    val out: array<string> = []
+    var start = 0
+    var i = 0
+    while (i <= text.size) {
+        if (i == text.size || text[i] == separator) {
+            if (i > start) out.append(text.slice(start, i))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    out
+}
+
+compile fun oneLockFind(lines: array<string>, prefix: string): string {
+    for (line in lines) if (line.startsWith(prefix)) return line
+    ""
+}
+
+compile fun oneServerLock(path: string): void {
+    val current: array<string> = []
+    val seen: array<string> = []
+    val retired: array<string> = []
+    for (function in compiler.functionsAnnotated("server")) {
+        val route = oneRemoteRoute(compiler.functionName(function))
+        if (oneRemoteIsRetired(function)) retired.append(route)
+        current.append(oneLockRouteLine(function))
+        var index = 0
+        while (index < compiler.parameterCount(function)) {
+            oneLockClasses(oneRemoteNormal(compiler.parameterType(function, index)), seen, current)
+            index = index + 1
+        }
+        oneLockClasses(oneRemoteNormal(compiler.resultType(function)), seen, current)
+    }
+    val file = Path(path)
+    val old = if (file.exists()) oneLockSplit(file.readText(), 10) else []
+    val problems: array<string> = []
+    val merged: array<string> = []
+    for (line in old) {
+        val words = oneLockSplit(line, 32)
+        if (line.startsWith("route ")) {
+            val name = oneLockSplit(words[1], 40)[0]
+            var isRetired = false
+            for (r in retired) if (r == name) isRetired = true
+            val now = oneLockFind(current, "route $name(")
+            if (isRetired) merged.append(line)
+            else if (now == "") problems.append("route $name was removed: mark it @retired instead")
+            else if (now != line) problems.append("route $name changed: was $line")
+            else merged.append(line)
+        } else if (line.startsWith("class ")) {
+            val parts = oneLockSplit(line.slice(6, line.size), 124)
+            val now = oneLockSplit(oneLockFind(current, "class ${parts[0]}|"), 124)
+            if (now.size == 0 && oneLockFind(current, "class ${parts[0]}") == "") merged.append(line)
+            else {
+                var index = 1
+                while (index < parts.size) {
+                    var kept = false
+                    for (field in now) if (field == parts[index]) kept = true
+                    if (!kept) problems.append("class ${parts[0]}: field ${parts[index]} was changed or removed")
+                    index = index + 1
+                }
+            }
+        }
+    }
+    if (problems.size > 0) {
+        compiler.generateModule("one_server_lock", "fun oneServerLockProblem(): void {\n    ${oneRemoteErrorName("server lock: ${problems[0]}")}()\n}\n")
+        return
+    }
+    for (line in current) if (!line.startsWith("route ") || oneLockFind(merged, line) == "") merged.append(line)
+    var text = ""
+    for (line in merged) text = "$text$line\n"
+    var previous = ""
+    for (line in old) previous = "$previous$line\n"
+    if (text != previous) compiler.writeFile(path, text)
+    return
+}

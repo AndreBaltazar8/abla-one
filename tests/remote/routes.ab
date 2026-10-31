@@ -1,0 +1,20 @@
+import "abla/test"
+import "abla/json"
+import "server/shop.ab" as shop
+import "../../src/server/remote.ab"
+
+// The generated routes, called directly (tests/remote/check.sh goes over HTTP).
+fun main: int {
+    val body = jsonParse("{\"status\":\"open\",\"limit\":3}").value
+    val reply = oneServerDispatch("orders", body)
+    expectEqual(reply.status, 200, "orders")
+    expectEqual(jsonParse(reply.body).value.get("next").asString(), "more", "nullable result")
+    expectEqual(jsonParse(reply.body).value.get("items").at(0).get("lines").at(0).get("sku").asString(), "a", "nested result")
+    expectEqual(jsonParse(reply.body).value.get("items").at(0).get("tags").get("status").asString(), "open", "map")
+    expect(jsonParse(reply.body).value.get("items").at(0).get("note").isNull(), "null")
+    expectEqual(oneServerDispatch("ping", jsonObject([], [])).body, "\"pong\"", "no arguments")
+    val grown = jsonParse(oneServerDispatch("tree", jsonParse("{\"depth\":1}").value).body).value
+    expectEqual(grown.get("children").at(0).get("label").asString(), "leaf", "recursive shape")
+    expectEqual(oneServerDispatch("nope", jsonObject([], [])).status, 404, "unknown route")
+    0
+}

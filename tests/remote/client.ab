@@ -1,0 +1,25 @@
+import "abla/test"
+import "abla/json"
+import contract "server/shop.ab" as shop
+import "../../src/core/services.ab"
+import "../../src/server/remote.ab"
+
+fun main: int {
+    var services: OneServices = oneRecordedServices()
+    val call = $remote(services, "https://x.test", shop.orders("open", 3))
+    val done = call.result(oneResponse(oneResponsePayload(call.id, 200, "{\"items\":[{\"id\":3,\"paid\":true,\"lines\":[{\"sku\":\"a\",\"count\":2}],\"note\":null,\"tags\":{\"status\":\"open\"}}],\"next\":\"more\"}", "")))
+    expect(done.ok(), "decoded")
+    expectEqual(done.value().items[0].lines[0].sku, "a", "nested")
+    expectEqual(done.value().items[0].id, 3, "class in a generic")
+    expectEqual(done.value().next ?? "", "more", "nullable")
+    expectEqual(done.value().items[0].tags.get("status") ?? "", "open", "map")
+    val old = $remote(services, "https://x.test", shop.oldOrders("x"))
+    val gone = old.result(oneResponse(oneResponsePayload(old.id, 410, "\"use orders\"", "")))
+    expectEqual(gone.kind, "retired", "retired")
+    expectEqual(gone.message, "use orders", "why")
+    val failed = call.result(oneResponse(oneResponsePayload(call.id, 0, "", "offline")))
+    expectEqual(failed.kind, "failed", "no network")
+    expectEqual(failed.message, "offline", "says why")
+    expect(!failed.ok(), "not ok")
+    0
+}

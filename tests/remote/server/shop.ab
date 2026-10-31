@@ -1,0 +1,29 @@
+// A server module: the client test imports it as a contract only.
+class Line(val sku: string, val count: int)
+class Page<T>(val items: array<T>, val next: string?)
+class Order(val id: int, val paid: bool, val lines: array<Line>, val note: string?, val tags: Map<string, string>)
+
+@server
+fun orders(status: string, limit: int): Page<Order> {
+    val tags: Map<string, string> = Map()
+    tags.set("status", status)
+    Page([Order(limit, true, [Line("a", 2)], null, tags)], "more")
+}
+
+@server
+fun ping(): string = "pong"
+
+@server
+@retired("use orders")
+fun oldOrders(status: string): array<Order> = []
+
+// Only on the server: a client binary must not have this.
+fun secretOfTheServer(): string = "SERVER_ONLY_MARKER"
+
+@server
+fun secret(): string = secretOfTheServer()
+
+class Tree(val label: string, val children: array<Tree>)
+
+@server
+fun tree(depth: int): Tree = Tree("root", if (depth > 0) [Tree("leaf", [])] else [])

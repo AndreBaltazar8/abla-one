@@ -1,0 +1,12 @@
+import "abla/http"
+import "abla/json"
+import "remote.ab"
+
+// Serves the `@server` routes: `router.post("/one/:route", oneServerHandler)`, with
+// oneServerHandler generated for a program that imports its server modules normally.
+fun oneServerAnswer(request: HttpRequest, dispatch: (string, Json) -> OneServerReply): HttpResponse {
+    val parsed = jsonParse(if (request.body == "") "{}" else request.body)
+    if (!parsed.succeeded) return httpJson(jsonStringify(jsonString("not JSON")), 400)
+    val reply = dispatch(request.routeParameter("route"), parsed.value)
+    httpJson(reply.body, reply.status)
+}

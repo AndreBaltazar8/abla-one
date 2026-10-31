@@ -1,0 +1,22 @@
+import "abla/http"
+import "abla/compiler"
+import "../server/shop.ab" as shop
+import "../../../src/server/remote.ab"
+import "../../../src/server/http.ab"
+import "../../../src/server/lock.ab"
+
+#compilerGrant("filesystem.read")
+#compilerGrant("filesystem.write")
+
+compile fun lock(): void {
+    oneServerLock("server.lock")
+    return
+}
+
+#compiler.transform(lock)
+
+fun main: int {
+    val router = httpRouter()
+    router.post("/one/:route", oneServerHandler)
+    serveHttp(router, 8977)
+}

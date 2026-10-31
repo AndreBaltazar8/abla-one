@@ -615,20 +615,22 @@ abla-one/
     this milestone) and running apps on the device itself (the bounded
     arena tree).
 
-## 16. One codebase, many deployments (proposed)
+## 16. One codebase, many deployments
 
-Not built yet: this is the design to build against, tracked in TODO.md. One
+What is left to build is tracked in TODO.md. One
 codebase produces one deployed backend, which also serves the web, plus client
 builds for mobile and embedded. The clients carry the presentation; what is marked
 as server stays out of them.
 
 ### What stays on the server
 
-Built in abla-one on what ablac already offers, with no compiler changes:
-`import contract` (signatures and data shapes, no implementations, none of the
-module's private dependencies), annotations, subparsers and the compile-time API.
-abla-mobile's `$mobileRpc` and `rpc_server.ab` prove the pattern for
-`(string) -> string`; abla-one generalizes it to any value.
+Built in abla-one (`src/server/`) on `import contract` (signatures and data shapes,
+no implementations, none of the module's private dependencies), annotations,
+subparsers and the compile-time API. abla-mobile's `$mobileRpc` and `rpc_server.ab`
+prove the pattern for `(string) -> string`; abla-one generalizes it to any value. It
+took two generic compile-time queries in ablac: `compilerContractFunctionsAnnotated`
+(a transform runs too early to see a contract call's types, so it walks the contract's
+functions) and the class type parameter names.
 
 Server code lives in its own modules, and is free to import abla-postgres, secrets
 and anything else. A function clients may call is marked:
@@ -645,21 +647,28 @@ A client imports the same file as a contract, and calls through `$remote`:
     // app/orders_screen.ab
     import contract "../server/orders.ab" as orders
 
-    $remote(orders.orders(session, "open")) { result -> ... }
+    pending = $remote(services, base, orders.orders(session, "open"))
+
+    // in `receive`, as with any service completion (§9):
+    val response = oneResponse(payload)
+    if (pending.matches(response)) {
+        val result = pending.result(response)   // kind: ok, retired or failed
+        if (result.ok()) show(result.value())
+    }
 
 - **Client builds:** the contract brings only signatures and data shapes, so
   abla-postgres and the bodies never reach a client binary. `$remote` replaces the
   call with a typed request through the services layer (§9), so it works on every
   target. A contract call left unreplaced is already a compile error
   (`E_CONTRACT_CALL_NOT_CONSUMED`).
-- **Server build:** imports the module normally. A generated router, found through
-  `compiler.functionsAnnotated("server")`, gives each function a route.
+- **Server build:** imports the module normally, and adds the generated handler:
+  `router.post("/one/:route", oneServerHandler)`.
 - **Any value:** parameters and results can be any plain data: numbers, strings,
   booleans, nullable values, arrays, maps and classes, nested and generic.
-  Serializers are generated at compile time by walking the type (`fieldsOf`,
-  `typeArguments`, the nullable check), on both sides from the one declaration.
+  Serializers are generated at compile time by walking the type, on both sides from
+  the one declaration.
   Closures, resources and native handles can't cross a network, and are a compile
-  error naming the field that holds one. Large bodies and files go through the
+  error naming the field that holds one. Recursive shapes work too. Large bodies and files go through the
   services layer's existing file support.
 - **Authentication:** every route authenticates the session itself. Being marked
   `@server` hides nothing: a client can call any route with any arguments.
@@ -670,12 +679,12 @@ Devices update rarely, so an old build keeps calling a newer server. Routes stay
 stable by default, and removing one is deliberate:
 
 - A lock file (`server.lock`, committed) records each route's signature and data
-  shapes. Adding a route, or a new field with a default, passes. Changing or removing
-  anything recorded fails the server build, naming what changed.
+  shapes. Adding a route or a field passes and is recorded; an old client that doesn't
+  send a new field gets it empty (null, 0, ""). Changing or removing anything recorded
+  fails the server build, naming what changed.
 - To remove or replace a route, mark it `@retired("reason")`: it stays recorded, and
   answers with a clear "update the app" response that `$remote` passes to the app.
   The entry can be dropped once no supported client calls it.
-- Clients send their build's contract fingerprint, so logs show who still calls what.
 
 ### Deployments
 
@@ -715,9 +724,6 @@ still vary by target through theming (§8) and `ui.target`.
 
 ### Open questions
 
-- First check by a spike: that `fieldsOf` walks data shapes through a contract
-  import, nested and generic, as ablac's docs describe. The stability rules depend
-  on the fingerprint or the lock file reading the same shapes.
 - Offline: what `$remote` gives an app on a device with no network.
 - How thin mode sends tree updates to a small device: whole trees or diffs.
 

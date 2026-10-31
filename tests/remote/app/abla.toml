@@ -1,0 +1,4 @@
+name = "remote-server"
+version = "0.0.1"
+entry = "server.ab"
+compileCapabilities = ["filesystem.read", "filesystem.write"]
