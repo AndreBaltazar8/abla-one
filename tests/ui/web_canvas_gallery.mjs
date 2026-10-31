@@ -51,6 +51,16 @@ try {
   const back = await hit(page, 'Componentes');
   await page.mouse.click(back.x, back.y);
   await waitText(page, 'CARTÃO');
+  // The dropdown on the bar: painted over the screen; a click outside only closes it.
+  const switcher = await hit(page, 'Estúdio Norte');
+  await page.mouse.click(switcher.x, switcher.y);
+  check(await waitText(page, 'Oficina Sul'), 'a popover opens on a canvas page');
+  await page.screenshot({path: 'build/ui/web-canvas-popover.png'});
+  const before = await texts(page);
+  await page.mouse.click(30, 600);
+  await page.waitForTimeout(400);
+  check(!(await texts(page)).includes('Oficina Sul'), 'a click outside closes it');
+  check(before.includes('Adicionar (1)') && (await texts(page)).includes('Adicionar (1)'), 'and reached nothing under it');
   await page.setViewportSize({width: 390, height: 480});
   await page.waitForTimeout(500);
   check((await page.evaluate(() => window.__oneFrame.h)) === 480, 'a resize lays the page out again');

@@ -35,12 +35,45 @@ class OneHit(
 // A feed row fully inside its viewport: deliver `event` with `item` to mark it read.
 class OneVisible(val event: int, val item: int)
 
-class OneFrame(val paints: array<OnePaint>, val hits: array<OneHit>, val visible: array<OneVisible>, val width: int, val height: int)
+class OneFrame(val paints: array<OnePaint>, val hits: array<OneHit>, val visible: array<OneVisible>, val width: int, val height: int, var popovers: int = 0)
 
 fun onePaintFrame(root: OneBox, width: int, height: int): OneFrame {
     var frame = OneFrame([], [], [], width, height)
     onePaintBox(root, 0, 0, frame, "r", 0, 0, width, height)
+    onePaintPopovers(root, frame)
     frame
+}
+
+// Open popovers go over everything, once the rest of the frame is done. While one is open nothing
+// under it takes input: a press outside dismisses it.
+fun onePaintPopovers(root: OneBox, var frame: OneFrame): void {
+    if (frame.popovers == 0) return
+    frame.hits.clear()
+    onePopoversIn(root, 0, 0, frame, "r")
+    return
+}
+
+fun onePopoversIn(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string): void {
+    val x = ox + box.x
+    val y = oy + box.y
+    var index = 0
+    for (child in box.children) {
+        val childPath = if (child.node.key != "") "$path/k:${child.node.key}" else "$path/$index"
+        if (box.node.kind == "popover" && index == 1) {
+            frame.hits.append(OneHit("press", 0, 0, frame.width, frame.height, oneParseInt(box.node.attr("onDismiss"), 0), 0, "dismiss", "", "", false))
+            // Below the anchor, or above it when only that fits, and inside the window.
+            val gap = 4
+            var px = if (box.node.attr("side") == "end") x + box.w - child.w else x
+            if (px + child.w > frame.width - 8) px = frame.width - 8 - child.w
+            if (px < 8) px = 8
+            var py = y + box.h + gap
+            if (py + child.h > frame.height - 8 && y - gap - child.h >= 8) py = y - gap - child.h
+            onePaintBox(child, px, py, frame, childPath, 0, 0, frame.width, frame.height)
+            onePopoversIn(child, px, py, frame, childPath)
+        } else onePopoversIn(child, x, y - box.scrollY, frame, childPath)
+        index = index + 1
+    }
+    return
 }
 
 fun oneRect(op: string, x: int, y: int, w: int, h: int, radius: int, color: string): OnePaint = OnePaint(op, x, y, w, h, radius, color, "", 0, "", "")
@@ -117,8 +150,9 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     for (child in box.children) {
         val childPath = if (child.node.key != "") "$path/k:${child.node.key}" else "$path/$index"
         val childY = y - box.scrollY + child.y
+        if (kind == "popover" && index == 1) frame.popovers = frame.popovers + 1
         // Skip what a scroll area has scrolled out of view.
-        if (!scrolls || (childY + child.h >= ncy && childY <= ncy + nch)) onePaintBox(child, x, y - box.scrollY, frame, childPath, ncx, ncy, ncw, nch)
+        else if (!scrolls || (childY + child.h >= ncy && childY <= ncy + nch)) onePaintBox(child, x, y - box.scrollY, frame, childPath, ncx, ncy, ncw, nch)
         if (kind == "feed" && child.node.attr("item") != "" && childY >= ncy && childY + child.h <= ncy + nch) {
             val item = oneParseInt(child.node.attr("item"), 0)
             if (item > visibleItem) visibleItem = item

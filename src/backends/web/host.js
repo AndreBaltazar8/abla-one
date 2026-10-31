@@ -288,6 +288,38 @@
     ask(to, entry.e);
   };
 
+  // --- popovers --------------------------------------------------------------
+  // Fixed to the window, so a scroll area can't clip it: below the anchor, or above when only that
+  // fits. The focus goes in when one opens, and back to where it was when it closes.
+  let opener = null;
+  const popovers = () => {
+    const panels = root.querySelectorAll('.one-panel');
+    for (const panel of panels) {
+      const anchor = panel.parentElement.firstElementChild.getBoundingClientRect();
+      const end = panel.getAttribute('data-side') === 'end';
+      const x = Math.max(8, Math.min(end ? anchor.right - panel.offsetWidth : anchor.left, innerWidth - 8 - panel.offsetWidth));
+      const below = anchor.bottom + 4;
+      const y = below + panel.offsetHeight > innerHeight - 8 && anchor.top - 4 - panel.offsetHeight >= 8 ? anchor.top - 4 - panel.offsetHeight : below;
+      panel.style.cssText = `position:fixed;margin:0;right:auto;left:${x}px;top:${y}px`;
+      if (!panel.__oneOpened) {
+        panel.__oneOpened = true;
+        opener = document.activeElement;
+        const first = panel.querySelector('button,a[href],input,textarea');
+        if (first) first.focus();
+      }
+    }
+    if (!panels.length && opener) {
+      if (opener.isConnected && (document.activeElement === document.body || !document.activeElement)) opener.focus();
+      opener = null;
+    }
+  };
+  addEventListener('resize', popovers);
+  addEventListener('scroll', popovers, true);
+  document.addEventListener('keydown', (e) => {
+    const scrims = e.key === 'Escape' ? root.querySelectorAll('.one-scrim') : [];
+    if (scrims.length) scrims[scrims.length - 1].click();
+  });
+
   const apply = (message) => {
     if (message.css) style.appendChild(document.createTextNode(message.css));
     if (message.title && document.title !== message.title) document.title = message.title;
@@ -309,6 +341,7 @@
       else if (atBottom) feed.scrollTop = feed.scrollHeight;
     }
     watchFeeds();
+    popovers();
   };
 
   // --- file pickers --------------------------------------------------------
@@ -529,6 +562,7 @@
   addEventListener('pagehide', saveScroll);
   for (const area of root.querySelectorAll('textarea')) grow(area);
   watchFeeds();
+  popovers();
   const left = savedScroll(entry.e);
   if (left) placeScroll(left);
   if (boot.wasm) run().catch((error) => { console.error(error); document.documentElement.setAttribute('data-one-offline', ''); });

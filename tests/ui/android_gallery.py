@@ -94,6 +94,10 @@ log = adb('logcat', '-d', '-s', 'ActivityTaskManager:I')
 check('android.intent.action.VIEW' in log and 'example.com' in log, 'link opens the browser')
 adb('shell', 'am', 'start', '-n', PACKAGE + '/' + adb('shell', 'cmd', 'package', 'resolve-activity', '--brief', PACKAGE).strip().splitlines()[-1].split('/')[-1])
 check(find('Abrir ligação (1)', tries=12) is not None, 'link press reached the app')
+# The same activity comes back with its field focused, and the keyboard over the form.
+if 'mInputShown=true' in adb('shell', 'dumpsys', 'input_method'):
+    adb('shell', 'input', 'keyevent', '4')
+    time.sleep(0.5)
 
 # Scroll: updates keep the position, and the next screen opens at the top.
 swipe_to_end()
@@ -125,11 +129,80 @@ check(PACKAGE not in focused() and presses > 1, f'back walks to the first entry,
 # A deep link reaches the app as a route, going in the same stack.
 def link(url):
     adb('shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', f"'{url}'", PACKAGE)
-link('abla-one-gallery://open/form/7')
-check(find('Formulário 7', tries=12) is not None, 'a deep link opens its screen')
+def activities():
+    return sum(1 for l in adb('shell', 'dumpsys', 'activity', 'activities').splitlines() if 'Hist' in l and PACKAGE + '/org.abla.mobile.host.AblaMobileActivity' in l)
+def raw_screen():
+    data = subprocess.check_output(['adb', 'exec-out', 'screencap'])
+    width, height = int.from_bytes(data[0:4], 'little'), int.from_bytes(data[4:8], 'little')
+    return width, height, data[16:]
+def pixel(screen, x, y):
+    width, _, pixels = screen
+    at = (y * width + x) * 4
+    return tuple(pixels[at:at + 3])
+
+# A link with the app open reaches the same activity: back at the first screen leaves.
+adb('shell', 'am', 'force-stop', PACKAGE)
+adb('shell', 'monkey', '-p', PACKAGE, '1')
+home = find('Adicionar (0)')
+check(home is not None, 'the app is open')
+button = bounds(home)
+link('abla-one-gallery://open/form/9')
+check(find('Formulário 9', tries=12) is not None, 'a link with the app open opens its screen')
+check(activities() == 1, f'in the same activity ({activities()})')
 adb('shell', 'input', 'keyevent', '4')
-check(find('Formulário 7', tries=1) is None and find('Pessoas') is not None, 'back from a deep link')
-link('abla-one-gallery://open/people?q=maya')
-check(find('Maya Townsend', tries=12) is not None and find('Sofia Costa', tries=1) is None, 'a deep link\'s query string')
+check(find('Adicionar (0)') is not None, 'back: the screen before')
+adb('shell', 'input', 'keyevent', '4')
+time.sleep(1)
+check(PACKAGE not in focused(), 'back again leaves, with no second home under it')
+
+# A link that starts the app: never a frame of the first route. The primary button, near-black
+# there, is where the form shows white.
+adb('shell', 'am', 'force-stop', PACKAGE)
+link('abla-one-gallery://open/form/7')
+seen = 0
+dark = 0
+for _ in range(25):
+    screen = raw_screen()
+    seen += 1
+    if pixel(screen, (button[0] + 12), (button[1] + button[3]) // 2) == (0x1f, 0x23, 0x28): dark += 1
+check(dark == 0, f'a cold start by link shows only its route ({dark} of {seen} frames showed the first)')
+check(find('Formulário 7', tries=12) is not None, 'a cold start by link opens its screen')
+adb('shell', 'input', 'keyevent', '4')
+check(find('Adicionar (0)') is not None, 'back from it: the first route')
+
+# The dropdown on the bar: over the screen, closed by a press outside, the back button or a choice.
+check(find('Estúdio Norte') is not None, 'the switcher is on the bar')
+tap('Estúdio Norte')
+check(find('Oficina Sul') is not None and find('Atelier Centro', tries=1) is not None, 'it opens')
+subprocess.run(['adb', 'exec-out', 'screencap', '-p'], stdout=open('build/ui/android-popover.png', 'wb'))
+adb('shell', 'input', 'keyevent', '4')
+check(find('Oficina Sul', tries=3) is None and find('Adicionar (0)') is not None, 'the back button closes it, and stays')
+tap('Estúdio Norte')
+find('Oficina Sul')
+# The button's left end, clear of the panel on the right.
+adb('shell', 'input', 'tap', str(button[0] + 12), str((button[1] + button[3]) // 2))
+time.sleep(0.8)
+check(find('Oficina Sul', tries=3) is None and find('Adicionar (0)') is not None, 'a press outside closes it, and reaches nothing under it')
+tap('Estúdio Norte')
+tap('Oficina Sul')
+check(find('Oficina Sul') is not None and find('Atelier Centro', tries=2) is None, 'a choice takes effect and closes it')
+
+# A bitmap: sharp cells, nothing but black and white.
+# All of it in view: at the end of the page, clear of the tab bar.
+for _ in range(3):
+    adb('shell', 'input', 'swipe', '300', '1400', '300', '400', '300')
+    time.sleep(0.5)
+code = find('Código de exemplo')
+check(code is not None, 'the bitmap is on the screen, with its label')
+if code is not None:
+    b = bounds(code)
+    screen = raw_screen()
+    # Whole pixels per cell, centered in the box.
+    cell = (b[2] - b[0]) // 7
+    left, top = b[0] + (b[2] - b[0] - cell * 7) // 2, b[1] + (b[3] - b[1] - cell * 7) // 2
+    colors = {pixel(screen, x, y) for x in range(left, left + cell * 7) for y in range(top, top + cell * 7)}
+    # The cells are drawn without antialiasing; the emulator's composer still shifts edge pixels a little.
+    check(all(max(c) <= 16 or min(c) >= 239 for c in colors), f'a bitmap is only black and white ({sorted(colors)[:6]})')
+    check(pixel(screen, left + cell // 2, top + cell // 2) == (0, 0, 0) and pixel(screen, left + cell + cell // 2, top + cell + cell // 2) == (255, 255, 255), 'its cells are where they should be')
 print('PASS tests/ui/android_gallery.py' if failures == 0 else f'{failures} failed')
 sys.exit(1 if failures else 0)

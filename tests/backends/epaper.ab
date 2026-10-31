@@ -54,6 +54,17 @@ fun main: int {
     }
     expect(same, "a band's pixels are the frame's rows 200-239")
 
+    // A popover: a tap on its item is its event, a tap outside its dismissal, on the panel's own pixels.
+    var popUi = oneUi("epaper", oneDefaultTheme())
+    val popTrigger = button(popUi, "Abrir", "plain", popUi.press { }, style())
+    val popItem = menuItem(popUi, "Escolher", false, popUi.press { })
+    val popDismiss = popUi.press { }
+    val popFrame = onePaintFrame(oneLayout(column(style().fill(), [popover(popUi, popTrigger, true, "start", popDismiss, [popItem])]), oneDefaultTheme(), "epaper", 360, 601, Map()), 360, 601)
+    expectEqual(popFrame.hits[popFrame.hits.size - 1].event, 2, "the item takes a tap on it")
+    expectEqual(popFrame.hits[0].event, popDismiss, "and anything else dismisses")
+    expectEqual(popFrame.paints[popFrame.paints.size - 1].text, "Escolher", "the panel draws last")
+    expect(oneEpaperScaleFrame(popFrame, 133, 480, 800, 2, true, []).hits.size == 2, "through the scale")
+
     // A bitmap: cells of one whole number of panel pixels, whichever way the scale rounds.
     val cells = "101" + "010" + "111"
     val bitmapOwners: array<string> = []

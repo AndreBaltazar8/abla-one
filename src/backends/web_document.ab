@@ -107,6 +107,10 @@ fun oneWebBaseCss(): string =
     ".k-icon{display:inline-block;flex-shrink:0;background-color:currentColor;-webkit-mask:var(--i) center/contain no-repeat;mask:var(--i) center/contain no-repeat}\n" +
     ".k-image{display:block;flex-shrink:0;object-fit:cover}\n" +
     ".k-divider{flex-shrink:0;align-self:stretch;height:1px}\n" +
+    ".k-popover{display:flex;flex-direction:column;position:relative}\n" +
+    ".one-scrim{position:fixed;inset:0;z-index:1000}\n" +
+    ".one-panel{position:absolute;top:100%;left:0;margin-top:4px;z-index:1001;width:max-content;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow-y:auto}\n" +
+    ".one-panel[data-side=end]{left:auto;right:0}\n" +
     ".k-spacer{flex-shrink:0}\n"
 
 class OneHtml(val html: string, val css: string)
@@ -188,7 +192,7 @@ fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string,
     val key = oneHtmlEscape(own)
     var inner = ""
     var index = 0
-    for (child in node.children) {
+    if (node.kind != "popover") for (child in node.children) {
         inner = "$inner${oneWebNode(child, theme, css, iconBase, "$own.$index", node.kind)}"
         index = index + 1
     }
@@ -210,6 +214,7 @@ fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string,
         "icon" -> "<span $common role=\"img\" aria-label=\"${oneHtmlEscape(node.attr("label"))}\" style=\"--i:url('${oneHtmlEscape(iconBase)}/${oneHtmlEscape(node.attr("name"))}.svg')\"></span>"
         "image" -> "<img $common src=\"${oneHtmlEscape(oneWebImageSource(node, iconBase))}\" alt=\"${oneHtmlEscape(node.attr("label"))}\">"
         "bitmap" -> oneWebBitmap(node, common)
+        "popover" -> "<div $common$selected>${oneWebPopover(node, theme, css, iconBase, own)}</div>"
         "pressable" -> "<button type=\"button\" $common data-one-press=\"${node.attr("onPress")}\"$disabled$selected${oneWebLabel(node)}>$inner</button>"
         "input" -> oneWebInput(node, common)
         "divider" -> "<div $common role=\"separator\"></div>"
@@ -217,6 +222,14 @@ fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string,
         "feed" -> "<div $common data-one-feed=\"${oneHtmlEscape(node.attr("anchor"))}\" data-one-visible=\"${node.attr("onVisible")}\">$inner</div>"
         else -> "<${if (tag != "") tag else "div"} $common$selected>$inner</${if (tag != "") tag else "div"}>"
     }
+}
+
+// The anchor, then when open a layer that catches a press outside and the panel over it. The host
+// moves the panel out of any clipping and inside the window; without script it's still below the anchor.
+fun oneWebPopover(node: Node, theme: Theme, var css: OneCss, iconBase: string, own: string): string {
+    val anchor = oneWebNode(node.children[0], theme, css, iconBase, "$own.0", node.kind)
+    if (node.children.size < 2) return anchor
+    "$anchor<div class=\"one-scrim\" data-one-press=\"${node.attr("onDismiss")}\"></div><div class=\"one-panel\" data-side=\"${oneHtmlEscape(node.attr("side"))}\">${oneWebNode(node.children[1], theme, css, iconBase, "$own.1", node.kind)}</div>"
 }
 
 fun oneWebTag(tag: string): string =

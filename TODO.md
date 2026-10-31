@@ -12,18 +12,9 @@
 - Only list what is really open. A task is done when it is verified where it
   runs (on the device for device work), not just when it compiles.
 
-## Components
-
-- [ ] `bitmap` draws on the raster targets (e-paper, canvas, desktop) and on web-document (an SVG), not on
-      Android: `OneRenderer.kt` in abla-mobile doesn't know the kind. Nothing there uses it yet.
-
 ## Routes
 
-- [ ] Android: a link that starts the app shows `/` for about half a second first. The host
-      delivers it after the first tree; it could reach the first render instead.
-- [ ] Desktop: no keyboard or mouse shortcut for back and forward (abla-graphics reports no
-      modifier keys, and no back button). Only `services.back`.
-- [ ] PaperMono: routes are covered by host tests and the firmware builds, in both modes;
+- [ ] PaperMono: routes and popovers are covered by host tests and the firmware builds, in both modes;
       not yet run on the device.
 
 ## Toolchain
@@ -46,4 +37,7 @@
 
 ## Abla One bugs seen
 
-- Thin mode wasn't linked or run after the compact storage change.
+- PaperMono thin mode after the compact storage change: it links (`make papermono-gallery MODE=thin
+  ONE_HOST=...`), but hasn't run on a device.
+- `tests/ui/android_gallery.py`, first run after an emulator boot: "fast typing reaches the app" failed with
+  the field stopped at 58 of 160 characters. It passed on each of the next runs; not reproduced since.

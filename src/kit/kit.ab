@@ -159,6 +159,21 @@ fun searchField(ui: Ui, value: string, placeholder: string, onChange: int): Node
         input(value, placeholder, onChange, oneParts(ui.theme, "SearchField", "", "input", style().grow(1)))
     ])
 
+// A panel floating at `anchor` while `open`: below it, lined up with its "start" or "end" side, above
+// it when only that fits. While open the rest of the screen takes no input: a press outside (and
+// Escape on the web and desktop, the back button on Android) is `onDismiss`, which closes it. Only
+// the app decides `open`. `items` are usually `menuItem`s.
+fun popover(ui: Ui, anchor: Node, open: bool, side: string, onDismiss: int, items: array<Node>): Node {
+    val marked = anchor.set("expanded", if (open) "true" else "false")
+    if (!open) return oneNode("popover", style(), [marked])
+    oneNode("popover", style(), [marked, column(oneParts(ui.theme, "Popover", "", "", style()), items)]).set("side", side).setInt("onDismiss", onDismiss)
+}
+
+fun menuItem(ui: Ui, label: string, selected: bool, onPress: int): Node =
+    pressable(onPress, oneParts(ui.theme, "MenuItem", if (selected) "selected" else "", "", style()), [
+        text(label, oneParts(ui.theme, "MenuItem", if (selected) "selected" else "", "label", style()))
+    ]).set("selected", if (selected) "true" else "false")
+
 fun textField(ui: Ui, value: string, placeholder: string, onChange: int, look: Style): Node =
     input(value, placeholder, onChange, oneParts(ui.theme, "TextField", "", "", look))
 

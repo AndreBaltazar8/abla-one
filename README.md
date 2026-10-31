@@ -19,7 +19,7 @@ class Counter(var count: int by State(0)) : OneApp {
 | Part | State |
 |---|---|
 | Core: `State`, styles, themes, nodes, `Ui` | done |
-| Kit: Button, IconButton, Badge, Chip, Avatar, ListRow, TopBar, TabBar, SearchField, TextField, SectionHeader, Card, EmptyState | done |
+| Kit: Button, IconButton, Badge, Chip, Avatar, ListRow, TopBar, TabBar, SearchField, TextField, SectionHeader, Card, EmptyState, Popover, MenuItem | done |
 | `android` backend (Compose host in abla-mobile) | done |
 | `web-document` server-side rendering | done |
 | `test` backend | done |

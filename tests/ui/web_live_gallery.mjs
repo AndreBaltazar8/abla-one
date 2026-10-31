@@ -8,6 +8,39 @@ const browser = await chromium.launch({executablePath: '/nix/store/62wviylhmg1g9
 let failures = 0;
 const check = (ok, label) => { console.log(ok ? `ok   ${label}` : `FAIL ${label}`); if (!ok) failures++; };
 try {
+  {
+    // The organization switcher: a dropdown on a bar button.
+    const page = await browser.newPage({viewport: {width: 390, height: 844}});
+    await page.goto(base + '/');
+    await page.waitForTimeout(200);
+    const trigger = page.getByRole('button', {name: 'Estúdio Norte'}).first();
+    check(await trigger.getAttribute('aria-expanded') === 'false', 'a closed popover says so');
+    await trigger.click();
+    const item = page.getByRole('button', {name: 'Oficina Sul'});
+    await item.waitFor({timeout: 5000});
+    check(await trigger.getAttribute('aria-expanded') === 'true', 'an open one too');
+    const box = await page.locator('.one-panel').boundingBox();
+    const anchor = await trigger.boundingBox();
+    check(box.y >= anchor.y + anchor.height && box.x + box.width <= 390 - 7 && box.x >= 8, `the panel is below the anchor, inside the window (${JSON.stringify(box)})`);
+    check(await page.evaluate(() => document.activeElement.textContent) === 'Estúdio Norte', 'the focus moves in');
+    await page.screenshot({path: 'build/ui/web-popover.png'});
+    check(await page.evaluate(({x, y}) => !!document.elementFromPoint(x, y).closest('.one-panel'), {x: box.x + 5, y: box.y + 5}), 'it lies over the screen');
+    // A press on what's under it only closes it.
+    await page.mouse.click(195, 500);
+    await item.waitFor({state: 'detached', timeout: 5000});
+    check(await page.getByText('Adicionar (0)').count() === 1, 'a press outside dismisses it, and reaches nothing under it');
+    await page.keyboard.press('Tab');
+    await trigger.click();
+    await item.waitFor({timeout: 5000});
+    await page.keyboard.press('Escape');
+    await item.waitFor({state: 'detached', timeout: 5000});
+    check(true, 'Escape dismisses it');
+    await trigger.click();
+    await item.click();
+    await page.locator('.one-panel').waitFor({state: 'detached', timeout: 5000});
+    check(await page.getByRole('button', {name: 'Oficina Sul'}).count() === 1, 'choosing an item takes effect and closes it');
+    await page.close();
+  }
   const noScript = await browser.newPage({javaScriptEnabled: false});
   await noScript.goto(base + '/');
   check(await noScript.getByText('Adicionar (0)').count() === 1, 'SSR renders the page without JavaScript');

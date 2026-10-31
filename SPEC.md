@@ -224,7 +224,8 @@ component ConversationRow(room: Room, onOpen: () -> void) = $one
 | `input` | single or multi-line text field | value, placeholder, keyboard (`number`, `decimal`, `email`), secure, onChange, onSubmit |
 | `toggle` | switch or checkbox | checked, onChange |
 | `spacer`, `divider` | space and rules | size |
-| `portal` | sheet, dialog, menu or toast layered above the screen | kind, onDismiss |
+| `popover` | an anchor and, while open, a panel floating at it above the screen (kit: `popover`, below) | side, onDismiss |
+| `portal` | sheet, dialog or toast layered above the screen (not built yet) | kind, onDismiss |
 | `native` | escape hatch: a raw node for one named target | target, payload |
 
 Any node may also carry document semantics, which the web document uses
@@ -244,6 +245,28 @@ Higher-level components (`Button`, `Badge`, `Avatar`, `Chip`, `ListRow`,
 `TopBar`, `TabBar`, `SearchField`…) are built from these kinds in the
 standard kit (`one/kit`) and styled by the theme. They aren't backend
 concerns.
+
+A dropdown is `popover(ui, anchor, open, side, onDismiss, items)` with `menuItem(ui, label, selected, onPress)`s:
+
+```abla
+popover(ui, chip(ui, organization, false, ui.press { open = !open }), open, "end", ui.press { open = false }, [
+    menuItem(ui, "Estúdio Norte", organization == "Estúdio Norte", ui.press { organization = "Estúdio Norte"; open = false })
+])
+```
+
+The panel sits below the anchor on the `side` asked for (`start` or `end`), above it when only that fits,
+inside the window, never clipped by a scroll area. Only the app decides `open`. While it's open the rest of
+the screen takes no input, and a press outside is `onDismiss`, on every target:
+
+| Target | The panel | Also dismisses |
+|---|---|---|
+| Web document | fixed in the page by the host; without script, absolute below the anchor | Escape; the focus moves in and comes back |
+| Web canvas, desktop | painted last by one-layout, over everything | Escape on desktop; web-canvas has no key for it |
+| Android | a Compose `Popup` window | the back button |
+| E-paper, full and thin | painted last, like the others; a tap outside dismisses | |
+
+On e-paper it's a plain bordered panel with no shadow, and opening or closing it is a partial refresh
+of what it covers. Checked by host tests, not on a device. There's no `$one` tag yet.
 
 ## 7. Layout
 
@@ -487,7 +510,8 @@ if (kind == "route") {
 | Web, live and Wasm | the browser's (`pushState`, `popstate`, title) | the browser's; `services.back` | window and scroll areas, per entry, also across a reload |
 | Web, canvas | the same, `?render=canvas` stays in the URL | the same | on the server, per entry |
 | Android | a stack (at most 64 entries) | the system button walks it, then leaves the app | saved state of the entry |
-| Desktop, e-paper (full and thin) | a stack; thin, on the server | the app's (`services.back`) | per entry, the last 16 |
+| Desktop | a stack | the mouse's back and forward buttons, Alt+Left and Alt+Right; `services.back` | per entry, the last 16 |
+| E-paper (full and thin) | a stack; thin, on the server | the app's (`services.back`) | per entry, the last 16 |
 
 **Web pages.** The live server claims paths through `isPage`, a predicate, or
 `oneLivePaths(["/", "/people", "/form/:n", "/docs/*"])`. A GET of a claimed path renders
@@ -510,8 +534,9 @@ page (`examples/gallery/web.ab`).
 
 **Android.** A VIEW intent reaches the app as `receive("openUrl", ...)` as before, with
 the whole URL, then as a route (`oneRouteFromUrl`: path and query, whatever the scheme, no
-fragment). The app declares its links with a `MobileAndroidIntentFilter`. A cold start shows
-the `/` route until the link arrives, about half a second later, and back then goes to it.
+fragment). The app declares its links with a `MobileAndroidIntentFilter`. There's one activity
+(`singleTask`), so a link with the app open reaches it there. A link that starts the app shows its route
+from the first frame (the host holds the first tree back for it), and back then goes to `/`.
 
 **Protocol.** Page to session: `{t:"event", r, id, v}`, with `c`, a running number, for typing;
 `{t:"route", p, e, n}` when the browser moves, and `e` in `hello`. Session to page, with the next patch or frame (sent even when the markup is the

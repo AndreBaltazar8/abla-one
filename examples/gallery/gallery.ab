@@ -27,6 +27,8 @@ class Gallery(
     var sent: string by State(""),
     var carried: string by State(""),
     var plain: string by State(""),
+    var switcherOpen: bool by State(false),
+    var organization: string by State("Estúdio Norte"),
     var page: string = "/"
 ) : OneApp {
     fun people(): array<Person> = [
@@ -50,12 +52,21 @@ class Gallery(
     }
 
     fun screen(var ui: Ui): Node = if (page.startsWith("/field/")) fieldScreen(ui) else if (page.startsWith("/same/")) sameScreen(ui) else if (moment != "") momentScreen(ui) else if (form > 0) formScreen(ui).keyed("form-$form") else column(style().fill().background("@surface"), [
-        topBar(ui, [], text("Abla One", style().text("title")), [iconButton(ui, "icon_bell", "Avisos", ui.press { count = 0 }, style())]),
+        topBar(ui, [], text("Abla One", style().text("title")), [organizationSwitcher(ui), iconButton(ui, "icon_bell", "Avisos", ui.press { count = 0 }, style())]),
         scroll(style().grow(1), [
             if (tab == 0) components(ui) else peopleList(ui)
         ]),
         tabBar(ui, [TabItem("nav_home", "Componentes", ui.press { services.navigate("/${search()}") }), TabItem("nav_team", "Pessoas", ui.press { services.navigate("/people${search()}") })], tab)
     ])
+
+    // A dropdown on a bar button: choosing closes it, and so does a press outside.
+    fun organizationSwitcher(var ui: Ui): Node {
+        val items: array<Node> = []
+        for (name in ["Estúdio Norte", "Oficina Sul", "Atelier Centro"]) {
+            items.append(menuItem(ui, name, name == organization, ui.press { organization = name; switcherOpen = false }))
+        }
+        popover(ui, chip(ui, organization, false, ui.press { switcherOpen = !switcherOpen }).set("label", organization), switcherOpen, "end", ui.press { switcherOpen = false }, items)
+    }
 
     fun components(var ui: Ui): Node = column(style().gap(4), [
         sectionHeader(ui, "BOTÕES", none()),
@@ -90,6 +101,10 @@ class Gallery(
         column(style().paddingX(16).paddingTop(12).gap(8), [
             button(ui, "Abrir formulário", "secondary", ui.press { services.navigate("/form/1") }, style()),
             routeLink("/people", ui.press { services.navigate("/people${search()}") }, style().paddingY(6), [text("Ver pessoas", style().text("label"))])
+        ]),
+        sectionHeader(ui, "CÓDIGO", none()),
+        column(style().paddingX(16), [
+            bitmap("1110111" + "1010101" + "1110111" + "0001000" + "1110111" + "1010001" + "1110111", 7, "Código de exemplo", style().size(84))
         ]),
         spacer(24)
     ])

@@ -110,6 +110,12 @@ fun oneDefaultTheme(): Theme {
     t.define("SectionHeader.label", style().text("label-sm").color("@muted").tracking(20))
 
     t.define("Card", style().padding(16).gap(12).radius(16).background("@surface").border(1, "@line"))
+    t.define("Popover", style().padding(6).gap(2).minWidth(200).radius(12).background("@surface").border(1, "@line").set("elevation", "6"))
+    t.define("MenuItem", style().minHeight(44).paddingX(12).radius(8).justify("center").pressed(style().background("@surface-alt")).on("web", style().hover(style().background("@surface-alt"))))
+    t.define("MenuItem.label", style().text("body").color("@ink").maxLines(1))
+    t.define("MenuItem.selected", style().background("@surface-alt"))
+    t.define("MenuItem.selected.label", style().weight("semibold"))
+
     t.define("EmptyState", style().paddingX(32).paddingY(48).gap(6).align("center"))
     t.define("EmptyState.title", style().text("title").color("@ink").textAlign("center"))
     t.define("EmptyState.body", style().text("body-sm").color("@muted").textAlign("center"))

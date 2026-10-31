@@ -2,7 +2,34 @@ import "abla/test"
 import "../../src/one_kit.ab"
 import "../../src/layout/paint.ab"
 
+fun press(var ui: Ui, label: string): Node = button(ui, label, "plain", ui.press { }, style())
+
 fun main: int {
+    // A popover: only the anchor takes room, the panel is painted last and on the side asked for, and
+    // while it's open a press anywhere else is its dismissal.
+    var pop = oneUi("t", oneDefaultTheme())
+    val below = press(pop, "Abaixo")
+    val trigger = press(pop, "Abrir")
+    val choice = press(pop, "Escolher")
+    val close = pop.press { }
+    val popped = column(style().fill(), [
+        row(style().height(40), [spacer(200), popover(pop, trigger, true, "end", close, [choice])]),
+        below
+    ])
+    val closed = column(style().fill(), [row(style().height(40), [spacer(200), popover(pop, trigger, false, "end", close, [choice])]), below])
+    val popFrame = onePaintFrame(oneLayout(popped, oneDefaultTheme(), "desktop", 400, 300, Map()), 400, 300)
+    val closedFrame = onePaintFrame(oneLayout(closed, oneDefaultTheme(), "desktop", 400, 300, Map()), 400, 300)
+    expectEqual(closedFrame.hits.size, 2, "closed: the anchor and what's below")
+    val lastPaint = popFrame.paints[popFrame.paints.size - 1]
+    expectEqual(lastPaint.text, "Escolher", "the panel is painted last, over what's below")
+    expectEqual(popFrame.hits.size, 2, "open: what's under it takes no input")
+    expectEqual(popFrame.hits[0].w, 400, "a press outside covers the window")
+    expectEqual(popFrame.hits[0].event, close, "and dismisses")
+    expect(popFrame.hits[1].x + popFrame.hits[1].w <= 392, "the panel stays inside the window (${popFrame.hits[1].x}+${popFrame.hits[1].w})")
+    expect(popFrame.hits[1].y >= 40, "below the anchor")
+    val lowFrame = onePaintFrame(oneLayout(column(style().fill().justify("end"), [popover(pop, trigger, true, "start", close, [choice])]), oneDefaultTheme(), "desktop", 400, 300, Map()), 400, 300)
+    expect(lowFrame.hits[1].y + lowFrame.hits[1].h <= 292 && lowFrame.hits[1].y < 250, "above it when only that fits (${lowFrame.hits[1].y})")
+
     // Text metrics: Inter "n" is 0.584 em? Use relations rather than constants.
     val w15 = oneTextWidth("Olá", 15, "regular")
     expect(w15 > 15 && w15 < 40, "text width is plausible ($w15)")

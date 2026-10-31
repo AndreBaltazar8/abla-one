@@ -92,7 +92,9 @@ class OneDesktopState(
     val routes: OneRoutes,
     val routeScrolls: OneRouteScrolls = oneRouteScrolls(),
     // The route epoch of the frame on screen: a press on it is for that route.
-    var routeEpoch: int = 0
+    var routeEpoch: int = 0,
+    // An Alt key is down: abla-graphics reports keys, not modifiers.
+    var alt: bool = false
 )
 
 // One frame: render, lay out, paint. Visible feed rows are delivered first.
@@ -126,6 +128,16 @@ fun oneDesktopHit(frame: OneFrame, x: int, y: int, kind: string): int {
     while (i >= 0) {
         val h = frame.hits[i]
         if (h.kind == kind && x >= h.x && x < h.x + h.w && y >= h.y && y < h.y + h.h) return i
+        i = i - 1
+    }
+    -1
+}
+
+// The press that closes the open popover on top (onePaintPopovers), or -1.
+fun oneDesktopDismiss(frame: OneFrame): int {
+    var i = frame.hits.size - 1
+    while (i >= 0) {
+        if (frame.hits[i].key == "dismiss") return i
         i = i - 1
     }
     -1
@@ -225,6 +237,21 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                         state.dirty = true
                     }
                 }
+            } else if (event.kind == windowEventPointerButton && (event.pointerButton() == pointerButtonBack || event.pointerButton() == pointerButtonForward)) {
+                // The mouse's own buttons, as in a browser.
+                if (event.pointerButtonPressed()) {
+                    if (event.pointerButton() == pointerButtonBack) state.routes.back("") else state.routes.forward()
+                    state.dirty = true
+                }
+            } else if (event.kind == windowEventKey && (event.key() == keyLeftAlt || event.key() == keyRightAlt)) {
+                state.alt = event.keyPressed()
+            } else if (event.kind == windowEventKey && event.keyPressed() && state.alt && (event.key() == keyLeft || event.key() == keyRight)) {
+                // Alt+Left and Alt+Right, as in a browser.
+                if (event.key() == keyLeft) state.routes.back("") else state.routes.forward()
+                state.dirty = true
+            } else if (event.kind == windowEventKey && event.keyPressed() && event.key() == keyEscape && oneDesktopDismiss(frame) >= 0) {
+                oneDesktopDeliver(app, theme, state, frame.hits[oneDesktopDismiss(frame)].event, "")
+                state.dirty = true
             } else if (event.kind == windowEventPointerButton && event.pointerButton() == pointerButtonLeft) {
                 if (event.pointerButtonPressed()) {
                     state.downX = state.pointerX
