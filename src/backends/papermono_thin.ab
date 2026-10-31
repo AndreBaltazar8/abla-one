@@ -106,6 +106,27 @@ trusted fun oneThinRequest(config: OneThinConfig, method: string, path: string):
     if (body + 4 <= text.size) text.slice(body + 4, text.size) else ""
 }
 
+// A value for a query string.
+fun oneThinEscape(value: string): string {
+    val digits = "0123456789ABCDEF"
+    var out = ""
+    for (b in value) {
+        val plain = (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
+        out = if (plain) "$out${oneThinByte(b)}" else "$out%${digits.slice(b / 16, b / 16 + 1)}${digits.slice(b % 16, b % 16 + 1)}"
+    }
+    out
+}
+
+fun oneThinByte(b: int): string {
+    val letters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    var i = 0
+    while (i < letters.size) {
+        if (letters[i] == b) return letters.slice(i, i + 1)
+        i = i + 1
+    }
+    ""
+}
+
 trusted fun oneThinConnect(config: OneThinConfig): void {
     while (!wifiHasAddress()) {
         if (!wifiJoin(config.ssid, config.ssidLength, config.password, config.passwordLength, 15000)) println("papermono: no Wi-Fi yet")
@@ -143,9 +164,13 @@ trusted fun onePaperMonoRunThin(theme: Theme, icons: OneIconSource, config: OneT
         var draw = false
         val started = onePaperMonoMilliseconds()
         if (gesture == paperMonoGestureTap) {
-            val event = oneEpaperPressAt(state, paperMonoGestureAtX(), paperMonoGestureAtY())
-            if (event > 0) {
-                draw = app.update(oneThinRequest(config, "POST", "/one/thin/event?id=$event"))
+            val tap = oneEpaperTap(state, paperMonoGestureAtX(), paperMonoGestureAtY())
+            if (tap.redraw) {
+                oneInvalidate()
+                draw = true
+            }
+            if (tap.event > 0) {
+                draw = app.update(oneThinRequest(config, "POST", "/one/thin/event?id=${tap.event}&value=${oneThinEscape(tap.value)}")) || draw
                 lastPoll = onePaperMonoMilliseconds()
             }
         } else if (gesture == paperMonoGestureSwipe) {

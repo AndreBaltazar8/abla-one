@@ -181,5 +181,64 @@ fun main: int {
     shown.tab = 1
     oneEpaperRender(shown, t, shownState, fileIcons())
     Path("build/ui/epaper-gallery-people.png").writeText(oneEpaperPreview(shownState))
+    oneEpaperKeyboardTest()
     testsPassed()
+}
+
+class Form(var mail: string by State("")) : OneApp {
+    fun render(var ui: Ui): Node = column(style().fill(), [
+        input(mail, "email", ui.change { value -> mail = value }, style().height(40)),
+        text("typed: $mail", style())
+    ])
+    fun receive(kind: string, value: string): void {
+        return
+    }
+}
+
+// Where a key's centre is in panel pixels.
+fun keyTap(var app: OneApp, t: Theme, var state: OneEpaperState, label: string): void {
+    var index = 0
+    var found = -1
+    for (r in oneEpaperLayers[state.keyLayer]) {
+        for (word in oneEpaperKeyWords(r)) {
+            index = index + 1
+            if (word == label) found = index
+        }
+    }
+    expect(found > 0, "key $label")
+    for (h in state.frame.hits) {
+        if (h.event == oneEpaperKeyBase + found) {
+            expect(oneEpaperTouch(app, t, state, (h.x + h.w / 2) * state.options.scale / 100, (h.y + h.h / 2) * state.options.scale / 100), "key $label acts")
+            oneEpaperRender(app, t, state, OneIconSource({ name -> "" }))
+            return
+        }
+    }
+    expect(false, "key $label on screen")
+    return
+}
+
+fun oneEpaperKeyboardTest(): void {
+    val t = theme()
+    var app = Form()
+    var state = oneEpaperState(onePaperMonoOptions())
+    oneEpaperRender(app, t, state, OneIconSource({ name -> "" }))
+    expect(oneEpaperTouch(app, t, state, 100, 20), "an input opens the keyboard")
+    oneEpaperRender(app, t, state, OneIconSource({ name -> "" }))
+    expect(state.typingEvent != 0, "typing")
+    keyTap(app, t, state, "⇧")
+    keyTap(app, t, state, "A")
+    expectEqual(state.keyLayer, 0, "one capital")
+    keyTap(app, t, state, "b")
+    keyTap(app, t, state, "#")
+    keyTap(app, t, state, "ã")
+    keyTap(app, t, state, "<")
+    keyTap(app, t, state, "1")
+    keyTap(app, t, state, "espaço")
+    keyTap(app, t, state, "#")
+    keyTap(app, t, state, "@")
+    expectEqual(app.mail, "Ab1 @", "the app gets the text")
+    keyTap(app, t, state, "OK")
+    expectEqual(state.typingEvent, 0, "closed")
+    expect(state.frame.hits.size == 1, "keys gone")
+    return
 }

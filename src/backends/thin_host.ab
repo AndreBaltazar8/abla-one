@@ -8,7 +8,7 @@ import "web_live.ab"
 // itself, so scrolling never waits on the network. Mount on any server:
 //
 //   GET  /one/thin/tree?have=<revision>     → 200 tree (core/wire.ab), or 204
-//   POST /one/thin/event?id=<event>         → 200 the tree after it, with `value` as the body
+//   POST /one/thin/event?id=<event>&value=<text>       → 200 the tree after it, and `value` for an input
 //
 // The app's services are a session queue ("thin"): timers run on each request, and
 // its requests go to `handler` (relative URLs, in process).
@@ -72,7 +72,7 @@ fun OneThinHost.handle(request: HttpRequest): HttpResponse? {
         return oneThinAnswer(if (oneParseInt(request.queryParameter("have"), -1) == revision) "" else tree)
     }
     if (request.path == "/one/thin/event" && request.method == "POST") {
-        oneDispatch(app, target, theme, oneParseInt(request.queryParameter("id"), 0), request.body, width)
+        oneDispatch(app, target, theme, oneParseInt(request.queryParameter("id"), 0), request.queryParameter("value"), width)
         // A handler can change what state can't see (plain fields).
         oneInvalidate()
         refresh()

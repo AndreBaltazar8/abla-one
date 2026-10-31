@@ -75,7 +75,12 @@ class OneEpaperState(
     var boxRevision: int = -1,
     var scrolled: bool = false,
     // Which 8x8 tiles a render changed, kept: the array is a tenth of a render's garbage.
-    val dirty: array<int> = []
+    val dirty: array<int> = [],
+    // The on-screen keyboard (oneEpaperTap): the input it types into (its change
+    // event, 0 when closed), that input's text, and its layer.
+    var typingEvent: int = 0,
+    var typed: string = "",
+    var keyLayer: int = 0
 )
 
 fun oneEpaperBandSurface(options: OneEpaperOptions): OneSurface {
@@ -227,7 +232,8 @@ fun oneEpaperRenderTree(tree: Node, theme: Theme, var state: OneEpaperState, ico
 
 fun oneEpaperLayOut(tree: Node, theme: Theme, var state: OneEpaperState): void {
     val o = state.options
-    val laid = oneLayoutCached(tree, theme, "epaper", oneEpaperLogicalWidth(o), oneEpaperLogicalHeight(o), state.scroll, state.layoutCache)
+    val shown = if (state.typingEvent != 0) column(style().fill(), [tree.styled(style().set("height", "fill")), oneEpaperKeyboard(state.keyLayer)]) else tree
+    val laid = oneLayoutCached(shown, theme, "epaper", oneEpaperLogicalWidth(o), oneEpaperLogicalHeight(o), state.scroll, state.layoutCache)
     state.boxes.clear()
     state.boxes.append(laid)
     return
@@ -605,22 +611,118 @@ fun oneEpaperPlaneLevel(planes: array<int>, px: int, py: int): int {
 
 fun oneEpaperBit(position: int): int = if (position == 0) 128 else if (position == 1) 64 else if (position == 2) 32 else if (position == 3) 16 else if (position == 4) 8 else if (position == 5) 4 else if (position == 6) 2 else 1
 
-// The event of what is pressable at a portrait panel pixel, 0 if nothing is.
-fun oneEpaperPressAt(state: OneEpaperState, x: int, y: int): int {
+// A tap's result for the app: an event to deliver (0: none) with its value. `redraw`
+// when the screen changes without one (the keyboard opening).
+class OneEpaperTap(val event: int, val value: string, val redraw: bool)
+
+// Handles a tap at a portrait panel pixel: an input opens the keyboard, a key edits
+// the text here and delivers it as the input's change, anything else is a press.
+fun oneEpaperTap(var state: OneEpaperState, x: int, y: int): OneEpaperTap {
     val lx = x * 100 / state.options.scale
     val ly = y * 100 / state.options.scale
     var i = state.frame.hits.size - 1
     while (i >= 0) {
         val h = state.frame.hits[i]
-        if (h.kind == "press" && lx >= h.x && lx < h.x + h.w && ly >= h.y && ly < h.y + h.h) return h.event
+        if (lx >= h.x && lx < h.x + h.w && ly >= h.y && ly < h.y + h.h) {
+            if (h.kind == "press" && h.event > oneEpaperKeyBase && h.event < oneChangeBase) return oneEpaperKey(state, h.event - oneEpaperKeyBase - 1)
+            if (h.kind == "press") return OneEpaperTap(h.event, "", false)
+            if (h.kind == "input") {
+                state.typingEvent = h.event
+                state.typed = h.value
+                state.keyLayer = 0
+                return OneEpaperTap(0, "", true)
+            }
+        }
         i = i - 1
     }
-    0
+    OneEpaperTap(0, "", false)
 }
 
-// A tap at a portrait panel pixel. Returns whether a handler ran.
-fun oneEpaperTouch(var app: OneApp, theme: Theme, state: OneEpaperState, x: int, y: int): bool =
-    oneDispatch(app, "epaper", theme, oneEpaperPressAt(state, x, y), "", oneEpaperLogicalWidth(state.options))
+val oneEpaperKeyBase = 900000
+// A row of a layer, a key per space-separated word. Special keys: "⇧" and "#" change
+// layer, "<" deletes, "OK" closes, and "_" under the space bar is a space.
+val oneEpaperLayers: array<array<string>> = [
+    ["q w e r t y u i o p", "a s d f g h j k l", "⇧ z x c v b n m <", "# @ . espaço OK"],
+    ["Q W E R T Y U I O P", "A S D F G H J K L", "⇧ Z X C V B N M <", "# @ . espaço OK"],
+    ["1 2 3 4 5 6 7 8 9 0", "- _ / : ; ( ) & ! ?", "á à ã â é ê í ó õ ú", "ç + = , < # espaço OK"]
+]
+
+fun oneEpaperKeyWords(row: string): array<string> {
+    val words: array<string> = []
+    var start = 0
+    var i = 0
+    while (i <= row.size) {
+        if (i == row.size || row[i] == 32) {
+            words.append(row.slice(start, i))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    words
+}
+
+fun oneEpaperKeyAt(layer: int, index: int): string {
+    var at = 0
+    for (row in oneEpaperLayers[layer]) {
+        for (word in oneEpaperKeyWords(row)) {
+            if (at == index) return word
+            at = at + 1
+        }
+    }
+    ""
+}
+
+fun oneEpaperKey(var state: OneEpaperState, index: int): OneEpaperTap {
+    val key = oneEpaperKeyAt(state.keyLayer, index)
+    if (key == "OK") {
+        state.typingEvent = 0
+        return OneEpaperTap(0, "", true)
+    }
+    if (key == "⇧") {
+        state.keyLayer = if (state.keyLayer == 0) 1 else 0
+        return OneEpaperTap(0, "", true)
+    }
+    if (key == "#") {
+        state.keyLayer = if (state.keyLayer == 2) 0 else 2
+        return OneEpaperTap(0, "", true)
+    }
+    if (key == "<") {
+        if (state.typed.size == 0) return OneEpaperTap(0, "", false)
+        // A whole UTF-8 character.
+        var end = state.typed.size - 1
+        while (end > 0 && state.typed[end] >= 128 && state.typed[end] < 192) end = end - 1
+        state.typed = state.typed.slice(0, end)
+    } else {
+        state.typed = "${state.typed}${if (key == "espaço") " " else key}"
+        // One capital, then back to lower case.
+        if (state.keyLayer == 1) state.keyLayer = 0
+    }
+    OneEpaperTap(state.typingEvent, state.typed, false)
+}
+
+fun oneEpaperKeyboard(layer: int): Node {
+    val rows: array<Node> = []
+    var at = 0
+    for (row in oneEpaperLayers[layer]) {
+        val keys: array<Node> = []
+        for (word in oneEpaperKeyWords(row)) {
+            at = at + 1
+            val wide = word == "espaço"
+            keys.append(pressable(oneEpaperKeyBase + at, style().grow(if (wide) 4 else 1).height(44).align("center").justify("center").border(1, "#000000").radius(6),
+                [text(word, style().fontSize(16).weight("medium"))]))
+        }
+        rows.append(row(style().gap(2).fillWidth(), keys))
+    }
+    column(style().gap(2).padding(2).background("#ffffff").borderTop(1, "#000000"), rows)
+}
+
+// A tap at a portrait panel pixel. Returns whether the screen may have changed.
+fun oneEpaperTouch(var app: OneApp, theme: Theme, var state: OneEpaperState, x: int, y: int): bool {
+    val tap = oneEpaperTap(state, x, y)
+    if (tap.redraw) oneInvalidate()
+    val handled = oneDispatch(app, "epaper", theme, tap.event, tap.value, oneEpaperLogicalWidth(state.options))
+    handled || tap.redraw
+}
 
 // A swipe at portrait pixel (x, y): scrolls the innermost scroll area there
 // by `dy` panel pixels (positive moves the content up, as a finger dragging
