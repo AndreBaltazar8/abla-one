@@ -23,12 +23,19 @@ def tap(text):
     b = bounds(n)
     adb('shell', 'input', 'tap', str((b[0] + b[2]) // 2), str((b[1] + b[3]) // 2))
     time.sleep(0.8)
+def dismiss_system_dialog():
+    # The system's "isn't responding" dialog, seen for System UI after a boot under load, takes every tap and key meant for the app.
+    if 'Application Not Responding' in adb('shell', 'dumpsys', 'window'):
+        print('dismissed the system\'s "isn\'t responding" dialog')
+        adb('shell', 'input', 'keyevent', '4')
+        time.sleep(1)
 def check(ok, label):
     global failures
     if not ok:
         failures += 1
         print('FAIL', label)
 
+dismiss_system_dialog()
 adb('install', '-r', APK)
 adb('shell', 'am', 'force-stop', PACKAGE)
 adb('shell', 'monkey', '-p', PACKAGE, '1')
@@ -72,7 +79,9 @@ check(find('Nome') is not None, 'form opens')
 # straight after and the render can't keep up. Far more than the event queue holds.
 typed = 'abcdefghij' * 16
 tap('Nome')
-adb('shell', 'input', 'text', typed)
+# In parts: `input text` stops after about 10 s, silently and with status 0, so on a slow emulator a whole string loses its tail
+# before the app sees it: the field held a clean prefix each time, in 10.2 to 11.1 s, and whole strings took at most 7.8 s.
+for part in range(0, len(typed), 40): adb('shell', 'input', 'text', typed[part:part + 40])
 tap('Valor')
 shown = find('Nome: ' + typed, tries=40)
 check(shown is not None, 'fast typing reaches the app')

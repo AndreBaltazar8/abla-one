@@ -30,18 +30,13 @@
 
 ## Abla One bugs seen
 
-- `make ui-android-services` doesn't build its APK, so it can run a stale one (seen 2026-10-31).
 - PaperMono thin mode after the compact storage change: it links (`make papermono-gallery MODE=thin
   ONE_HOST=...`, again on 2026-10-31 with the Wi-Fi change) and `make ui-thin` passes on the host, but it hasn't run
   on a device.
 - PaperMono: joining Wi-Fi in the background is tested on the host and builds; it hasn't run on a device. Check
   boots join without "Sem ligação".
-- `tests/ui/android_gallery.py`, first run after an emulator boot: "fast typing reaches the app" failed with
-  the field stopped at 58 of 160 characters. It passed on each of the next runs; not reproduced since.
-
 ## Tools in Python
 
 - [ ] `tools/vector2svg.py`, `tools/fonts.py` and `tools/icons-ab.py` are Python. NovaKind no longer calls
       `vector2svg.py` (`novakind-tool icons`, byte-identical on its 33 icons, could move here for other apps).
-- tests/integration/client.ab "a tick before the timer is due" can fail under heavy load (seen at load ~100; passes alone).
 - Android: scrollRow ran on a phone through Crew (2026-11-01); wrap compiles but hasn't been seen on a device.

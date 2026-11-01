@@ -40,6 +40,12 @@ def log_line(prefix, timeout=40):
                 if line.startswith(prefix + ':'): return line
         time.sleep(1)
     return ''
+def dismiss_system_dialog():
+    # The system's "isn't responding" dialog, seen for System UI after a boot under load, takes every tap and key meant for the app.
+    if 'Application Not Responding' in adb('shell', 'dumpsys', 'window'):
+        print('dismissed the system\'s "isn\'t responding" dialog')
+        adb('shell', 'input', 'keyevent', '4')
+        time.sleep(1)
 def check(ok, label, detail=''):
     global failures
     if not ok:
@@ -71,6 +77,7 @@ try:
     subprocess.run(['dd', 'if=/dev/urandom', 'of=/tmp/abla-one-upload.bin', 'bs=1024', 'count=1536'], check=True, capture_output=True)
     adb('push', '/tmp/abla-one-upload.bin', '/sdcard/Download/abla-one-upload.bin')
     adb('shell', 'am', 'broadcast', '-a', 'android.intent.action.MEDIA_SCANNER_SCAN_FILE', '-d', 'file:///sdcard/Download/abla-one-upload.bin')
+    dismiss_system_dialog()
     adb('shell', 'am', 'force-stop', PACKAGE)
     adb('shell', 'monkey', '-p', PACKAGE, '1')
     find('JSON PUT')
