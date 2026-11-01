@@ -198,8 +198,7 @@ fun oneDesktopCaret(var surface: OneSurface, frame: OneFrame, key: string): void
     val hitIndex = oneDesktopInput(frame, key)
     if (hitIndex < 0) return
     val h = frame.hits[hitIndex]
-    val cx = oneCaretX(frame, h)
-    oneFillRect(surface, cx, h.y + h.h / 2 - 10, 2, 20, 1653808, 255)
+    oneFillRect(surface, h.caretX, h.caretY - 10, oneCaretWidth, 20, 1653808, 255)
     return
 }
 

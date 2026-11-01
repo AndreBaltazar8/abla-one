@@ -29,7 +29,9 @@ class OneHit(
     val key: string,       // layout path (scroll areas) or node key
     val value: string,
     val placeholder: string,
-    val multiline: bool    // or, for a scroll area, that it follows its end
+    val multiline: bool,   // or, for a scroll area, that it follows its end
+    val caretX: int = 0,   // input: where the caret goes, after the text
+    val caretY: int = 0    // input: the middle of the caret's line
 )
 
 // A feed row fully inside its viewport: deliver `event` with `item` to mark it read.
@@ -76,6 +78,20 @@ fun onePopoversIn(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: stri
     return
 }
 
+val oneCaretWidth = 2
+
+// The end of `value`, from the first character that doesn't fit `room` on: it's only
+// partly seen, so what's left of the field is never empty. All of it when it fits.
+fun oneInputTail(value: string, size: int, weight: string, room: int): string {
+    var start = value.size
+    while (start > 0) {
+        start = start - 1
+        while (start > 0 && value[start] >= 128 && value[start] < 192) start = start - 1
+        if (oneTextWidth(value.slice(start, value.size), size, weight) > room) return value.slice(start, value.size)
+    }
+    value
+}
+
 fun oneRect(op: string, x: int, y: int, w: int, h: int, radius: int, color: string): OnePaint = OnePaint(op, x, y, w, h, radius, color, "", 0, "", "")
 
 // `cx..cy` with `cw × ch` is the current clip, for visibility tests.
@@ -118,14 +134,45 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
         val value = box.node.attr("value")
         val size = r.int("size", 16)
         val lh = oneLineHeight(r)
-        val shown = if (value == "") box.node.attr("placeholder") else value
+        val weight = r.get("weight")
+        val inner = box.w - pl - pr
+        val multiline = box.node.attr("multiline") == "true"
         val color = if (value == "") r.get("placeholderColor") else r.get("color")
-        var line = 0
-        for (text in oneWrap(shown, size, r.get("weight"), box.w - pl - pr, if (box.node.attr("multiline") == "true") r.int("maxLines", 5) else 1)) {
-            frame.paints.append(OnePaint("text", x + pl, y + (box.h - lh * (if (box.node.attr("multiline") == "true") 1 else 1)) / 2 + line * lh, box.w - pl - pr, lh, 0, if (color != "") color else "#888888", text, size, r.get("weight"), ""))
-            line = line + 1
+        val ink = if (color != "") color else "#888888"
+        var caretX = x + pl
+        var caretY = y + box.h / 2
+        if (value != "" && !multiline) {
+            // The caret stays at the end, so the end is what shows: text too long for
+            // the field slides left under a clip, keeping room for the caret itself.
+            val tail = oneInputTail(value, size, weight, inner - oneCaretWidth)
+            val width = oneTextWidth(tail, size, weight)
+            val over = width + oneCaretWidth - inner
+            val tx = x + pl - (if (over > 0) over else 0)
+            if (over > 0) frame.paints.append(oneRect("clip", x + pl, y, inner, box.h, 0, ""))
+            frame.paints.append(OnePaint("text", tx, y + (box.h - lh) / 2, width, lh, 0, ink, tail, size, weight, ""))
+            if (over > 0) frame.paints.append(oneRect("unclip", x + pl, y, inner, box.h, 0, ""))
+            caretX = tx + width
+        } else {
+            // The rows that fit: a value's last ones, as new text arrives at the end.
+            val most = if (multiline) r.int("maxLines", 5) else 1
+            val lines = if (value == "") oneWrap(box.node.attr("placeholder"), size, weight, inner, most) else oneWrap(value, size, weight, inner, 0)
+            val first = if (lines.size > most) lines.size - most else 0
+            val top = y + (box.h - lh * (lines.size - first)) / 2
+            var line = first
+            while (line < lines.size) {
+                frame.paints.append(OnePaint("text", x + pl, top + (line - first) * lh, inner, lh, 0, ink, lines[line], size, weight, ""))
+                line = line + 1
+            }
+            if (value != "") {
+                // The word wrapper drops the spaces at the end, so those are added back.
+                var end = value.size
+                while (end > 0 && value[end - 1] == 32) end = end - 1
+                caretX = x + pl + oneTextWidth("${lines[lines.size - 1]}${value.slice(end, value.size)}", size, weight)
+                caretY = top + (lines.size - first - 1) * lh + lh / 2
+            }
         }
-        frame.hits.append(OneHit("input", x, y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), path, value, box.node.attr("placeholder"), box.node.attr("multiline") == "true"))
+        val rightmost = x + box.w - pr - oneCaretWidth
+        frame.hits.append(OneHit("input", x, y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), path, value, box.node.attr("placeholder"), multiline, if (caretX > rightmost) rightmost else caretX, caretY))
     }
     if (kind == "pressable" || kind == "link") {
         val event = oneParseInt(box.node.attr("onPress"), 0)
@@ -184,27 +231,6 @@ fun oneFrameJson(frame: OneFrame): string {
         hits.append(jsonArray([jsonString(h.kind), jsonInteger(h.x), jsonInteger(h.y), jsonInteger(h.w), jsonInteger(h.h), jsonInteger(h.event), jsonInteger(h.submit), jsonString(h.key), jsonString(h.value), jsonString(h.placeholder), jsonBoolean(h.multiline)]))
     }
     jsonStringify(jsonObject(["w", "h", "paints", "hits"], [jsonInteger(frame.width), jsonInteger(frame.height), jsonArray(paints), jsonArray(hits)]))
-}
-
-// Where a caret goes in a field, after its text. What's painted went through
-// the word wrapper, which drops the spaces at the end, so those are added back.
-fun oneCaretX(frame: OneFrame, field: OneHit): int {
-    var x = field.x + 16
-    var size = 16
-    var weight = ""
-    if (field.value != "") {
-        for (p in frame.paints) {
-            if (p.op == "text" && p.x >= field.x && p.y >= field.y && p.x < field.x + field.w && p.y < field.y + field.h) {
-                x = p.x + oneTextWidth(p.text, p.size, p.weight)
-                size = p.size
-                weight = p.weight
-            }
-        }
-    }
-    var end = field.value.size
-    while (end > 0 && field.value[end - 1] == 32) end = end - 1
-    if (end < field.value.size) x = x + oneTextWidth(field.value.slice(end, field.value.size), size, weight)
-    x
 }
 
 // Scrolls a scroll area to `offset`. A feed left at its end has no saved offset,

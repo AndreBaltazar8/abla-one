@@ -77,17 +77,29 @@ fun testScrollRow(): void {
     return
 }
 
-fun caretFor(value: string): int {
+fun fieldFrame(value: string, multiline: bool): OneFrame {
     val theme = oneDefaultTheme()
-    val frame = onePaintFrame(oneLayout(column(style().fill(), [input(value, "Type", 1, style().padding(16))]), theme, "desktop", 300, 200, Map()), 300, 200)
+    val field = input(value, "Type", 1, style().padding(16).set("maxLines", "2"))
+    onePaintFrame(oneLayout(column(style().fill(), [if (multiline) field.set("multiline", "true") else field]), theme, "desktop", 300, 200, Map()), 300, 200)
+}
+
+fun fieldHit(frame: OneFrame): OneHit {
     var found = -1
     var index = 0
     while (index < frame.hits.size) {
         if (frame.hits[index].kind == "input") found = index
         index = index + 1
     }
-    oneCaretX(frame, frame.hits[found])
+    frame.hits[found]
 }
+
+fun fieldText(frame: OneFrame): array<OnePaint> {
+    val texts: array<OnePaint> = []
+    for (p in frame.paints) if (p.op == "text") texts.append(p)
+    texts
+}
+
+fun caretFor(value: string): int = fieldHit(fieldFrame(value, false)).caretX
 
 fun testCaret(): void {
     val empty = caretFor("")
@@ -98,6 +110,44 @@ fun testCaret(): void {
     expect(caretFor("ab  ") > spaced, "caret: and another moves it again")
     expect(caretFor(" ") > empty, "caret: only a space moves it too")
     expect(caretFor("ab c") > spaced, "caret: the next letter still moves it on")
+    return
+}
+
+fun endsWith(text: string, end: string): bool = text.size >= end.size && text.slice(text.size - end.size, text.size) == end
+
+fun testFieldShowsItsEnd(): void {
+    var long = ""
+    var index = 0
+    while (index < 40) {
+        long = "${long}palavra "
+        index = index + 1
+    }
+    val frame = fieldFrame("${long}fim", false)
+    val hit = fieldHit(frame)
+    val texts = fieldText(frame)
+    expectEqual(texts.size, 1, "long field: one line")
+    expect(endsWith(texts[0].text, "fim"), "long field: the newest text is what's painted")
+    expect(texts[0].x < hit.x + 16, "long field: it slid left")
+    expectEqual(texts[0].x + texts[0].w, hit.caretX, "long field: the caret follows the text")
+    expectEqual(hit.caretX, hit.x + hit.w - 16 - oneCaretWidth, "long field: the caret stays inside")
+    var clips = 0
+    for (p in frame.paints) if (p.op == "clip" && p.x == hit.x + 16) clips = clips + 1
+    expectEqual(clips, 1, "long field: the slid text is clipped to the field")
+    expect(!endsWith(fieldText(fieldFrame("${long}fim", false))[0].text, "…"), "long field: no ellipsis")
+    expect(fieldText(fieldFrame("ab", false))[0].x == hit.x + 16, "short field: starts at its padding")
+    // A character is never cut in half, whatever the width lands on.
+    val accents = oneInputTail("ééééééééééééééééééééééééééééééééééééééééé", 16, "regular", 100)
+    expect(accents[0] < 128 || accents[0] >= 192, "tail: starts on a whole character")
+    expect(endsWith(fieldText(fieldFrame("${long}", false))[0].text, " "), "long field: its trailing space counts")
+    expect(fieldHit(fieldFrame("${long}", false)).caretX <= hit.x + hit.w - 16, "long field: and the caret still fits")
+    val rows = fieldFrame("${long}fim", true)
+    val rowTexts = fieldText(rows)
+    expectEqual(rowTexts.size, 2, "multiline: as many rows as it may show")
+    expect(endsWith(rowTexts[1].text, "fim"), "multiline: the last ones")
+    val rowHit = fieldHit(rows)
+    expect(rowTexts[0].y >= rowHit.y, "multiline: the rows are inside the field")
+    expect(rowHit.caretY > rowHit.y + rowHit.h / 2, "multiline: the caret is on the last row")
+    expect(endsWith(fieldText(fieldFrame("", false))[0].text, "Type"), "empty field: shows its placeholder")
     return
 }
 
@@ -132,6 +182,7 @@ fun testFeedFollows(): void {
 fun main: int {
     testFeedFollows()
     testCaret()
+    testFieldShowsItsEnd()
     testWrap()
     testScrollRow()
     // A popover: only the anchor takes room, the panel is painted last and on the side asked for, and
