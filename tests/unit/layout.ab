@@ -101,7 +101,36 @@ fun testCaret(): void {
     return
 }
 
+fun testFeedFollows(): void {
+    val theme = oneDefaultTheme()
+    val tree = { count: int ->
+        val items: array<Node> = []
+        var index = 0
+        while (index < count) {
+            items.append(block(100))
+            index = index + 1
+        }
+        column(style().fill(), [feed(style().grow(1), items, "bottom", 0, 0)])
+    }
+    val offsets: Map<string, int> = Map()
+    expectEqual(oneLayout(tree(20), theme, "desktop", 200, 300, offsets).children[0].scrollY, 100, "feed: opens at its end")
+    expectEqual(oneLayout(tree(30), theme, "desktop", 200, 300, offsets).children[0].scrollY, 300, "feed: follows new items")
+    val frame = onePaintFrame(oneLayout(tree(30), theme, "desktop", 200, 300, offsets), 200, 300)
+    var hit = -1
+    var index = 0
+    while (index < frame.hits.size) {
+        if (frame.hits[index].kind == "scroll") hit = index
+        index = index + 1
+    }
+    oneScrollTo(offsets, frame.hits[hit], 40)
+    expectEqual(oneLayout(tree(40), theme, "desktop", 200, 300, offsets).children[0].scrollY, 40, "feed: scrolled up, it stays")
+    oneScrollTo(offsets, frame.hits[hit], 300)
+    expectEqual(oneLayout(tree(50), theme, "desktop", 200, 300, offsets).children[0].scrollY, 700, "feed: back at the end, it follows again")
+    return
+}
+
 fun main: int {
+    testFeedFollows()
     testCaret()
     testWrap()
     testScrollRow()

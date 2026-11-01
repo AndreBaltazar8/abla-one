@@ -29,7 +29,7 @@ class OneHit(
     val key: string,       // layout path (scroll areas) or node key
     val value: string,
     val placeholder: string,
-    val multiline: bool
+    val multiline: bool    // or, for a scroll area, that it follows its end
 )
 
 // A feed row fully inside its viewport: deliver `event` with `item` to mark it read.
@@ -144,7 +144,7 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
         ncy = y
         ncw = box.w
         nch = box.h
-        if (scrolls) frame.hits.append(OneHit("scroll", x, y, box.w, box.h, 0, 0, path, "${box.scrollY}", "${box.contentH - box.h}", false))
+        if (scrolls) frame.hits.append(OneHit("scroll", x, y, box.w, box.h, 0, 0, path, "${box.scrollY}", "${box.contentH - box.h}", kind == "feed" && box.node.attr("anchor") != "top"))
         if (across && box.contentW > box.w) frame.hits.append(OneHit("scrollAcross", x, y, box.w, box.h, 0, 0, path, "${box.scrollX}", "${box.contentW - box.w}", false))
     }
     var index = 0
@@ -205,4 +205,12 @@ fun oneCaretX(frame: OneFrame, field: OneHit): int {
     while (end > 0 && field.value[end - 1] == 32) end = end - 1
     if (end < field.value.size) x = x + oneTextWidth(field.value.slice(end, field.value.size), size, weight)
     x
+}
+
+// Scrolls a scroll area to `offset`. A feed left at its end has no saved offset,
+// which is what keeps it following new items; scrolled up, it stays put.
+fun oneScrollTo(var scroll: Map<string, int>, hit: OneHit, offset: int): void {
+    if (hit.multiline && offset >= oneParseInt(hit.placeholder, 0)) scroll.remove(hit.key)
+    else scroll.set(hit.key, offset)
+    return
 }

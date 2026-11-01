@@ -134,6 +134,15 @@ fun oneDesktopHit(frame: OneFrame, x: int, y: int, kind: string): int {
     -1
 }
 
+fun oneDesktopHitAtKey(frame: OneFrame, key: string): int {
+    var i = frame.hits.size - 1
+    while (i >= 0) {
+        if (frame.hits[i].kind == "scroll" && frame.hits[i].key == key) return i
+        i = i - 1
+    }
+    -1
+}
+
 // The press that closes the open popover on top (onePaintPopovers), or -1.
 fun oneDesktopDismiss(frame: OneFrame): int {
     var i = frame.hits.size - 1
@@ -206,8 +215,16 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
     var pixels = pixelBuffer(state.width, state.height)
     var frame = OneFrame([], [], [], 0, 0)
     var running = true
+    // Frames still owed after a resize: the first one presented to a new size
+    // may not reach the screen, and otherwise nothing replaces it until
+    // something else changes.
+    var settling = 0
     while (running) {
         if (oneDesktopPump(app, session)) state.dirty = true
+        if (settling > 0) {
+            settling = settling - 1
+            state.dirty = true
+        }
         if (state.dirty) {
             state.dirty = false
             frame = oneDesktopFrame(app, theme, state)
@@ -217,7 +234,8 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
             if (oneDesktopBlit(pixels, surface)) window.presentPixels(pixels)
         }
         val wait = oneLiveQueueList[oneLiveQueueIndex(session)].nextTimer(monotonicMilliseconds())
-        var event = window.pollEvent(if (wait < 50) wait else 50)
+        val most = if (settling > 0) 16 else 50
+        var event = window.pollEvent(if (wait < most) wait else most)
         while (event.happened()) {
             if (event.kind == windowEventCloseRequested) running = false
             else if (event.kind == windowEventResized || event.kind == windowEventFramebufferResized) {
@@ -225,6 +243,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     state.width = event.first
                     state.height = event.second
                     state.dirty = true
+                    settling = 12
                 }
             } else if (event.kind == windowEventPointerMoved) {
                 state.pointerX = event.pointerX()
@@ -233,7 +252,9 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     val dy = if (state.dragAcross) state.downX - state.pointerX else state.downY - state.pointerY
                     if (dy > 6 || dy < -6) state.dragging = true
                     if (state.dragging) {
-                        state.scroll.set(state.dragKey, state.dragFrom + dy)
+                        val dragged = oneDesktopHitAtKey(frame, state.dragKey)
+                        if (dragged >= 0) oneScrollTo(state.scroll, frame.hits[dragged], state.dragFrom + dy)
+                        else state.scroll.set(state.dragKey, state.dragFrom + dy)
                         state.dirty = true
                     }
                 }
@@ -285,7 +306,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     state.scroll.set(frame.hits[across].key, oneParseInt(frame.hits[across].value, 0) - notches * 48)
                     state.dirty = true
                 } else if (s >= 0) {
-                    state.scroll.set(frame.hits[s].key, oneParseInt(frame.hits[s].value, 0) - event.scrollY() * 48)
+                    oneScrollTo(state.scroll, frame.hits[s], oneParseInt(frame.hits[s].value, 0) - event.scrollY() * 48)
                     state.dirty = true
                 }
             } else if (event.kind == windowEventText && state.focusKey != "") {
