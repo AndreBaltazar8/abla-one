@@ -26,7 +26,6 @@
 
 ## ablac bugs seen (worked around, not fixed)
 
-- abla-embedded's `src/m5stack/imu_orientation.ab` calls `imuAxisOrder` through a private helper to avoid a compiler bug fixed in ablac a7e1675d: drop it once a release has the fix.
 - A `when` over an f32 gives `when.match` for literal cases (documented).
 
 ## Abla One bugs seen
@@ -37,8 +36,6 @@
   on a device.
 - PaperMono: joining Wi-Fi in the background is tested on the host and builds; it hasn't run on a device. Check
   boots join without "Sem ligação".
-- abla-embedded `tools/check-source` stops with "Illegal instruction" (core dump) after "ESP32 full opaque parity",
-  on master before and after the Wi-Fi change (`make check`, 2026-10-31), so it checks nothing after that point.
 - `tests/ui/android_gallery.py`, first run after an emulator boot: "fast typing reaches the app" failed with
   the field stopped at 58 of 160 characters. It passed on each of the next runs; not reproduced since.
 
