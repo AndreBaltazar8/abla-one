@@ -240,6 +240,23 @@ fun oneEventLanding(maps: array<OneEventMap>, age: int, id: int, moved: bool): i
     current.translate(older, id)
 }
 
+// A press that lands nowhere is lost, and the person can't tell from the screen: the app hears `receive("pressLost", "")`, to say
+// so as it likes. Not the second of a double press, whose first did land: nobody wanted that one to do more.
+class OnePresses(var shown: int, var id: int) {
+    fun landed(revision: int, press: int): void {
+        shown = revision
+        id = press
+        return
+    }
+    fun lost(var app: OneApp, revision: int, press: int): bool {
+        if (press > oneChangeBase || (revision == shown && press == id)) return false
+        app.receive("pressLost", "")
+        true
+    }
+}
+
+fun onePresses(): OnePresses = OnePresses(-1, 0)
+
 // Keeps the last `most`, oldest out first.
 fun oneEventMapsBound(var maps: array<OneEventMap>, most: int): void {
     if (maps.size <= most) return

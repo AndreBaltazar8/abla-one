@@ -41,8 +41,7 @@
 
 ## Tools in Python
 
-- [ ] `tools/papermono-thin-config`, `tools/vector2svg.py`, `tools/fonts.py` and `tools/icons-ab.py` are Python. NovaKind no longer calls
-      `vector2svg.py` (`novakind-tool icons`, byte-identical on its 33 icons, could move here for other apps), but `make papermono` still needs
-      `papermono-thin-config`, which reads Wi-Fi credentials (seen 2026-10-31).
+- [ ] `tools/vector2svg.py`, `tools/fonts.py` and `tools/icons-ab.py` are Python. NovaKind no longer calls
+      `vector2svg.py` (`novakind-tool icons`, byte-identical on its 33 icons, could move here for other apps).
 - tests/integration/client.ab "a tick before the timer is due" can fail under heavy load (seen at load ~100; passes alone).
-- Android: wrap and scrollRow compile but are untested on a device; the shared emulator was busy.
+- Android: scrollRow ran on a phone through Crew (2026-11-01); wrap compiles but hasn't been seen on a device.

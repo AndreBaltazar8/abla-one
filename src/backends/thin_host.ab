@@ -26,6 +26,7 @@ class OneThinHost(
     var seen: int,
     var tree: string,
     val fence: OneRouteFence = oneRouteFence(),
+    val presses: OnePresses = onePresses(),
     // One per revision, as a web session keeps them: an event older than the tree on the server
     // lands by place (SPEC §4).
     val maps: array<OneEventMap> = []
@@ -89,8 +90,12 @@ fun OneThinHost.handle(request: HttpRequest): HttpResponse? {
         refresh()
         // Without `r`, made for the tree of now.
         val shown = oneParseInt(request.queryParameter("r"), revision)
-        val event = oneEventLanding(maps, revision - shown, oneParseInt(request.queryParameter("id"), 0), shown < fence.from)
-        if (event > 0) oneDispatch(app, target, theme, event, request.queryParameter("value"), width)
+        val pressed = oneParseInt(request.queryParameter("id"), 0)
+        val event = oneEventLanding(maps, revision - shown, pressed, shown < fence.from)
+        if (event > 0) {
+            oneDispatch(app, target, theme, event, request.queryParameter("value"), width)
+            if (pressed <= oneChangeBase) presses.landed(shown, pressed)
+        } else presses.lost(app, shown, pressed)
         // A handler can change what state can't see (plain fields).
         oneInvalidate()
         refresh()

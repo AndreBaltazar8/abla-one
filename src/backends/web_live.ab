@@ -491,7 +491,7 @@ fun oneLiveFontName(name: string): bool = name == "Inter-400.ttf" || name == "In
 // new session seeded from the request. The page is rendered with the session's
 // current state, at the route the request names: a new session starts there, and
 // one resumed at another route (a URL typed in the same tab) moves there. Resuming
-// asks `storage.resumes` first.
+// asks `storage.resumes` first. A resumed session's app hears `receive("pageLoad", "")`, before the page renders.
 fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val route = oneLiveRoute(request)
     var index = resumable(request, oneLiveCookie(request, "one_resume"))
@@ -508,8 +508,10 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
         val app = factory(request, id)
         sessions.append(oneSession(id, app, oneLiveQueueList[queueIndex]))
         index = sessions.size - 1
-    } else if (oneRouteWithoutHash(sessions[index].queue.routes.current()) != route) {
-        sessions[index].queue.routes.arrive(route, sessions[index].queue.routes.fresh())
+    } else {
+        if (oneRouteWithoutHash(sessions[index].queue.routes.current()) != route) sessions[index].queue.routes.arrive(route, sessions[index].queue.routes.fresh())
+        // The person asked for the page again: what the app read earlier may have changed since, so it hears of it.
+        sessions[index].receive("pageLoad", "")
     }
     sessions[index].lastSeen = monotonicMilliseconds()
     // The page's last known width (the host keeps it in a cookie), so the first
