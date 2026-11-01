@@ -77,7 +77,32 @@ fun testScrollRow(): void {
     return
 }
 
+fun caretFor(value: string): int {
+    val theme = oneDefaultTheme()
+    val frame = onePaintFrame(oneLayout(column(style().fill(), [input(value, "Type", 1, style())]), theme, "desktop", 300, 200, Map()), 300, 200)
+    var found = -1
+    var index = 0
+    while (index < frame.hits.size) {
+        if (frame.hits[index].kind == "input") found = index
+        index = index + 1
+    }
+    oneCaretX(frame, frame.hits[found])
+}
+
+fun testCaret(): void {
+    val empty = caretFor("")
+    val word = caretFor("ab")
+    val spaced = caretFor("ab ")
+    expect(word > empty, "caret: after the text")
+    expect(spaced > word, "caret: a trailing space moves it")
+    expect(caretFor("ab  ") > spaced, "caret: and another moves it again")
+    expect(caretFor(" ") > empty, "caret: only a space moves it too")
+    expect(caretFor("ab c") > spaced, "caret: the next letter still moves it on")
+    return
+}
+
 fun main: int {
+    testCaret()
     testWrap()
     testScrollRow()
     // A popover: only the anchor takes room, the panel is painted last and on the side asked for, and

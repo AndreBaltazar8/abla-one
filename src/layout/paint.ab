@@ -185,3 +185,24 @@ fun oneFrameJson(frame: OneFrame): string {
     }
     jsonStringify(jsonObject(["w", "h", "paints", "hits"], [jsonInteger(frame.width), jsonInteger(frame.height), jsonArray(paints), jsonArray(hits)]))
 }
+
+// Where a caret goes in a field, after its text. What's painted went through
+// the word wrapper, which drops the spaces at the end, so those are added back.
+fun oneCaretX(frame: OneFrame, field: OneHit): int {
+    var x = field.x + 16
+    var size = 16
+    var weight = ""
+    if (field.value != "") {
+        for (p in frame.paints) {
+            if (p.op == "text" && p.x >= field.x && p.y >= field.y && p.x < field.x + field.w && p.y < field.y + field.h) {
+                x = p.x + oneTextWidth(p.text, p.size, p.weight)
+                size = p.size
+                weight = p.weight
+            }
+        }
+    }
+    var end = field.value.size
+    while (end > 0 && field.value[end - 1] == 32) end = end - 1
+    if (end < field.value.size) x = x + oneTextWidth(field.value.slice(end, field.value.size), size, weight)
+    x
+}
