@@ -57,6 +57,9 @@ try {
     await resend(page, stale);
     await settled(page);
     check(await page.getByText('Perdidos: 1').count() === 1 && await page.getByText('Emitidas: 2, anuladas: 1').count() === 1, 'a press lost across a change reaches the app as pressLost');
+    await page.goto(base + '/moment');
+    await page.getByText('Cargas de novo: 1').waitFor({timeout: 5000}).then(() => check(true, 'a page loaded again in the same tab keeps the session, and the app hears pageLoad'), () => check(false, 'a page loaded again: pageLoad'));
+    check(await page.getByText('Emitidas: 2, anuladas: 1').count() === 1, 'and its state stays');
     await page.close();
   }
   {

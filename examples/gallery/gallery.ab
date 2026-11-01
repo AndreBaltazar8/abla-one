@@ -21,6 +21,7 @@ class Gallery(
     var linkPresses: int by State(0),
     var moment: string by State(""),
     var lost: int by State(0),
+    var loaded: int by State(0),
     var issued: int by State(0),
     var voided: int by State(0),
     var tallied: int by State(0),
@@ -117,6 +118,7 @@ class Gallery(
         else button(ui, "Anular", "danger", ui.press { voided += 1; moment = "ask" }, style()),
         text("Emitidas: $issued, anuladas: $voided", style()),
         text("Perdidos: $lost", style()),
+        text("Cargas de novo: $loaded", style()),
         button(ui, "Contar", "secondary", ui.press { tallied += 1 }, style()),
         text("Contadas: $tallied", style()),
         textField(ui, draft, "Rascunho", ui.change { value -> draft = value }, style()),
@@ -188,6 +190,7 @@ class Gallery(
     fun receive(kind: string, value: string): void {
         if (kind == "route") show(value)
         else if (kind == "pressLost") lost += 1
+        else if (kind == "pageLoad") loaded += 1
         return
     }
 }
