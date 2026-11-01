@@ -34,7 +34,11 @@ class OneLiveSlot(
     var outputOffset: int,
     var upgraded: bool,
     var session: string,
-    var closing: bool
+    var closing: bool,
+    // Tells this connection from an earlier one in the same slot, for tickets.
+    var generation: int,
+    // A socket of the application's (OneLiveSockets), not a page's.
+    var appSocket: bool
 )
 
 class OneLiveOptions(
@@ -62,6 +66,24 @@ class OneLiveStorage(
     val resumes: (HttpRequest, Map<string, string>) -> bool
 )
 
+// WebSockets of the application's own, on the server's port and in its loop, such
+// as a worker that dials in. `claims` picks the upgrade requests; each connection is
+// known by its ticket, for `OneLiveServer.sendSocket` and `closeSocket`. A handler
+// runs mid-loop, so one that wants to send queues it for after `step`.
+class OneLiveSockets(
+    val claims: (HttpRequest) -> bool,
+    val opened: (int, HttpRequest) -> void,
+    val message: (int, string) -> void,
+    val closed: (int) -> void
+)
+
+fun oneLiveNoSockets(): OneLiveSockets = OneLiveSockets({ request -> false }, { ticket, request -> return }, { ticket, text -> return }, { ticket -> return })
+
+fun oneLiveNoDefers(): (HttpRequest, int) -> bool {
+    val none: (HttpRequest, int) -> bool = { request, ticket -> false }
+    none
+}
+
 fun oneLiveNoStorage(): OneLiveStorage = OneLiveStorage({ request -> Map<string, string>() }, { request, key, value -> array<string>() }, { request, stored -> true })
 
 resource class OneLiveServer(
@@ -75,6 +97,10 @@ resource class OneLiveServer(
     val theme: Theme,
     val options: OneLiveOptions,
     val storage: OneLiveStorage,
+    val sockets: OneLiveSockets,
+    // Takes a request whose answer isn't ready, with the ticket to give
+    // `OneLiveServer.answer` later. False leaves it to `handler`.
+    val defers: (HttpRequest, int) -> bool,
     val listener: TcpListener,
     val poller: SocketPoller,
     val slots: array<OneLiveSlot>,
@@ -107,13 +133,15 @@ fun oneLiveServer(
     factory: (HttpRequest, string) -> OneApp,
     theme: Theme,
     options: OneLiveOptions,
-    storage: OneLiveStorage = oneLiveNoStorage()
+    storage: OneLiveStorage = oneLiveNoStorage(),
+    sockets: OneLiveSockets = oneLiveNoSockets(),
+    defers: (HttpRequest, int) -> bool = oneLiveNoDefers()
 ): OneLiveServer {
     val listener = tcpListenAddress(address, 1024)
     listener.setNonblocking()
     val poller = socketPoller()
     if (listener.descriptor >= 0 && poller.descriptor >= 0) poller.watchDescriptor(listener.descriptor)
-    OneLiveServer(handler, isPage, factory, theme, options, storage, move(listener), move(poller), [], [], false)
+    OneLiveServer(handler, isPage, factory, theme, options, storage, sockets, defers, move(listener), move(poller), [], [], false)
 }
 
 // Claims the paths an app declares, as `isPage`: "/people", "/form/:n", "/docs/*".
@@ -180,10 +208,50 @@ fun OneLiveServer.queue(slot: int, bytes: string): void {
     return
 }
 
+// Slots are reused, so a ticket also names the connection, and one from a closed
+// connection finds nothing.
+fun OneLiveServer.ticket(slot: int): int = slots[slot].generation * 65536 + slot
+
+fun OneLiveServer.ticketSlot(ticket: int): int {
+    val slot = ticket % 65536
+    if (ticket >= 0 && slot < slots.size && slots[slot].descriptor >= 0 && this.ticket(slot) == ticket) slot else -1
+}
+
+// Answers a deferred request. False when its connection has gone.
+fun OneLiveServer.answer(ticket: int, response: HttpResponse): bool {
+    val slot = ticketSlot(ticket)
+    if (slot < 0 || slots[slot].upgraded) return false
+    queue(slot, response.render())
+    if (slots[slot].descriptor < 0) return false
+    slots[slot].closing = true
+    true
+}
+
+fun OneLiveServer.sendSocket(ticket: int, text: string): bool {
+    val slot = ticketSlot(ticket)
+    if (slot < 0 || !slots[slot].appSocket) return false
+    queue(slot, webSocketEncodeFrame(text, 1))
+    slots[slot].descriptor >= 0
+}
+
+fun OneLiveServer.closeSocket(ticket: int, code: int, reason: string): void {
+    val slot = ticketSlot(ticket)
+    if (slot < 0 || !slots[slot].appSocket) return
+    queue(slot, webSocketEncodeFrame(webSocketClosePayload(code, reason), 8))
+    if (slots[slot].descriptor >= 0) slots[slot].closing = true
+    return
+}
+
 fun OneLiveServer.closeSlot(slot: int): void {
     if (slot < 0 || slots[slot].descriptor < 0) return
     poller.unwatchDescriptor(slots[slot].descriptor)
     linuxTcpCloseDescriptor(slots[slot].descriptor)
+    if (slots[slot].appSocket) {
+        val closed = sockets.closed
+        closed(this.ticket(slot))
+    }
+    slots[slot].generation = slots[slot].generation + 1
+    slots[slot].appSocket = false
     val session = findSession(slots[slot].session)
     if (session >= 0 && sessions[session].slot == slot) sessions[session].slot = -1
     slots[slot].descriptor = -1
@@ -243,7 +311,7 @@ fun OneLiveServer.accept(): void {
                 if (slots[i].descriptor < 0) slot = i
                 i = i + 1
             }
-            if (slot < 0) slots.append(OneLiveSlot(descriptor, "", "", 0, false, "", false))
+            if (slot < 0) slots.append(OneLiveSlot(descriptor, "", "", 0, false, "", false, 1, false))
             else {
                 slots[slot].descriptor = descriptor
                 slots[slot].input = ""
@@ -323,6 +391,18 @@ fun OneLiveServer.http(slot: int): void {
         frames(slot)
         return
     }
+    val claims = sockets.claims
+    if (webSocketIsUpgradeRequest(request) && !oneLiveReserved(request.path) && claims(request)) {
+        slots[slot].upgraded = true
+        slots[slot].appSocket = true
+        queue(slot, webSocketUpgradeResponse(request).render())
+        val opened = sockets.opened
+        if (slots[slot].descriptor >= 0) opened(this.ticket(slot), request)
+        if (slots[slot].descriptor >= 0) frames(slot)
+        return
+    }
+    val defers = this.defers
+    if (!oneLiveReserved(request.path) && defers(request, this.ticket(slot))) return
     val response = if (request.path == "/one/upload" && request.method == "POST") upload(request)
         else if (request.path == "/one/cookies") cookies(request)
         else if (request.path == "/one/host.js")
@@ -499,7 +579,12 @@ fun OneLiveServer.frames(slot: int): void {
                 queue(slot, webSocketEncodeFrame(frame.payload, 8))
                 slots[slot].closing = true
                 processing = false
-            } else if (frame.opcode == 1) message(slot, frame.payload)
+            } else if (frame.opcode == 1) {
+                if (slots[slot].appSocket) {
+                    val received = sockets.message
+                    received(this.ticket(slot), frame.payload)
+                } else message(slot, frame.payload)
+            }
         }
     }
     return

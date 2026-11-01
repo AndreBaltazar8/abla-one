@@ -13,7 +13,7 @@ const open = async () => {
     window.__frames = [];
     window.WebSocket = class extends Native {
       constructor(...args) { super(...args); window.__socket = this; }
-      send(text) { window.__frames.push(text); super.send(text); }
+      send(text) { window.__frames.push(text); if (window.__lag) setTimeout(() => super.send(text), window.__lag); else super.send(text); }
     };
   });
   await page.goto(base + '/moment');
@@ -33,6 +33,17 @@ const typeNow = (page, text, then) => page.evaluate(({text, then}) => {
   if (then) [...document.querySelectorAll('button')].find(b => b.textContent === then).click();
 }, {text, then});
 try {
+  {
+    const page = await open();
+    // Keys faster than the round trip: the session's echoes of older text change nothing.
+    await page.evaluate(() => { window.__lag = 40; });
+    const field = page.locator('input[placeholder="Rascunho"]');
+    await field.click();
+    await field.pressSequentially('typed in the browser');
+    await page.waitForTimeout(400);
+    check(await field.inputValue() === 'typed in the browser', 'typing ahead of the session keeps every key');
+    await page.close();
+  }
   {
     const page = await open();
     // Two presses in one go: both made for "Emitir", the second arrives after the screen changed.

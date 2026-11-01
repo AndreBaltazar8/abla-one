@@ -142,10 +142,11 @@
       if (from.getAttribute(attr.name) !== attr.value) from.setAttribute(attr.name, attr.value);
     }
     // Keep what the person is typing: a focused field keeps its value unless the
-    // server cleared it (a sent message) or changed it deliberately.
+    // server cleared it (a sent message) or changed it deliberately. Until the session
+    // has seen all the typing, what it sends is an echo of older text, not a decision.
     if (from.tagName === 'INPUT' || from.tagName === 'TEXTAREA') {
       const wanted = to.tagName === 'TEXTAREA' ? to.textContent : to.getAttribute('value') || '';
-      if (document.activeElement !== from || wanted === '' || from.__oneLast !== wanted) {
+      if (document.activeElement !== from || (typedSeen === typed && (wanted === '' || from.__oneLast !== wanted))) {
         if (from.value !== wanted) from.value = wanted;
         if (from.tagName === 'TEXTAREA') grow(from);
       }
@@ -238,6 +239,7 @@
   // The session's answer: moves it made, then the screen. With no question of ours
   // open, the URL ends up at the route the session says it's at.
   const patched = (message) => {
+    if (message.c) typedSeen = message.c;
     let moved = false;
     for (const move of message.nav || []) if (follow(move)) moved = true;
     // A move that changes nothing on the screen (only the URL catches up) disturbs nothing.
@@ -260,7 +262,6 @@
     if (moved) placeScroll(null);
     else if (message.ack && message.ack === asked) placeScroll(savedScroll(entry.e));
     watchFeeds();
-    if (message.c) typedSeen = message.c;
     release();
   };
   const ask = (path, id) => {

@@ -1,0 +1,140 @@
+import "abla/text"
+import "abla/http"
+import "abla/net"
+import "abla/test"
+import "abla/websocket"
+import "abla/process/time"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+
+// The application's own sockets and deferred answers, through the real loop.
+class Idle() : OneApp {
+    fun render(var ui: Ui): Node = text("idle", style())
+    fun receive(kind: string, value: string): void {
+        return
+    }
+}
+
+fun idleApp(request: HttpRequest, session: string): OneApp = Idle()
+
+val seen: array<string> = []
+val tickets: array<int> = []
+
+fun serve(port: int): OneLiveServer = oneLiveServer(
+    Ipv4SocketAddress("127.0.0.1", port),
+    { request -> httpText("handler", 200) },
+    oneLivePaths(["/page"]),
+    idleApp,
+    oneDefaultTheme(),
+    OneLiveOptions("t", "en", "#fff", "/i", "src/backends/web/host.js", ""),
+    oneLiveNoStorage(),
+    OneLiveSockets(
+        { request -> request.path == "/worker" },
+        { ticket, request ->
+            seen.append("open")
+            tickets.append(ticket)
+        },
+        { ticket, message -> seen.append("message:$message") },
+        { ticket -> seen.append("closed") }
+    ),
+    { request, ticket ->
+        if (request.path == "/later") {
+            tickets.append(ticket)
+            true
+        } else false
+    }
+)
+
+// Steps the server until the client has what it wants.
+fun exchange(var server: OneLiveServer, var client: TcpConnection, wanted: string): string {
+    var got = ""
+    val started = monotonicMilliseconds()
+    client.setNonblocking()
+    while (monotonicMilliseconds() - started < 3000) {
+        server.step()
+        val incoming = client.readResult(65536)
+        if (incoming.hasData()) got = "$got${incoming.bytes}"
+        if (wanted != "" && got.indexOf(wanted) >= 0) return got
+        if (incoming.reachedEof()) return got
+    }
+    got
+}
+
+fun connect(port: int): TcpConnection = tcpConnectIpv4("127.0.0.1", port, 2000)
+
+val upgrade = "HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+
+fun main: int {
+    val port = 47990
+    var server = serve(port)
+
+    var plain = connect(port)
+    plain.writeResult("GET /other HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect(exchange(server, plain, "").indexOf("handler") >= 0, "other requests reach the handler")
+    plain.close()
+
+    // A deferred request waits, then gets its answer.
+    var later = connect(port)
+    later.writeResult("GET /later HTTP/1.1\r\nHost: x\r\n\r\n")
+    var i = 0
+    while (i < 5) {
+        server.step()
+        i = i + 1
+    }
+    expectEqual(tickets.size, 1, "it's taken")
+    val ticket = tickets[0]
+    expect(server.answer(ticket, httpText("done", 200)), "the answer goes out")
+    expect(exchange(server, later, "").indexOf("done") >= 0, "and arrives")
+    later.close()
+    expect(!server.answer(ticket, httpText("again", 200)), "a used ticket finds nothing")
+
+    // A connection that left before its answer.
+    var gone = connect(port)
+    gone.writeResult("GET /later HTTP/1.1\r\nHost: x\r\n\r\n")
+    i = 0
+    while (i < 5) {
+        server.step()
+        i = i + 1
+    }
+    val goneTicket = tickets[1]
+    gone.close()
+    i = 0
+    while (i < 5) {
+        server.step()
+        i = i + 1
+    }
+    expect(!server.answer(goneTicket, httpText("late", 200)), "a closed connection finds nothing")
+
+    // A socket of the application's.
+    var worker = connect(port)
+    worker.writeResult("GET /worker $upgrade")
+    val hello = exchange(server, worker, "\r\n\r\n")
+    expect(hello.indexOf("101") >= 0, "the socket upgrades")
+    expectEqual(seen[0], "open", "the application hears of it")
+    val socket = tickets[2]
+    worker.writeResult(webSocketEncodeFrame("hi", 1, true, "mask"))
+    i = 0
+    while (i < 5) {
+        server.step()
+        i = i + 1
+    }
+    expectEqual(seen[1], "message:hi", "and its messages")
+    expect(server.sendSocket(socket, "back"), "it can send")
+    expect(exchange(server, worker, "back").indexOf("back") >= 0, "and it arrives")
+    expect(!server.sendSocket(ticket, "nobody"), "not to a closed ticket")
+    worker.close()
+    i = 0
+    while (i < 5) {
+        server.step()
+        i = i + 1
+    }
+    expectEqual(seen[seen.size - 1], "closed", "closing is reported")
+    expect(!server.sendSocket(socket, "gone"), "and the ticket is dead")
+
+    // An upgrade nobody claims is still not a socket.
+    var stray = connect(port)
+    stray.writeResult("GET /stray $upgrade")
+    expect(exchange(server, stray, "").indexOf("101") < 0, "an unclaimed upgrade isn't accepted")
+    stray.close()
+    testsPassed()
+}
