@@ -9,6 +9,13 @@ fun tree(var ui: Ui, rows: array<string>, extra: bool): Node {
     column(style(), items)
 }
 
+// The same controls, laid out for a narrow page or a wide one, which puts them at other places in the tree.
+fun laidOut(wide: bool, first: string, second: string): OneEventMap {
+    var u = oneUi("t", theme())
+    val controls = [button(u, first, "primary", u.press { }, style()), button(u, second, "plain", u.press { }, style())]
+    oneEventMap(if (wide) row(style(), [text("Bem-vindo", style()), column(style(), [column(style(), controls)])]) else column(style(), controls))
+}
+
 fun landingScreen(title: string, field: string, kept: string): OneEventMap {
     var u = oneUi("t", theme())
     val named = input("", "Código", u.change { v -> }, style())
@@ -55,6 +62,14 @@ fun main: int {
     // Across a move to another route.
     val before2 = landingScreen("Fatura 1", "Nome", "code")
     val elsewhere = landingScreen("Fatura 2", "Nome", "code")
+    // A page's first render doesn't know its width, and the press can arrive after the one that does.
+    val narrow = laidOut(false, "Confirmar", "Reenviar")
+    expectEqual(laidOut(true, "Confirmar", "Reenviar").translate(narrow, 1), 1, "the same control on a new layout")
+    expectEqual(laidOut(true, "Confirmar", "Reenviar").translate(narrow, 2), 2, "and the one after it")
+    expectEqual(laidOut(true, "Confirmar", "Enviar").translate(narrow, 2), 0, "not if it says something else now")
+    expectEqual(laidOut(true, "Enviar", "Enviar").translate(narrow, 1), 0, "nor if nothing says that")
+    expectEqual(laidOut(true, "Confirmar", "Confirmar").translate(narrow, 1), 0, "nor if two say it: which one was meant isn't known")
+    expectEqual(laidOut(true, "Reenviar", "Reenviar").translate(laidOut(false, "Reenviar", "Reenviar"), 1), 0, "nor if two said it before")
     val unnamed = landingScreen("Fatura 2", "Nome", "")
     val alike = landingScreen("Fatura 1", "Nome", "code")
     val changes = oneChangeBase + 1

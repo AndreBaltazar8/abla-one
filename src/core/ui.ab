@@ -169,6 +169,13 @@ fun oneDispatch(var app: OneApp, target: string, theme: Theme, event: int, value
     ui.handled
 }
 
+// What kind of event a place holds: what's after its "#".
+fun oneEventPlaceKind(place: string): string {
+    var i = place.size - 1
+    while (i >= 0 && place[i] != 35) i = i - 1
+    place.slice(i + 1, place.size)
+}
+
 // Where each event id of a rendered tree lives: "<key path>#<event>", with a
 // node's key at each level, or for unkeyed nodes their kind and position
 // among siblings of that kind (so inserting a button doesn't move an input). An event that arrives from a slightly
@@ -185,8 +192,24 @@ class OneEventMap(val byId: Map<int, string>, val byPlace: Map<string, int>, val
         val place = older.byId.get(id)
         if (place == null) return 0
         val current = byPlace.get(place)
-        if (current == null || says.get(place) != older.says.get(place)) return 0
-        current
+        if (current != null && says.get(place) == older.says.get(place)) return current
+        moved(older, place)
+    }
+    // The same control somewhere else: a new width lays a screen out differently, and the first render
+    // of a page doesn't know its width. It has to be the only one saying that, in both trees.
+    fun moved(older: OneEventMap, place: string): int {
+        val said = older.says.get(place) ?? ""
+        if (said == "") return 0
+        val kind = oneEventPlaceKind(place)
+        if (older.saying(said, kind).size != 1) return 0
+        val here = saying(said, kind)
+        if (here.size != 1) return 0
+        byPlace.get(here[0]) ?? 0
+    }
+    fun saying(said: string, kind: string): array<string> {
+        val found: array<string> = []
+        for (place in byPlace.keys()) if (says.get(place) == said && oneEventPlaceKind(place) == kind) found.append(place)
+        found
     }
     fun same(other: OneEventMap): bool {
         val places = byPlace.keys()

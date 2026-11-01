@@ -25,16 +25,19 @@ gallery-android:
 ui-web: gallery-web
 	node tests/ui/web_gallery.mjs
 
+# One user of the emulator at a time, across projects: the lock NovaKind's suites hold (its tests/android_lock.py).
+ANDROID_LOCK ?= $${ANDROID_EMULATOR_LOCK:-/tmp/android-emulator.lock}
+
 # Needs a running emulator or device (adb).
 ui-android: gallery-android
 	mkdir -p build/ui
-	python3 tests/ui/android_gallery.py
+	flock $(ANDROID_LOCK) python3 tests/ui/android_gallery.py
 
 # Real requests, uploads, downloads, storage and timers on the emulator,
 # against tests/ui/echo.py behind a temporary HTTPS tunnel.
 ui-android-services:
 	mkdir -p build/ui
-	python3 tests/ui/android_services.py
+	flock $(ANDROID_LOCK) python3 tests/ui/android_services.py
 
 # The gallery in Wasm client mode: build/gallery/client.html (server-rendered)
 # with web/host.js and the app's module beside it; any static server works.
