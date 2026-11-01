@@ -81,4 +81,17 @@ done
 copy
 printf '\n@server\nfun livestock(): int = 1\n' >> "$shop"
 build server.ab server > "$work/log"; check "a name that only starts like one is fine" "$?" 0
+
+# Many routes and shapes, through an alias: each class is spelled once, and all of them right.
+copy
+for n in $(seq 1 60); do
+  printf '\nclass Many%d(val first: string, val third: array<Line>)\n@server\nfun many%d(first: string): Many%d = Many%d(first, [Line("a", 2)])\n' "$n" "$n" "$n" "$n" >> "$shop"
+done
+build server.ab server > "$work/log"; check "many routes build" "$?" 0
+"$work/server" & pid=$!
+sleep 1
+check "the last answers" "$(post many60 '{"first":"x"}')" 200
+check "with its shape" "$(grep -c '"sku":"a"' "$work/out")" 1
+kill $pid; wait $pid 2>/dev/null; pid=0
+build both.ab both > "$work/log"; check "and a client beside the server" "$?" 0
 exit $failed

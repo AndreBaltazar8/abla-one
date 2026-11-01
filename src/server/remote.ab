@@ -149,7 +149,7 @@ fun oneRemoteParseF64(text: string): f64 {
 // before analysis) writes plain Abla: one encoder and decoder per type, and for each
 // `@server` function either the client call (a contract) or a route (its real body).
 
-compile class OneRemoteSource(var code: string, val seen: array<string>, val problems: array<string>)
+compile class OneRemoteSource(var code: string, val seen: array<string>, val problems: array<string>, val prefixes: array<string>, val classes: array<string>, val spellings: array<string>)
 
 compile fun oneRemoteHash(text: string): int {
     var value = 17
@@ -214,22 +214,49 @@ compile fun oneRemoteSubstitute(type: string, names: array<string>, values: arra
 
 // The name a class goes by here: one that came through an import alias carries its
 // module's prefix.
-compile fun oneRemoteClassName(name: string): string {
-    val modules: array<string> = []
+compile fun oneRemoteClassName(var source: OneRemoteSource, name: string): string {
+    var known = 0
+    while (known < source.classes.size) {
+        if (source.classes[known] == name) return source.spellings[known]
+        known = known + 1
+    }
+    var spelled = name
     val handle = compilerFindType(name)
-    if (handle >= 0) modules.append(compilerTypeModuleIdentity(handle))
-    for (function in compilerContractFunctionsAnnotated("server")) modules.append(compiler.functionModuleIdentity(function))
-    for (function in compiler.functionsAnnotated("server")) modules.append(compiler.functionModuleIdentity(function))
+    if (handle >= 0) {
+        val own = oneRemoteModulePrefix(compilerTypeModuleIdentity(handle))
+        if (own != "" && compilerFindClass("$own$name") >= 0) spelled = "$own$name"
+    }
+    if (spelled == name) for (prefix in source.prefixes) if (spelled == name && compilerFindClass("$prefix$name") >= 0) spelled = "$prefix$name"
+    source.classes.append(name)
+    source.spellings.append(spelled)
+    spelled
+}
+
+compile fun oneRemoteModulePrefix(module: string): string {
+    if (module == "") return ""
     val digits = "0123456789abcdef"
-    for (module in modules) {
-        if (module != "") {
-            var hex = ""
-            for (b in module) hex = "$hex${digits.slice(b / 16, b / 16 + 1)}${digits.slice(b % 16, b % 16 + 1)}"
-            val full = "__abla_module_${hex}__$name"
-            if (compilerFindClass(full) >= 0) return full
+    var hex = ""
+    for (b in module) hex = "$hex${digits.slice(b / 16, b / 16 + 1)}${digits.slice(b % 16, b % 16 + 1)}"
+    "__abla_module_${hex}__"
+}
+
+// The modules `@server` functions come from, once each: spelling a class looks in them, and there are many of both.
+compile fun oneRemotePrefixes(): array<string> {
+    val modules: array<string> = []
+    val prefixes: array<string> = []
+    val functions: array<int> = []
+    for (function in compilerContractFunctionsAnnotated("server")) functions.append(function)
+    for (function in compiler.functionsAnnotated("server")) functions.append(function)
+    for (function in functions) {
+        val module = compiler.functionModuleIdentity(function)
+        var known = false
+        for (seen in modules) if (seen == module) known = true
+        if (!known) {
+            modules.append(module)
+            prefixes.append(oneRemoteModulePrefix(module))
         }
     }
-    name
+    prefixes
 }
 
 // How to call a function here: under its module's prefix when it came through an alias.
@@ -253,17 +280,17 @@ compile fun oneRemoteRoute(name: string): string {
 }
 
 // `type` as this generated module spells it.
-compile fun oneRemoteSpell(type: string): string {
-    if (type.endsWith("?")) return "${oneRemoteSpell(type.slice(0, type.size - 1))}?"
+compile fun oneRemoteSpell(var source: OneRemoteSource, type: string): string {
+    if (type.endsWith("?")) return "${oneRemoteSpell(source, type.slice(0, type.size - 1))}?"
     if (type == "int" || type == "string" || type == "bool" || type == "f64" || type == "Json") return type
     var open = 0
     while (open < type.size && type[open] != 60) open = open + 1
     var head = type.slice(0, open)
-    if (head != "array" && head != "Map") head = oneRemoteClassName(head)
+    if (head != "array" && head != "Map") head = oneRemoteClassName(source, head)
     if (open == type.size) return head
     var inner = ""
     for (argument in oneRemoteArguments(type.slice(open + 1, type.size - 1))) {
-        val next = oneRemoteSpell(argument)
+        val next = oneRemoteSpell(source, argument)
         inner = if (inner == "") next else "$inner, $next"
     }
     "$head<$inner>"
@@ -279,7 +306,7 @@ compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool,
     val name = "oneRemote${if (out) "Out" else "In"}_${oneRemoteHash(type)}"
     for (seen in source.seen) if (seen == name) return name
     source.seen.append(name)
-    val spelled = oneRemoteSpell(type)
+    val spelled = oneRemoteSpell(source, type)
     val signature = if (out) "fun $name(value: $spelled): Json" else "fun $name(json: Json): $spelled"
     val argument = if (out) "value" else "json"
     val helperKind = if (out) "Out" else "In"
@@ -384,14 +411,14 @@ compile fun oneRemoteWriteClients(var source: OneRemoteSource): void {
         while (index < compiler.parameterCount(function)) {
             val name = compiler.parameterName(function, index)
             val type = oneRemoteNormal(compiler.parameterType(function, index))
-            parameters = "$parameters, $name: ${oneRemoteSpell(type)}"
+            parameters = "$parameters, $name: ${oneRemoteSpell(source, type)}"
             val encoded = "${oneRemoteCodec(source, type, true, "$route($name)")}($name)"
             keys = if (keys == "") "\"$name\"" else "$keys, \"$name\""
             values = if (values == "") encoded else "$values, $encoded"
             index = index + 1
         }
         val result = oneRemoteNormal(compiler.resultType(function))
-        val spelled = oneRemoteSpell(result)
+        val spelled = oneRemoteSpell(source, result)
         val decode = oneRemoteCodec(source, result, false, "$route: result")
         val body = if (keys == "") "oneRemoteObjectEmpty()" else "jsonObject([$keys], [$values])"
         source.code = "${source.code}fun oneRemoteCall_$route($parameters): OneRemote<$spelled> = oneRemoteSend<$spelled>(services, base, \"$route\", $body, $decode)\n"
@@ -432,7 +459,7 @@ compile fun oneRemoteReservedRoute(route: string): bool =
     route == "live" || route == "upload" || route == "cookies" || route == "host" || route == "canvas" || route == "fonts" || route == "thin"
 
 compile fun oneRemoteGenerate(): void {
-    var source = OneRemoteSource("", [], [])
+    var source = OneRemoteSource("", [], [], oneRemotePrefixes(), [], [])
     for (function in compiler.functionsAnnotated("server")) {
         val route = oneRemoteRoute(compiler.functionName(function))
         if (oneRemoteReservedRoute(route)) source.problems.append("route $route is reserved by the live server: rename it")
