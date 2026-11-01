@@ -79,7 +79,7 @@ fun testScrollRow(): void {
 
 fun caretFor(value: string): int {
     val theme = oneDefaultTheme()
-    val frame = onePaintFrame(oneLayout(column(style().fill(), [input(value, "Type", 1, style())]), theme, "desktop", 300, 200, Map()), 300, 200)
+    val frame = onePaintFrame(oneLayout(column(style().fill(), [input(value, "Type", 1, style().padding(16))]), theme, "desktop", 300, 200, Map()), 300, 200)
     var found = -1
     var index = 0
     while (index < frame.hits.size) {
