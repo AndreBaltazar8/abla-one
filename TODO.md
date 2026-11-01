@@ -41,6 +41,5 @@
 
 ## Tools in Python
 
-- [ ] `tools/papermono-thin-config`, `tools/vector2svg.py`, `tools/fonts.py` and `tools/icons-ab.py` are Python. NovaKind no longer calls
-      `vector2svg.py` (`novakind-tool icons`, byte-identical on its 33 icons, could move here for other apps), but `make papermono` still needs
-      `papermono-thin-config`, which reads Wi-Fi credentials (seen 2026-10-31).
+- [ ] `tools/vector2svg.py`, `tools/fonts.py` and `tools/icons-ab.py` are Python. NovaKind no longer calls
+      `vector2svg.py` (`novakind-tool icons`, byte-identical on its 33 icons, could move here for other apps).

@@ -8,6 +8,7 @@ TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab t
 # Unit, backend and integration tests (host only).
 test:
 	$(NIX) '$(ABLAC) test $(TESTS)'
+	tests/thin_config.sh
 
 # @server over real HTTP: the routes, server.lock, client binaries.
 test-remote:
