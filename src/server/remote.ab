@@ -46,6 +46,57 @@ class OneRemoteResult<T>(val values: array<T>, val status: int, val kind: string
     fun value(): borrow(this) T = values[0]
 }
 
+// A reply without saying what it holds, one type of it for all routes: `kind` as above, `json` when
+// "ok". `$remoteDecode` reads that into the route's result. With `$remoteCall`, which only gives the
+// request's id, this is what a client with many routes uses: `$remote`'s two generic classes are
+// copied per result type, which an MCU's flash notices.
+class OneRemoteReply(val status: int, val kind: string, val message: string, val json: Json) {
+    fun ok(): bool = kind == "ok"
+}
+
+@noinline
+fun oneRemoteReply(response: OneResponse): OneRemoteReply {
+    if (response.status == 410) {
+        val reason = jsonParse(response.body)
+        return OneRemoteReply(410, "retired", if (reason.succeeded) reason.value.asString() else response.body, jsonNull())
+    }
+    if (!response.ok()) return OneRemoteReply(response.status, "failed", if (response.error != "") response.error else response.body, jsonNull())
+    val parsed = jsonParse(response.body)
+    if (!parsed.succeeded) return OneRemoteReply(response.status, "failed", "not JSON", jsonNull())
+    OneRemoteReply(response.status, "ok", "", parsed.value)
+}
+
+// A call's arguments, filled in by the generated code one call each, so a route costs little.
+class OneRemoteBody(val keys: array<string> = [], val values: array<Json> = [])
+@noinline
+fun oneRemoteBodyText(var body: OneRemoteBody, key: string, value: string): void {
+    body.keys.append(key)
+    body.values.append(jsonString(value))
+    return
+}
+@noinline
+fun oneRemoteBodyValue(var body: OneRemoteBody, key: string, value: Json): void {
+    body.keys.append(key)
+    body.values.append(value)
+    return
+}
+@noinline
+fun oneRemoteBodySend(body: OneRemoteBody, services: OneServices, base: string, route: string): int {
+    val slash = if (base.size > 0 && base[base.size - 1] == 47) "" else "/"
+    services.send(oneRequest("POST", "$base${slash}one/$route").json(jsonObject(body.keys, body.values)))
+}
+
+@noinline
+fun oneRemoteTextField(json: Json, name: string): string = json.get(name).asString()
+@noinline
+fun oneRemoteIntField(json: Json, name: string): int = json.get(name).asInt()
+@noinline
+fun oneRemoteBoolField(json: Json, name: string): bool = json.get(name).asBoolean()
+@noinline
+fun oneRemoteCount(json: Json): int = if (json.isArray()) json.values.size else 0
+@noinline
+fun oneRemoteAt(json: Json, index: int): Json = json.values[index]
+
 // What a route answers, on the server.
 class OneServerReply(val status: int, val body: string)
 
@@ -321,7 +372,9 @@ compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool,
     val arguments = if (open < type.size) oneRemoteArguments(type.slice(open + 1, type.size - 1)) else []
     if (head == "array") {
         val inner = oneRemoteCodec(source, arguments[0], out, "$path[]")
-        source.code = "${source.code}$signature = oneRemote${helperKind}Array($argument, $inner)\n"
+        // Reading, the loop is written out for each type: a shared generic would be copied per type anyway, with a closure.
+        if (out) source.code = "${source.code}$signature = oneRemoteOutArray(value, $inner)\n"
+        else source.code = "${source.code}fun $name(json: Json): $spelled {\n    val items: $spelled = []\n    val count = oneRemoteCount(json)\n    var index = 0\n    while (index < count) {\n        items.append($inner(oneRemoteAt(json, index)))\n        index = index + 1\n    }\n    items\n}\n"
         return name
     }
     if (head == "Map") {
@@ -349,7 +402,11 @@ compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool,
         val fieldType = oneRemoteSubstitute(compilerClassFieldType(declaration, index), parameters, arguments)
         val codec = oneRemoteCodec(source, fieldType, out, "$path.$field")
         keys = if (keys == "") "\"$field\"" else "$keys, \"$field\""
-        val read = if (out) "$codec(value.$field)" else "$codec(oneRemoteField(json, \"$field\"))"
+        val read = if (out) "$codec(value.$field)"
+            else if (fieldType == "string") "oneRemoteTextField(json, \"$field\")"
+            else if (fieldType == "int") "oneRemoteIntField(json, \"$field\")"
+            else if (fieldType == "bool") "oneRemoteBoolField(json, \"$field\")"
+            else "$codec(oneRemoteField(json, \"$field\"))"
         values = if (values == "") read else "$values, $read"
         index = index + 1
     }
@@ -407,12 +464,14 @@ compile fun oneRemoteWriteClients(var source: OneRemoteSource): void {
         var parameters = "services: OneServices, base: string"
         var keys = ""
         var values = ""
+        var fill = ""
         var index = 0
         while (index < compiler.parameterCount(function)) {
             val name = compiler.parameterName(function, index)
             val type = oneRemoteNormal(compiler.parameterType(function, index))
             parameters = "$parameters, $name: ${oneRemoteSpell(source, type)}"
             val encoded = "${oneRemoteCodec(source, type, true, "$route($name)")}($name)"
+            fill = if (type == "string") "$fill    oneRemoteBodyText(oneRemoteArguments, \"$name\", $name)\n" else "$fill    oneRemoteBodyValue(oneRemoteArguments, \"$name\", $encoded)\n"
             keys = if (keys == "") "\"$name\"" else "$keys, \"$name\""
             values = if (values == "") encoded else "$values, $encoded"
             index = index + 1
@@ -421,6 +480,7 @@ compile fun oneRemoteWriteClients(var source: OneRemoteSource): void {
         val spelled = oneRemoteSpell(source, result)
         val decode = oneRemoteCodec(source, result, false, "$route: result")
         val body = if (keys == "") "oneRemoteObjectEmpty()" else "jsonObject([$keys], [$values])"
+        source.code = "${source.code}@noinline\nfun oneRemoteSendTo_$route($parameters): int {\n    var oneRemoteArguments = OneRemoteBody()\n$fill    oneRemoteBodySend(oneRemoteArguments, services, base, \"$route\")\n}\nfun oneRemoteDecode_$route(json: Json): $spelled = $decode(json)\n"
         source.code = "${source.code}fun oneRemoteCall_$route($parameters): OneRemote<$spelled> = oneRemoteSend<$spelled>(services, base, \"$route\", $body, $decode)\n"
     }
     return
@@ -502,3 +562,48 @@ compile fun oneRemoteParse(cursor: ParserCursor): SyntaxExpression {
 }
 
 #compilerRegisterSubparser("remote", oneRemoteParse)
+
+// `$remoteCall(services, base, contract.function(arguments))`: as `$remote`, giving the request's id.
+compile fun oneRemoteCallParse(cursor: ParserCursor): SyntaxExpression {
+    parserExpect(cursor, "(")
+    parserRawSkipWhitespace(cursor)
+    val services = parserParseAblaExpression(cursor)
+    parserRawSkipWhitespace(cursor)
+    parserExpect(cursor, ",")
+    parserRawSkipWhitespace(cursor)
+    val base = parserParseAblaExpression(cursor)
+    parserRawSkipWhitespace(cursor)
+    parserExpect(cursor, ",")
+    parserRawSkipWhitespace(cursor)
+    val call = parserParseAblaExpression(cursor)
+    parserRawSkipWhitespace(cursor)
+    parserExpect(cursor, ")")
+    if (syntaxKind(call) != "call" && syntaxKind(call) != "member.call") parserFail(cursor, "\$remoteCall needs a direct call of a contract function")
+    val arguments: array<SyntaxExpression> = [services, base]
+    var index = 0
+    while (index < syntaxChildCount(call)) {
+        arguments.append(syntaxChild(call, index))
+        index = index + 1
+    }
+    syntaxCall("oneRemoteSendTo_${oneRemoteRoute(syntaxText(call))}", arguments)
+}
+
+#compilerRegisterSubparser("remoteCall", oneRemoteCallParse)
+
+// `$remoteDecode(reply.json, contract.function())`: that route's result. The call only names the route.
+compile fun oneRemoteDecodeParse(cursor: ParserCursor): SyntaxExpression {
+    parserExpect(cursor, "(")
+    parserRawSkipWhitespace(cursor)
+    val json = parserParseAblaExpression(cursor)
+    parserRawSkipWhitespace(cursor)
+    parserExpect(cursor, ",")
+    parserRawSkipWhitespace(cursor)
+    val call = parserParseAblaExpression(cursor)
+    parserRawSkipWhitespace(cursor)
+    parserExpect(cursor, ")")
+    if (syntaxKind(call) != "call" && syntaxKind(call) != "member.call") parserFail(cursor, "\$remoteDecode needs a contract function, as a call")
+    val arguments: array<SyntaxExpression> = [json]
+    syntaxCall("oneRemoteDecode_${oneRemoteRoute(syntaxText(call))}", arguments)
+}
+
+#compilerRegisterSubparser("remoteDecode", oneRemoteDecodeParse)

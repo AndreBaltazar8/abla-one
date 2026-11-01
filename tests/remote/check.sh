@@ -31,6 +31,8 @@ kill $pid; wait $pid 2>/dev/null; pid=0
 build client.ab client > "$work/log" || { cat "$work/log"; exit 1; }
 check "client runs" "$("$work/client")" 1
 check "no server code in the client" "$(grep -c SERVER_ONLY_MARKER "$work/client")" 0
+build client_slim.ab client_slim > "$work/log" || { cat "$work/log"; exit 1; }
+check "\$remoteCall, oneRemoteReply and \$remoteDecode" "$("$work/client_slim" | tr '\n' '|')" "1|retired use orders|ok 7 a 2|"
 
 # A server that runs its client code too, from the same source as a client build.
 build both.ab both > "$work/log" || { cat "$work/log"; exit 1; }
