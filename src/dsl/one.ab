@@ -343,6 +343,7 @@ compile fun oneDslElement(cursor: ParserCursor): SyntaxExpression {
         "Row" -> syntaxCall("row", [styled, syntaxArray(children)])
         "Stack" -> syntaxCall("stack", [styled, syntaxArray(children)])
         "Scroll" -> syntaxCall("scroll", [styled, syntaxArray(children)])
+        "ScrollRow" -> syntaxCall("scrollRow", [styled, syntaxArray(children)])
         "Pressable" -> syntaxCall("pressable", [oneDslPress(a, "onPress"), styled, syntaxArray(children)])
         "Text" -> syntaxCall("text", [content, styled])
         "Icon" -> syntaxCall("icon", [oneDslText(a, "name", ""), oneDslText(a, "label", ""), styled])

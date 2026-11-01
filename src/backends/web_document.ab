@@ -101,6 +101,7 @@ fun oneWebBaseCss(): string =
     ".k-row{display:flex;flex-direction:row;align-items:center}\n" +
     ".k-stack{display:grid}.k-stack>*{grid-area:1/1}\n" +
     ".k-scroll,.k-feed{overflow-y:auto;min-height:0}\n" +
+    ".k-scrollRow{display:flex;flex-direction:row;align-items:center;overflow-x:auto;min-width:0}.k-scrollRow>*{flex:none}\n" +
     ".k-text,.k-rich{display:block;overflow-wrap:anywhere}\n" +
     ".k-pressable{appearance:none;border:0;background:none;font:inherit;color:inherit;text-align:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}\n" +
     ".k-input{font:inherit;border:0;outline:0;background:transparent;color:inherit;width:100%;resize:none}\n" +
@@ -325,7 +326,7 @@ fun oneWebRuns(runs: string): string {
 fun oneWebDeclarations(node: Node, r: Resolved, state: string, parentKind: string): array<string> {
     val out: array<string> = []
     val p = if (state == "") "" else "$state:"
-    val parentRow = parentKind == "row"
+    val parentRow = parentKind == "row" || parentKind == "scrollRow"
     var paddingDone = false
     for (name in r.props.keys()) {
         var prop = name
@@ -395,6 +396,7 @@ fun oneWebDeclaration(kind: string, prop: string, v: string, parentRow: bool): s
         "borderColor" -> "border-color:$v"
         "opacity" -> "opacity:${oneWebPercent(v)}"
         "clip" -> if (v == "true") "overflow:hidden" else ""
+        "wrap" -> if (v == "true") "flex-wrap:wrap" else ""
         "elevation" -> "box-shadow:0 ${v}px ${oneParseInt(v, 0) * 3}px rgba(0,0,0,.12)"
         "color" -> "color:$v"
         "tint" -> "color:$v"

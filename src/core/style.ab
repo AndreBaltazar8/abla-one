@@ -76,6 +76,8 @@ class Style(val entries: array<StyleEntry>) {
     fun borderRight(width: int, color: string): Style = setInt("borderRight", width).set("borderColor", color)
     fun opacity(percent: int): Style = setInt("opacity", percent)
     fun clip(): Style = set("clip", "true")
+    // A row whose children flow onto more lines when they run out of width.
+    fun wrap(): Style = set("wrap", "true")
 
     // Text.
     fun text(preset: string): Style = set("text", preset)

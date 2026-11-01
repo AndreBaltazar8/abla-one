@@ -148,7 +148,9 @@ class OneBox(
     val lines: array<string>,
     var contentH: int,
     var scrollY: int,
-    val lineWidths: array<int> = []  // of `lines`, when text
+    val lineWidths: array<int> = [],  // of `lines`, when text
+    var contentW: int = 0,  // of a scrollRow
+    var scrollX: int = 0
 )
 
 class OneLayoutContext(val theme: Theme, val target: string, val scroll: Map<string, int>, val cache: OneLayoutCache, val width: int, val height: int)
@@ -162,6 +164,7 @@ class OneWrapEntry(val text: string, val size: int, val weight: string, val widt
 class OneLayoutCache(val resolved: Map<int, OneResolvedEntry>, val wraps: Map<int, OneWrapEntry>, val boxes: Map<int, OneBox>)
 
 val oneLayoutCacheMost = 1024
+val oneScrollRowChildWidth = 1000000
 
 fun oneLayoutCache(): OneLayoutCache = OneLayoutCache(Map(), Map(), Map())
 
@@ -178,7 +181,7 @@ fun oneHashTree(node: Node): Node {
     for (entry in node.style.entries) style = oneHashText(oneHashText(oneHashText(oneHashText(style, entry.property), entry.value), entry.target), entry.state)
     var hash = oneHashText(style, node.key)
     for (item in node.attrs) hash = oneHashText(oneHashText(hash, item.name), item.value)
-    var scrolls = node.kind == "scroll" || node.kind == "feed"
+    var scrolls = node.kind == "scroll" || node.kind == "feed" || node.kind == "scrollRow"
     val children: array<Node> = []
     for (child in node.children) {
         val hashed = oneHashTree(child)
@@ -269,6 +272,7 @@ fun oneLayoutRescroll(var box: OneBox, scroll: Map<string, int>, path: string): 
         if (offset < 0) offset = 0
         box.scrollY = offset
     }
+    if (kind == "scrollRow") box.scrollX = oneScrollRowOffset(box, scroll.get(path))
     var index = 0
     while (index < box.children.size) {
         oneLayoutRescroll(box.children[index], scroll, oneChildPath(path, box.children[index].node, index))
@@ -355,6 +359,8 @@ fun oneMeasureFresh(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: 
     } else if (kind == "row") {
         val box = oneMeasureRow(ctx, node, r, availW, availH, w, h, pl, pr, pt, pb, path)
         return box
+    } else if (kind == "scrollRow") {
+        return oneMeasureScrollRow(ctx, node, r, availW, availH, w, h, pl, pr, pt, pb, path)
     } else if (kind == "stack") {
         val innerW = (if (w >= 0) w else availW) - pl - pr
         val innerH = (if (h >= 0) h else availH) - pt - pb
@@ -504,7 +510,72 @@ fun oneMeasureColumn(var ctx: OneLayoutContext, node: Node, r: Resolved, availW:
     outer
 }
 
+// Children at their natural sizes, left to right, starting a new line when the
+// next one doesn't fit. `gap` separates them both ways.
+fun oneMeasureWrapRow(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, givenW: int, givenH: int, pl: int, pr: int, pt: int, pb: int, path: string): OneBox {
+    val gap = r.int("gap", 0)
+    val innerW = (if (givenW >= 0) givenW else availW) - pl - pr
+    val innerH = (if (givenH >= 0) givenH else availH) - pt - pb
+    val boxes: array<OneBox> = []
+    var x = 0
+    var y = 0
+    var lineH = 0
+    var widest = 0
+    var index = 0
+    for (child in node.children) {
+        val box = oneMeasure(ctx, child, oneResolveNode(ctx, child), innerW, innerH, -1, -1, oneChildPath(path, child, index))
+        if (x > 0 && x + box.w > innerW) {
+            y = y + lineH + gap
+            x = 0
+            lineH = 0
+        }
+        box.x = pl + x
+        box.y = pt + y
+        if (box.h > lineH) lineH = box.h
+        if (x + box.w > widest) widest = x + box.w
+        x = x + box.w + gap
+        boxes.append(box)
+        index = index + 1
+    }
+    val w = oneClamp(if (givenW >= 0) givenW else widest + pl + pr, r, "Width")
+    val h = oneClamp(if (givenH >= 0) givenH else y + lineH + pt + pb, r, "Height")
+    OneBox(node, r, 0, 0, w, h, boxes, [], 0, 0)
+}
+
+fun oneScrollRowOffset(box: OneBox, saved: int?): int {
+    val most = if (box.contentW > box.w) box.contentW - box.w else 0
+    var offset = if (saved != null) saved else box.scrollX
+    if (offset > most) offset = most
+    if (offset < 0) offset = 0
+    offset
+}
+
+// Children at their natural widths, however wide that comes to.
+fun oneMeasureScrollRow(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, givenW: int, givenH: int, pl: int, pr: int, pt: int, pb: int, path: string): OneBox {
+    val gap = r.int("gap", 0)
+    val innerH = (if (givenH >= 0) givenH else availH) - pt - pb
+    val boxes: array<OneBox> = []
+    var x = pl
+    var tallest = 0
+    var index = 0
+    for (child in node.children) {
+        val box = oneMeasure(ctx, child, oneResolveNode(ctx, child), oneScrollRowChildWidth, innerH, -1, -1, oneChildPath(path, child, index))
+        box.x = x
+        x = x + box.w + (if (index + 1 < node.children.size) gap else 0)
+        if (box.h > tallest) tallest = box.h
+        boxes.append(box)
+        index = index + 1
+    }
+    for (box in boxes) box.y = pt + (tallest - box.h) / 2
+    val w = oneClamp(if (givenW >= 0) givenW else availW, r, "Width")
+    val h = oneClamp(if (givenH >= 0) givenH else tallest + pt + pb, r, "Height")
+    val outer = OneBox(node, r, 0, 0, w, h, boxes, [], 0, 0, [], x + pr, 0)
+    outer.scrollX = oneScrollRowOffset(outer, ctx.scroll.get(path))
+    outer
+}
+
 fun oneMeasureRow(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: int, availH: int, givenW: int, givenH: int, pl: int, pr: int, pt: int, pb: int, path: string): OneBox {
+    if (r.get("wrap") == "true") return oneMeasureWrapRow(ctx, node, r, availW, availH, givenW, givenH, pl, pr, pt, pb, path)
     var w = givenW
     var h = givenH
     val gap = r.int("gap", 0)

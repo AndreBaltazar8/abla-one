@@ -115,6 +115,16 @@ class Gallery(
         if (moment == "ask") button(ui, "Emitir", "primary", ui.press { issued += 1; moment = "done" }, style())
         else button(ui, "Anular", "danger", ui.press { voided += 1; moment = "ask" }, style()),
         text("Emitidas: $issued, anuladas: $voided", style()),
+        row(style().wrap().gap(8), [
+            badge(ui, "Linha", "secondary"), badge(ui, "que", "secondary"), badge(ui, "passa", "secondary"),
+            badge(ui, "para", "secondary"), badge(ui, "a seguinte", "secondary"), badge(ui, "quando", "secondary"),
+            badge(ui, "não cabe", "secondary"), badge(ui, "na largura", "secondary"), badge(ui, "disponível", "secondary")
+        ]).set("label", "wrap"),
+        scrollRow(style().gap(8).set("label", "scrollRow"), [
+            badge(ui, "Desliza", "secondary"), badge(ui, "para o lado", "secondary"), badge(ui, "para ver", "secondary"),
+            badge(ui, "o resto", "secondary"), badge(ui, "desta linha", "secondary"), badge(ui, "que é", "secondary"),
+            badge(ui, "bem mais", "secondary"), badge(ui, "larga que", "secondary"), badge(ui, "o ecrã", "secondary")
+        ]),
         button(ui, "Contar", "secondary", ui.press { tallied += 1 }, style()),
         text("Contadas: $tallied", style()),
         textField(ui, draft, "Rascunho", ui.change { value -> draft = value }, style()),

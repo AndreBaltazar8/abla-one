@@ -133,17 +133,19 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     }
     if (kind == "link" && box.node.attr("route") != "true") frame.hits.append(OneHit("link", x, y, box.w, box.h, 0, 0, path, box.node.attr("href"), "", false))
     val scrolls = kind == "scroll" || kind == "feed"
+    val across = kind == "scrollRow"
     var ncx = cx
     var ncy = cy
     var ncw = cw
     var nch = ch
-    if (scrolls || r.get("clip") == "true") {
+    if (scrolls || across || r.get("clip") == "true") {
         frame.paints.append(oneRect("clip", x, y, box.w, box.h, radius, ""))
         ncx = x
         ncy = y
         ncw = box.w
         nch = box.h
         if (scrolls) frame.hits.append(OneHit("scroll", x, y, box.w, box.h, 0, 0, path, "${box.scrollY}", "${box.contentH - box.h}", false))
+        if (across && box.contentW > box.w) frame.hits.append(OneHit("scrollAcross", x, y, box.w, box.h, 0, 0, path, "${box.scrollX}", "${box.contentW - box.w}", false))
     }
     var index = 0
     var visibleItem = 0
@@ -152,6 +154,10 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
         val childY = y - box.scrollY + child.y
         if (kind == "popover" && index == 1) frame.popovers = frame.popovers + 1
         // Skip what a scroll area has scrolled out of view.
+        else if (across) {
+            val childX = x - box.scrollX + child.x
+            if (childX + child.w >= ncx && childX <= ncx + ncw) onePaintBox(child, x - box.scrollX, y, frame, childPath, ncx, ncy, ncw, nch)
+        }
         else if (!scrolls || (childY + child.h >= ncy && childY <= ncy + nch)) onePaintBox(child, x, y - box.scrollY, frame, childPath, ncx, ncy, ncw, nch)
         if (kind == "feed" && child.node.attr("item") != "" && childY >= ncy && childY + child.h <= ncy + nch) {
             val item = oneParseInt(child.node.attr("item"), 0)
@@ -163,7 +169,7 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
         val event = oneParseInt(box.node.attr("onVisible"), 0)
         if (event > 0) frame.visible.append(OneVisible(event, visibleItem))
     }
-    if (scrolls || r.get("clip") == "true") frame.paints.append(oneRect("unclip", x, y, box.w, box.h, 0, ""))
+    if (scrolls || across || r.get("clip") == "true") frame.paints.append(oneRect("unclip", x, y, box.w, box.h, 0, ""))
     return
 }
 

@@ -4,7 +4,82 @@ import "../../src/layout/paint.ab"
 
 fun press(var ui: Ui, label: string): Node = button(ui, label, "plain", ui.press { }, style())
 
+fun block(width: int): Node = column(style().width(width).height(20), [])
+
+fun boxAt(root: OneBox, index: int): borrow(root) OneBox = root.children[index]
+
+fun testWrap(): void {
+    val theme = oneDefaultTheme()
+    val wrapped = oneLayout(column(style().fill(), [
+        row(style().wrap().gap(10).padding(5), [block(100), block(100), block(100), block(50)])
+    ]), theme, "desktop", 240, 300, Map()).children[0]
+    expectEqual(boxAt(wrapped, 0).x, 5, "wrap: first at the padding")
+    expectEqual(boxAt(wrapped, 1).x, 115, "wrap: second beside it, after the gap")
+    expectEqual(boxAt(wrapped, 2).x, 5, "wrap: third starts a line")
+    expectEqual(boxAt(wrapped, 2).y, 35, "wrap: a line lower, with the gap")
+    expectEqual(boxAt(wrapped, 3).y, 35, "wrap: fourth still fits there")
+    expectEqual(wrapped.h, 60, "wrap: as tall as its lines")
+    val wide = oneLayout(column(style().fill(), [
+        row(style().wrap().gap(10), [block(500), block(50)])
+    ]), theme, "desktop", 240, 300, Map()).children[0]
+    expectEqual(boxAt(wide, 0).y, 0, "wrap: an oversized child takes the first line")
+    expectEqual(boxAt(wide, 1).y, 30, "wrap: and pushes the next down")
+    val none = oneLayout(column(style().fill(), [row(style().wrap(), [])]), theme, "desktop", 240, 300, Map()).children[0]
+    expectEqual(none.h, 0, "wrap: empty")
+    return
+}
+
+fun testScrollRow(): void {
+    val theme = oneDefaultTheme()
+    val tree = column(style().fill(), [scrollRow(style().gap(10).padding(5), [block(100), block(100), block(100)])])
+    val fresh = oneLayout(tree, theme, "desktop", 200, 300, Map()).children[0]
+    expectEqual(fresh.w, 200, "scrollRow: takes the width offered")
+    expectEqual(fresh.h, 30, "scrollRow: as tall as its children")
+    expectEqual(fresh.contentW, 330, "scrollRow: content keeps natural widths")
+    expectEqual(fresh.scrollX, 0, "scrollRow: starts at the left")
+    val frame = onePaintFrame(oneLayout(tree, theme, "desktop", 200, 300, Map()), 200, 300)
+    var hit = -1
+    var index = 0
+    while (index < frame.hits.size) {
+        if (frame.hits[index].kind == "scrollAcross") hit = index
+        index = index + 1
+    }
+    expect(hit >= 0, "scrollRow: scrollable when it overflows")
+    val path = frame.hits[hit].key
+    val offsets: Map<string, int> = Map()
+    offsets.set(path, 60)
+    expectEqual(oneLayout(tree, theme, "desktop", 200, 300, offsets).children[0].scrollX, 60, "scrollRow: keeps its offset")
+    offsets.set(path, 9999)
+    expectEqual(oneLayout(tree, theme, "desktop", 200, 300, offsets).children[0].scrollX, 130, "scrollRow: clamps at the end")
+    offsets.set(path, -5)
+    expectEqual(oneLayout(tree, theme, "desktop", 200, 300, offsets).children[0].scrollX, 0, "scrollRow: clamps at the start")
+    var moved = oneLayout(tree, theme, "desktop", 200, 300, Map())
+    offsets.set(path, 40)
+    oneLayoutRescroll(moved, offsets, "r")
+    expectEqual(moved.children[0].scrollX, 40, "scrollRow: rescroll applies without a new layout")
+    // What follows a scrollRow is painted outside its clip.
+    val clips = onePaintFrame(oneLayout(column(style().fill(), [scrollRow(style(), [block(500)]), text("after", style())]), theme, "desktop", 200, 300, Map()), 200, 300)
+    var depth = 0
+    var depthAtText = -1
+    for (paint in clips.paints) {
+        if (paint.op == "clip") depth = depth + 1
+        else if (paint.op == "unclip") depth = depth - 1
+        else if (paint.text == "after") depthAtText = depth
+    }
+    expectEqual(depthAtText, 0, "scrollRow: its clip ends with it")
+    val fits = column(style().fill(), [scrollRow(style(), [block(50)])])
+    val fitFrame = onePaintFrame(oneLayout(fits, theme, "desktop", 200, 300, Map()), 200, 300)
+    var fitHits = 0
+    for (found in fitFrame.hits) {
+        if (found.kind == "scrollAcross") fitHits = fitHits + 1
+    }
+    expectEqual(fitHits, 0, "scrollRow: nothing to scroll when it fits")
+    return
+}
+
 fun main: int {
+    testWrap()
+    testScrollRow()
     // A popover: only the anchor takes room, the panel is painted last and on the side asked for, and
     // while it's open a press anywhere else is its dismissal.
     var pop = oneUi("t", oneDefaultTheme())

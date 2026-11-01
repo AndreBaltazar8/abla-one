@@ -94,7 +94,8 @@ class OneDesktopState(
     // The route epoch of the frame on screen: a press on it is for that route.
     var routeEpoch: int = 0,
     // An Alt key is down: abla-graphics reports keys, not modifiers.
-    var alt: bool = false
+    var alt: bool = false,
+    var dragAcross: bool = false
 )
 
 // One frame: render, lay out, paint. Visible feed rows are delivered first.
@@ -189,7 +190,7 @@ fun oneDesktopCaret(var surface: OneSurface, frame: OneFrame, key: string): void
     if (hitIndex < 0) return
     val h = frame.hits[hitIndex]
     var cx = h.x + 16
-    for (p in frame.paints) if (p.op == "text" && p.x >= h.x && p.y >= h.y && p.x < h.x + h.w && p.y < h.y + h.h && h.value != "") cx = p.x + p.w
+    for (p in frame.paints) if (p.op == "text" && p.x >= h.x && p.y >= h.y && p.x < h.x + h.w && p.y < h.y + h.h && h.value != "") cx = p.x + oneTextWidth(p.text, p.size, p.weight)
     oneFillRect(surface, cx, h.y + h.h / 2 - 10, 2, 20, 1653808, 255)
     return
 }
@@ -230,7 +231,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                 state.pointerX = event.pointerX()
                 state.pointerY = event.pointerY()
                 if (state.dragKey != "") {
-                    val dy = state.downY - state.pointerY
+                    val dy = if (state.dragAcross) state.downX - state.pointerX else state.downY - state.pointerY
                     if (dy > 6 || dy < -6) state.dragging = true
                     if (state.dragging) {
                         state.scroll.set(state.dragKey, state.dragFrom + dy)
@@ -257,7 +258,9 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     state.downX = state.pointerX
                     state.downY = state.pointerY
                     state.dragging = false
-                    val s = oneDesktopHit(frame, state.pointerX, state.pointerY, "scroll")
+                    val across = oneDesktopHit(frame, state.pointerX, state.pointerY, "scrollAcross")
+                    state.dragAcross = across >= 0
+                    val s = if (across >= 0) across else oneDesktopHit(frame, state.pointerX, state.pointerY, "scroll")
                     state.dragKey = if (s >= 0) frame.hits[s].key else ""
                     state.dragFrom = if (s >= 0) oneParseInt(frame.hits[s].value, 0) else 0
                 } else {
@@ -275,8 +278,14 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     state.dragging = false
                 }
             } else if (event.kind == windowEventScrolled) {
+                val across = oneDesktopHit(frame, state.pointerX, state.pointerY, "scrollAcross")
                 val s = oneDesktopHit(frame, state.pointerX, state.pointerY, "scroll")
-                if (s >= 0) {
+                if (across >= 0) {
+                    // A plain wheel moves it too: most mice have no sideways wheel.
+                    val notches = if (event.scrollX() != 0) event.scrollX() else event.scrollY()
+                    state.scroll.set(frame.hits[across].key, oneParseInt(frame.hits[across].value, 0) - notches * 48)
+                    state.dirty = true
+                } else if (s >= 0) {
                     state.scroll.set(frame.hits[s].key, oneParseInt(frame.hits[s].value, 0) - event.scrollY() * 48)
                     state.dirty = true
                 }
@@ -284,6 +293,8 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                 val i = oneDesktopInput(frame, state.focusKey)
                 if (i >= 0) {
                     oneDesktopDeliver(app, theme, state, frame.hits[i].event, "${frame.hits[i].value}${oneUtf8(event.codepoint())}")
+                    // The next key may already be queued, and builds on this text.
+                    frame = oneDesktopFrame(app, theme, state)
                     state.dirty = true
                 }
             } else if (event.kind == windowEventKey && event.keyPressed() && state.focusKey != "") {
@@ -293,6 +304,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     var end = value.size - 1
                     while (end > 0 && value[end] >= 128 && value[end] < 192) end = end - 1
                     oneDesktopDeliver(app, theme, state, frame.hits[i].event, value.slice(0, end))
+                    frame = oneDesktopFrame(app, theme, state)
                     state.dirty = true
                 } else if (i >= 0 && event.key() == keyEnter && frame.hits[i].submit > 0) {
                     oneDesktopDeliver(app, theme, state, frame.hits[i].submit, "")
