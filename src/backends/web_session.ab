@@ -313,6 +313,7 @@ class OneLiveSession(
     // What keeps a raced press off a new route; a route message from the page,
     // answered with the next patch; canvas scroll positions per entry.
     val fence: OneRouteFence,
+    val presses: OnePresses,
     var routeAnswer: int,
     val scrolls: OneRouteScrolls,
     // A page has had a socket to this session.
@@ -378,8 +379,11 @@ class OneLiveSession(
         if (target > 0) {
             oneDispatch(app, if (canvas) "web-canvas" else "web-document", theme, target, value, width)
             changed = true
-            if (!change) pressed = true
-        }
+            if (!change) {
+                pressed = true
+                presses.landed(eventRevision, eventId)
+            }
+        } else if (presses.lost(app, eventRevision, eventId)) changed = true
         return
     }
     fun receive(kind: string, payload: string): void {
@@ -477,5 +481,5 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
 }
 
 fun oneSession(id: string, app: OneApp, queue: OneLiveQueue): OneLiveSession {
-    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), 0, oneRouteScrolls(), false, 0, false, 0)
+    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), onePresses(), 0, oneRouteScrolls(), false, 0, false, 0)
 }

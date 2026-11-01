@@ -46,11 +46,17 @@ try {
     await resend(page, stale);
     await settled(page);
     check(await page.getByText('Emitidas: 1, anuladas: 0').count() === 1, 'a press for an older revision doesn\'t run the handler now at that place');
+    check(await page.getByText('Perdidos: 0').count() === 1, 'and a second press of what already landed isn\'t lost: nobody meant more by it');
     await page.getByRole('button', {name: 'Anular'}).click();
     await page.getByText('Emitidas: 1, anuladas: 1').waitFor({timeout: 5000});
     check(true, 'a press on what\'s shown does');
     await page.getByRole('button', {name: 'Emitir'}).click();
     await page.getByText('Emitidas: 2, anuladas: 1').waitFor({timeout: 5000});
+    // The app hears of a press that went nowhere, when that press wasn't the one before it.
+    await page.getByRole('button', {name: 'Anular'}).waitFor();
+    await resend(page, stale);
+    await settled(page);
+    check(await page.getByText('Perdidos: 1').count() === 1 && await page.getByText('Emitidas: 2, anuladas: 1').count() === 1, 'a press lost across a change reaches the app as pressLost');
     await page.close();
   }
   {

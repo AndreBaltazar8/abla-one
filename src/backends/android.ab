@@ -37,6 +37,7 @@ fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
     var running = true
     val recent: array<OneEventMap> = []
     val fence = oneRouteFence()
+    val presses = onePresses()
     oneAppRoutes.start("/")
     while (running) {
         oneRoutesDrain(app, oneAppRoutes)
@@ -63,11 +64,11 @@ fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
             }
         } else if (event > 0) {
             val age = revision - eventRevision
-            if (age == 0) oneDispatch(app, "android", theme, event, payload)
-            else {
-                val translated = oneEventLanding(recent, age, event, eventRevision < fence.from)
-                if (translated > 0) oneDispatch(app, "android", theme, translated, payload)
-            }
+            val landing = if (age == 0) event else oneEventLanding(recent, age, event, eventRevision < fence.from)
+            if (landing > 0) {
+                oneDispatch(app, "android", theme, landing, payload)
+                if (event <= oneChangeBase) presses.landed(eventRevision, event)
+            } else presses.lost(app, eventRevision, event)
         }
     }
     0

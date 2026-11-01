@@ -20,6 +20,7 @@ class Gallery(
     var formNotes: string by State(""),
     var linkPresses: int by State(0),
     var moment: string by State(""),
+    var lost: int by State(0),
     var issued: int by State(0),
     var voided: int by State(0),
     var tallied: int by State(0),
@@ -115,6 +116,7 @@ class Gallery(
         if (moment == "ask") button(ui, "Emitir", "primary", ui.press { issued += 1; moment = "done" }, style())
         else button(ui, "Anular", "danger", ui.press { voided += 1; moment = "ask" }, style()),
         text("Emitidas: $issued, anuladas: $voided", style()),
+        text("Perdidos: $lost", style()),
         button(ui, "Contar", "secondary", ui.press { tallied += 1 }, style()),
         text("Contadas: $tallied", style()),
         textField(ui, draft, "Rascunho", ui.change { value -> draft = value }, style()),
@@ -185,6 +187,7 @@ class Gallery(
 
     fun receive(kind: string, value: string): void {
         if (kind == "route") show(value)
+        else if (kind == "pressLost") lost += 1
         return
     }
 }
