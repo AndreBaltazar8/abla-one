@@ -1,0 +1,84 @@
+import "../../abla-xml/src/xml.ab"
+import "abla/fs"
+import "abla/io"
+import "abla/process"
+import "abla/text"
+
+fun die(message: string): never { eprintln(message); exit(1) }
+
+// Android vector drawables to SVG, so the web app uses the same icons: <path> fill and stroke attributes, and <group>
+// translate, rotate and scale. Colours become currentColor with --tint (icons tinted by CSS).
+val iconAndroid: string = "http://schemas.android.com/apk/res/android"
+
+fun iconColor(value: string, tint: bool): string {
+    if (value == "") return "none"
+    if (value.startsWith("@")) return if (value.contains("transparent")) "none" else "currentColor"
+    var begin = 0
+    while (begin < value.size && value[begin] == 35) begin = begin + 1
+    val digits = value.slice(begin, value.size)
+    if (digits.size == 8 && digits.startsWith("00")) return "none"
+    if (tint) return "currentColor"
+    "#${if (digits.size == 8) digits.slice(2, 8) else digits}"
+}
+
+fun iconElement(node: XmlElement, tint: bool): string {
+    var out = ""
+    val get = { name: string, fallback: string -> node.attributeValue(name, fallback, iconAndroid) }
+    if (node.name == "path") {
+        var attributes = "d=\"${get("pathData", "None")}\" fill=\"${iconColor(get("fillColor", ""), tint)}\""
+        if (get("strokeColor", "") != "") {
+            attributes = "$attributes stroke=\"${iconColor(get("strokeColor", ""), tint)}\" stroke-width=\"${get("strokeWidth", "1")}\""
+            if (get("strokeLineCap", "") != "") attributes = "$attributes stroke-linecap=\"${get("strokeLineCap", "")}\""
+            if (get("strokeLineJoin", "") != "") attributes = "$attributes stroke-linejoin=\"${get("strokeLineJoin", "")}\""
+        }
+        if (get("fillType", "") == "evenOdd") attributes = "$attributes fill-rule=\"evenodd\""
+        out = "$out<path $attributes/>"
+    } else if (node.name == "group") {
+        val pivotX = get("pivotX", "0")
+        val pivotY = get("pivotY", "0")
+        var transform = ""
+        if (get("translateX", "") != "" || get("translateY", "") != "") transform = "translate(${get("translateX", "0")} ${get("translateY", "0")})"
+        if (get("rotation", "") != "") transform = "$transform${if (transform != "") " " else ""}rotate(${get("rotation", "")} $pivotX $pivotY)"
+        if (get("scaleX", "") != "" || get("scaleY", "") != "") transform = "$transform${if (transform != "") " " else ""}translate($pivotX $pivotY) scale(${get("scaleX", "1")} ${get("scaleY", "1")}) translate(-$pivotX -$pivotY)"
+        out = "$out<g transform=\"$transform\">${iconConvert(node, tint)}</g>"
+    }
+    out
+}
+
+fun iconConvert(element: XmlElement, tint: bool): string {
+    var out = ""
+    for (node in element.children) {
+        when (node) {
+            is XmlElement -> out = "$out${iconElement(node, tint)}"
+            else -> {}
+        }
+    }
+    out
+}
+
+fun main(): int {
+    val firstArgument = 0
+    val arguments: array<string> = []
+    var tint = false
+    var index = firstArgument
+    while (index < processArgumentCount()) {
+        if (processArgument(index) == "--tint") tint = true
+        else arguments.append(processArgument(index))
+        index = index + 1
+    }
+    if (arguments.size == 0) die("Usage: vector2svg OUTPUT_FOLDER [--tint] DRAWABLE.xml...")
+    val folder = Path(arguments[0])
+    if (!folder.createDirectories()) die("Could not create ${folder.text}")
+    index = 1
+    while (index < arguments.size) {
+        val file = Path(arguments[index])
+        val parsed = xmlParse(file.readText()).document
+        if (parsed == null) die("Not XML: ${file.text}")
+        val root = parsed.root
+        val svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${root.attributeValue("viewportWidth", "None", iconAndroid)} ${root.attributeValue("viewportHeight", "None", iconAndroid)}\">${iconConvert(root, tint)}</svg>\n"
+        val name = file.name()
+        if (!folder.child("${name.slice(0, name.size - file.extension().size - 1)}.svg").writeText(svg)) die("Could not write ${name}")
+        index = index + 1
+    }
+    0
+}

@@ -19,7 +19,7 @@ class OneDesktopOptions(
     val width: int,
     val height: int,
     val background: string,
-    // Directory of `<name>.svg` icons (tools/vector2svg.py output).
+    // Directory of `<name>.svg` icons (tools/vector2svg output).
     val iconDir: string
 )
 

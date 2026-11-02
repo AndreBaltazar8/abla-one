@@ -777,7 +777,7 @@ fun oneBlitGlyph(var surface: OneSurface, glyph: OneGlyphBitmap, penX: int, base
 
 // --- icons (SVG paths) -----------------------------------------------------------
 
-// Draws an SVG icon (as produced by tools/vector2svg.py) into a box. Stroked
+// Draws an SVG icon (as produced by tools/vector2svg) into a box. Stroked
 // paths use their stroke width; filled paths fill. Everything takes `tint`.
 fun oneDrawSvg(var surface: OneSurface, svg: string, x: int, y: int, w: int, h: int, tint: string): void {
     val box = oneSvgAttr(svg, "viewBox")

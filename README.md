@@ -30,7 +30,7 @@ class Counter(var count: int by State(0)) : OneApp {
 - `src/one.ab`: core. `src/one_kit.ab`: core plus kit and default theme.
 - `src/backends/`: `android.ab` (run loop), `android_tree.ab` (encoding), `web_document.ab`, `test.ab`.
 - `examples/gallery/`: one shared app (`gallery.ab`) with `android.ab` and `web.ab` entry files.
-- `tools/`: `build-android.sh`, `vector2svg.py` (Android vector drawables to SVG icons for the web), `shoot.mjs` (screenshots).
+- `tools/`: `build-android.sh`, `vector2svg` (Android vector drawables to SVG icons for the web), `shoot.mjs` (screenshots).
 
 ## Tests
 

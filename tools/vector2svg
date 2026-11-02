@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+root=$(cd "$(dirname "$0")/.." && pwd)
+program=$root/build/vector2svg
+if [ ! -x "$program" ] || [ "$root/tools/vector2svg.ab" -nt "$program" ]; then
+  mkdir -p "$root/build"
+  (cd "$root" && nix-shell ../ablac/shell.nix --run "../ablac/build/ablac build tools/vector2svg.ab -o '$program.next' --fast" >&2 && mv "$program.next" "$program")
+fi
+exec "$program" "$@"

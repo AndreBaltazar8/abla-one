@@ -20,7 +20,7 @@ mkdir -p build/papermono
 # Its icons, embedded: the project's ../icons/*.xml, if any.
 if compgen -G "$project/../icons/*.xml" > /dev/null; then
   mkdir -p build/papermono/icons
-  python3 "$root/tools/vector2svg.py" build/papermono/icons --tint "$project"/../icons/*.xml
+  "$root/tools/vector2svg" build/papermono/icons --tint "$project"/../icons/*.xml
   python3 "$root/tools/icons-ab.py" build/papermono/icons.ab build/papermono/icons
 fi
 driver=build.ab

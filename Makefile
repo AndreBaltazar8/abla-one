@@ -20,7 +20,7 @@ test-remote:
 gallery-web:
 	$(NIX) '$(ABLAC) build examples/gallery/web.ab -o build/gallery-web --fast'
 	./build/gallery-web
-	python3 tools/vector2svg.py build/gallery/icons --tint examples/gallery/icons/*.xml
+	tools/vector2svg build/gallery/icons --tint examples/gallery/icons/*.xml
 
 gallery-android:
 	tools/build-android.sh gallery
