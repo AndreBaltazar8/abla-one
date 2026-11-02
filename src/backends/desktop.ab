@@ -208,6 +208,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
         WindowConfig(title = options.title, width = options.width, height = options.height, resizable = true)
     )
     if (!window.valid()) return 1
+    oneUseCaret()
     val icons = OneIconSource({ name -> linuxReadFile("${options.iconDir}/$name.svg", 65536) })
     oneLiveQueueList[oneLiveQueueIndex(session)].routes.start("/")
     var state = OneDesktopState(options.width, options.height, 0, 0, 0, 0, false, "", 0, "", true, Map(), Map(), oneLiveQueueList[oneLiveQueueIndex(session)].routes)

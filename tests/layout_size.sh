@@ -13,6 +13,10 @@ for name in wrap scroll_row; do
   grown=$(($(stat -c %s "$work/$name") - plain))
   if [ "$grown" -ge 2000 ]; then echo "ok   $name adds $grown bytes to a program that makes one"; else echo "FAIL $name adds $grown bytes: is its code in every program?"; failed=1; fi
 done
+# A field's caret, the same way: a program that paints a field without drawing a caret keeps none of it.
+for name in field field_caret; do "$ABLAC" build "tests/size/$name.ab" -o "$work/$name"; done
+grown=$(($(stat -c %s "$work/field_caret") - $(stat -c %s "$work/field")))
+if [ "$grown" -ge 100 ]; then echo "ok   a caret adds $grown bytes to a program that draws one"; else echo "FAIL a caret adds $grown bytes: is its code in every program?"; failed=1; fi
 
 # And what reaches a row without those calls.
 run() { "$ABLAC" build "tests/rows/$1.ab" -o "$work/$1" && "$work/$1" 2>&1; }

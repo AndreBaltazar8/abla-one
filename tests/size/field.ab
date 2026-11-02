@@ -1,0 +1,4 @@
+import "../../src/one.ab"
+import "../../src/one_kit.ab"
+import "../../src/layout/paint.ab"
+fun main: int = onePaintFrame(oneLayout(input("a", "b", 1, style()), oneDefaultTheme(), "desktop", 200, 100, Map()), 200, 100).hits.size

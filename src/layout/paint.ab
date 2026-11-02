@@ -30,7 +30,7 @@ class OneHit(
     val value: string,
     val placeholder: string,
     val multiline: bool,   // or, for a scroll area, that it follows its end
-    val caretX: int = 0,   // input: where the caret goes, after the text
+    val caretX: int = 0,   // input: where the caret goes, after the text, with `oneUseCaret`
     val caretY: int = 0    // input: the middle of the caret's line
 )
 
@@ -62,7 +62,7 @@ fun onePopoversIn(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: stri
     for (child in box.children) {
         val childPath = if (child.node.key != "") "$path/k:${child.node.key}" else "$path/$index"
         if (box.node.kind == "popover" && index == 1) {
-            oneAddHit(frame, "press", 0, 0, frame.width, frame.height, oneParseInt(box.node.attr("onDismiss"), 0), 0, "dismiss", "", "", false, 0, 0)
+            oneAddHit(frame, "press", 0, 0, frame.width, frame.height, oneParseInt(box.node.attr("onDismiss"), 0), 0, "dismiss", "", "", false)
             // Below the anchor, or above it when only that fits, and inside the window.
             val gap = 4
             var px = if (box.node.attr("side") == "end") x + box.w - child.w else x
@@ -111,9 +111,14 @@ fun oneAddPaint(var frame: OneFrame, op: string, x: int, y: int, w: int, h: int,
 
 fun oneAddText(var frame: OneFrame, x: int, y: int, w: int, lh: int, color: string, text: string, size: int, weight: string): void = oneAddPaint(frame, "text", x, y, w, lh, 0, color, text, size, weight, "")
 
+// Where a field's caret goes, added by what draws one (`oneUseCaret`): only a window does, and a program that never asks, an e-paper device
+// above all, links none of it. The call takes a small `OneInputRows`, as with the hooks of src/layout/layout.ab.
+class OneInputRows(val lines: array<string>, val first: int, val top: int, val left: int, val width: int, val pr: int)
+val oneCaretPlace: array<(var: OneFrame, OneBox, OneInputRows) -> void> = []
+
 @noinline
-fun oneAddHit(var frame: OneFrame, kind: string, x: int, y: int, w: int, h: int, event: int, submit: int, key: string, value: string, placeholder: string, multiline: bool, caretX: int, caretY: int): void {
-    frame.hits.append(OneHit(kind, x, y, w, h, event, submit, key, value, placeholder, multiline, caretX, caretY))
+fun oneAddHit(var frame: OneFrame, kind: string, x: int, y: int, w: int, h: int, event: int, submit: int, key: string, value: string, placeholder: string, multiline: bool): void {
+    frame.hits.append(OneHit(kind, x, y, w, h, event, submit, key, value, placeholder, multiline))
     return
 }
 
@@ -148,8 +153,6 @@ fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneF
     val multiline = box.node.attr("multiline") == "true"
     val color = if (value == "") r.get("placeholderColor") else r.get("color")
     val ink = if (color != "") color else "#888888"
-    var caretX = x + pl
-    var caretY = y + box.h / 2
     // The caret stays at the end, so the end is what shows. On a single line, text too long for
     // the field slides left under a clip, keeping room for the caret itself. Otherwise it's
     // the rows that fit: a value's last ones, as new text arrives at the end.
@@ -168,16 +171,35 @@ fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneF
         line = line + 1
     }
     if (over > 0) oneAddRect(frame, "unclip", x + pl, y, inner, box.h, 0, "")
-    if (slides) caretX = left + width
+    oneAddHit(frame, "input", x, y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), path, value, placeholder, multiline)
+    if (oneCaretPlace.size > 0) oneCaretPlace[0](frame, box, OneInputRows(lines, first, top, left, width, pr))
+    return
+}
+
+// On the field's hit, just added.
+fun onePlaceCaret(var frame: OneFrame, box: OneBox, rows: OneInputRows): void {
+    val hit = frame.hits[frame.hits.size - 1]
+    val r = box.r
+    val size = r.int("size", 16)
+    val weight = r.get("weight")
+    val value = hit.value
+    var caretX = rows.left
+    var caretY = hit.y + box.h / 2
+    if (value != "" && !hit.multiline) caretX = rows.left + rows.width
     else if (value != "") {
         // The word wrapper drops the spaces at the end, so those are added back.
         var end = value.size
         while (end > 0 && value[end - 1] == 32) end = end - 1
-        caretX = left + oneTextWidth(lines[lines.size - 1], size, weight) + oneTextWidth(value.slice(end, value.size), size, weight)
-        caretY = top + (lines.size - first - 1) * lh + lh / 2
+        caretX = rows.left + oneTextWidth(rows.lines[rows.lines.size - 1], size, weight) + oneTextWidth(value.slice(end, value.size), size, weight)
+        caretY = rows.top + (rows.lines.size - rows.first - 1) * oneLineHeight(r) + oneLineHeight(r) / 2
     }
-    val rightmost = x + box.w - pr - oneCaretWidth
-    oneAddHit(frame, "input", x, y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), path, value, placeholder, multiline, if (caretX > rightmost) rightmost else caretX, caretY)
+    val rightmost = hit.x + box.w - rows.pr - oneCaretWidth
+    frame.hits[frame.hits.size - 1] = OneHit(hit.kind, hit.x, hit.y, hit.w, hit.h, hit.event, hit.submit, hit.key, value, hit.placeholder, hit.multiline, if (caretX > rightmost) rightmost else caretX, caretY)
+    return
+}
+
+fun oneUseCaret(): void {
+    if (oneCaretPlace.size == 0) oneCaretPlace.append(onePlaceCaret)
     return
 }
 
@@ -185,7 +207,7 @@ fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneF
 @noinline
 fun onePaintScrollHit(box: OneBox, across: bool, x: int, y: int, var frame: OneFrame, path: string): void {
     val most = box.contentH - (if (across) box.w else box.h)
-    if (!across || most > 0) oneAddHit(frame, if (across) "scrollAcross" else "scroll", x, y, box.w, box.h, 0, 0, path, "${box.scrollY}", "$most", oneFeedFollows(box.node), 0, 0)
+    if (!across || most > 0) oneAddHit(frame, if (across) "scrollAcross" else "scroll", x, y, box.w, box.h, 0, 0, path, "${box.scrollY}", "$most", oneFeedFollows(box.node))
     return
 }
 
@@ -219,9 +241,9 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     }
     if (kind == "pressable" || kind == "link") {
         val event = oneParseInt(box.node.attr("onPress"), 0)
-        if (event > 0 && box.node.attr("enabled") != "false") oneAddHit(frame, "press", x, y, box.w, box.h, event, 0, path, box.node.attr("label"), "", false, 0, 0)
+        if (event > 0 && box.node.attr("enabled") != "false") oneAddHit(frame, "press", x, y, box.w, box.h, event, 0, path, box.node.attr("label"), "", false)
     }
-    if (kind == "link" && box.node.attr("route") != "true") oneAddHit(frame, "link", x, y, box.w, box.h, 0, 0, path, box.node.attr("href"), "", false, 0, 0)
+    if (kind == "link" && box.node.attr("route") != "true") oneAddHit(frame, "link", x, y, box.w, box.h, 0, 0, path, box.node.attr("href"), "", false)
     val scrolls = kind == "scroll" || kind == "feed"
     // A scrollRow's children are already placed at its offset (oneMeasureScrollRow, oneLayoutRescroll), which keeps this short.
     val across = kind == "scrollRow"

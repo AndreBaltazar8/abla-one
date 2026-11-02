@@ -110,6 +110,7 @@ fun fieldText(frame: OneFrame): array<OnePaint> {
 fun caretFor(value: string): int = fieldHit(fieldFrame(value, false)).caretX
 
 fun testCaret(): void {
+    oneUseCaret()
     val empty = caretFor("")
     val word = caretFor("ab")
     val spaced = caretFor("ab ")
@@ -124,6 +125,7 @@ fun testCaret(): void {
 fun endsWith(text: string, end: string): bool = text.size >= end.size && text.slice(text.size - end.size, text.size) == end
 
 fun testFieldShowsItsEnd(): void {
+    oneUseCaret()
     var long = ""
     var index = 0
     while (index < 40) {
