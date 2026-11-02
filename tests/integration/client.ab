@@ -80,8 +80,9 @@ fun main: int {
     html = find(out, "patch").getString("html")
 
     // Timers ask the page to wake the module.
-    val timerPressed = monotonicMilliseconds()
+    val beforeTimer = monotonicMilliseconds()
     out = call("{\"t\":\"event\",\"r\":$r,\"id\":${pressFor(html, "Timer")},\"v\":\"\"}")
+    val afterTimer = monotonicMilliseconds()
     val wait = find(out, "wait")
     expect(!wait.isNull() && wait.get("ms").asInt() <= 300, "wait message for a timer")
 
@@ -110,10 +111,11 @@ fun main: int {
     html = find(out, "patch").getString("html")
     expect(has(html, "download: 200 big 10 application/octet-stream"), "saved file reaches the app")
     // Whether the timer is due depends on how long all of the above took, so a tick is judged by the clock: under load this far can
-    // take past its 300 ms. Read after the tick, a time short of it proves the tick came before it was due.
+    // take past its 300 ms. The timer started within the press and the tick looked within its call, so only what those bounds settle is judged.
+    val beforeTick = monotonicMilliseconds()
     val ticked = kinds(call("{\"t\":\"tick\"}"))
-    if (monotonicMilliseconds() - timerPressed < 300) expectEqual(ticked, "wait ", "a tick before the timer is due only asks to wait again")
-    else expect(has(ticked, "patch"), "a tick after the timer is due completes it")
+    if (monotonicMilliseconds() - beforeTimer < 300) expectEqual(ticked, "wait ", "a tick before the timer is due only asks to wait again")
+    else if (beforeTick - afterTimer >= 300) expect(has(ticked, "patch"), "a tick after the timer is due completes it")
     // And past it for certain, however fast this ran.
     sleep(320)
     val late = call("{\"t\":\"tick\"}")
