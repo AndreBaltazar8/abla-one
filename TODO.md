@@ -12,11 +12,7 @@
 - Only list what is really open. A task is done when it is verified where it
   runs (on the device for device work), not just when it compiles.
 
-## Routes
-
-- [ ] PaperMono: routes and popovers are covered by host tests and the firmware builds, in both modes;
-      not yet run on the device, which wasn't connected on 2026-10-31. Needs its owner's taps: open and go back
-      between routes, open a popover and tap outside it, in full and in thin mode.
+PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not to be touched for now.
 
 ## Toolchain
 
@@ -33,11 +29,6 @@
 
 ## Abla One bugs seen
 
-- PaperMono thin mode after the compact storage change: it links (`make papermono-gallery MODE=thin
-  ONE_HOST=...`, again on 2026-10-31 with the Wi-Fi change) and `make ui-thin` passes on the host, but it hasn't run
-  on a device.
-- PaperMono: joining Wi-Fi in the background is tested on the host and builds; it hasn't run on a device. Check
-  boots join without "Sem ligação".
 
 ## Tests
 
