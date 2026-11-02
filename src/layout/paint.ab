@@ -79,6 +79,49 @@ fun onePopoversIn(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: stri
 fun oneRect(op: string, x: int, y: int, w: int, h: int, radius: int, color: string): OnePaint = OnePaint(op, x, y, w, h, radius, color, "", 0, "", "")
 
 // `cx..cy` with `cw × ch` is the current clip, for visibility tests.
+// Out of line, as `onePaintBox`, which recurses, has a large frame.
+@noinline
+fun onePaintText(box: OneBox, x: int, y: int, pl: int, pr: int, pt: int, var frame: OneFrame): void {
+    val r = box.r
+    val size = r.int("size", 15)
+    val lh = oneLineHeight(r)
+    val align = r.get("textAlign")
+    var line = 0
+    for (text in box.lines) {
+        val tw = box.lineWidths[line]
+        val inner = box.w - pl - pr
+        val tx = x + pl + (if (align == "center") (inner - tw) / 2 else if (align == "end" || align == "right") inner - tw else 0)
+        frame.paints.append(OnePaint("text", tx, y + pt + line * lh, tw, lh, 0, if (r.get("color") != "") r.get("color") else "#111111", text, size, r.get("weight"), ""))
+        line = line + 1
+    }
+    return
+}
+
+@noinline
+fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneFrame, path: string): void {
+    val r = box.r
+    val value = box.node.attr("value")
+    val size = r.int("size", 16)
+    val lh = oneLineHeight(r)
+    val shown = if (value == "") box.node.attr("placeholder") else value
+    val color = if (value == "") r.get("placeholderColor") else r.get("color")
+    var line = 0
+    for (text in oneWrap(shown, size, r.get("weight"), box.w - pl - pr, if (box.node.attr("multiline") == "true") r.int("maxLines", 5) else 1)) {
+        frame.paints.append(OnePaint("text", x + pl, y + (box.h - lh * (if (box.node.attr("multiline") == "true") 1 else 1)) / 2 + line * lh, box.w - pl - pr, lh, 0, if (color != "") color else "#888888", text, size, r.get("weight"), ""))
+        line = line + 1
+    }
+    frame.hits.append(OneHit("input", x, y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), path, value, box.node.attr("placeholder"), box.node.attr("multiline") == "true"))
+    return
+}
+
+// One that fits has nothing to scroll across.
+@noinline
+fun onePaintScrollHit(box: OneBox, across: bool, x: int, y: int, var frame: OneFrame, path: string): void {
+    val most = box.contentH - (if (across) box.w else box.h)
+    if (!across || most > 0) frame.hits.append(OneHit(if (across) "scrollAcross" else "scroll", x, y, box.w, box.h, 0, 0, path, "${box.scrollY}", "$most", oneFeedFollows(box.node)))
+    return
+}
+
 fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string, cx: int, cy: int, cw: int, ch: int): void {
     val r = box.r
     val x = ox + box.x
@@ -97,17 +140,7 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     val pt = onePad(r, "Top")
     val pr = onePad(r, "Right")
     if (kind == "text" || kind == "rich") {
-        val size = r.int("size", 15)
-        val lh = oneLineHeight(r)
-        val align = r.get("textAlign")
-        var line = 0
-        for (text in box.lines) {
-            val tw = box.lineWidths[line]
-            val inner = box.w - pl - pr
-            val tx = x + pl + (if (align == "center") (inner - tw) / 2 else if (align == "end" || align == "right") inner - tw else 0)
-            frame.paints.append(OnePaint("text", tx, y + pt + line * lh, tw, lh, 0, if (r.get("color") != "") r.get("color") else "#111111", text, size, r.get("weight"), ""))
-            line = line + 1
-        }
+        onePaintText(box, x, y, pl, pr, pt, frame)
     } else if (kind == "icon") {
         frame.paints.append(OnePaint("icon", x, y, box.w, box.h, 0, if (r.get("tint") != "") r.get("tint") else r.get("color"), box.node.attr("name"), 0, "", ""))
     } else if (kind == "image") {
@@ -115,17 +148,7 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     } else if (kind == "bitmap") {
         frame.paints.append(OnePaint("bitmap", x, y, box.w, box.h, 0, "", box.node.attr("cells"), 0, box.node.attr("columns"), ""))
     } else if (kind == "input") {
-        val value = box.node.attr("value")
-        val size = r.int("size", 16)
-        val lh = oneLineHeight(r)
-        val shown = if (value == "") box.node.attr("placeholder") else value
-        val color = if (value == "") r.get("placeholderColor") else r.get("color")
-        var line = 0
-        for (text in oneWrap(shown, size, r.get("weight"), box.w - pl - pr, if (box.node.attr("multiline") == "true") r.int("maxLines", 5) else 1)) {
-            frame.paints.append(OnePaint("text", x + pl, y + (box.h - lh * (if (box.node.attr("multiline") == "true") 1 else 1)) / 2 + line * lh, box.w - pl - pr, lh, 0, if (color != "") color else "#888888", text, size, r.get("weight"), ""))
-            line = line + 1
-        }
-        frame.hits.append(OneHit("input", x, y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), path, value, box.node.attr("placeholder"), box.node.attr("multiline") == "true"))
+        onePaintInput(box, x, y, pl, pr, frame, path)
     }
     if (kind == "pressable" || kind == "link") {
         val event = oneParseInt(box.node.attr("onPress"), 0)
@@ -133,7 +156,9 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     }
     if (kind == "link" && box.node.attr("route") != "true") frame.hits.append(OneHit("link", x, y, box.w, box.h, 0, 0, path, box.node.attr("href"), "", false))
     val scrolls = kind == "scroll" || kind == "feed"
+    // A scrollRow's children are already placed at its offset (oneMeasureScrollRow, oneLayoutRescroll), which keeps this short.
     val across = kind == "scrollRow"
+    val down = if (across) 0 else box.scrollY
     var ncx = cx
     var ncy = cy
     var ncw = cw
@@ -144,21 +169,16 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
         ncy = y
         ncw = box.w
         nch = box.h
-        if (scrolls) frame.hits.append(OneHit("scroll", x, y, box.w, box.h, 0, 0, path, "${box.scrollY}", "${box.contentH - box.h}", kind == "feed" && box.node.attr("anchor") != "top"))
-        if (across && box.contentW > box.w) frame.hits.append(OneHit("scrollAcross", x, y, box.w, box.h, 0, 0, path, "${box.scrollX}", "${box.contentW - box.w}", false))
+        if (scrolls || across) onePaintScrollHit(box, across, x, y, frame, path)
     }
     var index = 0
     var visibleItem = 0
     for (child in box.children) {
         val childPath = if (child.node.key != "") "$path/k:${child.node.key}" else "$path/$index"
-        val childY = y - box.scrollY + child.y
+        val childY = y + child.y - down
         if (kind == "popover" && index == 1) frame.popovers = frame.popovers + 1
         // Skip what a scroll area has scrolled out of view.
-        else if (across) {
-            val childX = x - box.scrollX + child.x
-            if (childX + child.w >= ncx && childX <= ncx + ncw) onePaintBox(child, x - box.scrollX, y, frame, childPath, ncx, ncy, ncw, nch)
-        }
-        else if (!scrolls || (childY + child.h >= ncy && childY <= ncy + nch)) onePaintBox(child, x, y - box.scrollY, frame, childPath, ncx, ncy, ncw, nch)
+        else if ((!scrolls && !across) || (childY + child.h >= ncy && childY <= ncy + nch && x + child.x + child.w >= ncx && x + child.x <= ncx + ncw)) onePaintBox(child, x, y - down, frame, childPath, ncx, ncy, ncw, nch)
         if (kind == "feed" && child.node.attr("item") != "" && childY >= ncy && childY + child.h <= ncy + nch) {
             val item = oneParseInt(child.node.attr("item"), 0)
             if (item > visibleItem) visibleItem = item

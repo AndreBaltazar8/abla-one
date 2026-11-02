@@ -1,3 +1,5 @@
+import "../layout/layout.ab"
+
 import "style.ab"
 import "routes.ab"
 
@@ -44,7 +46,10 @@ fun row(value: Style, children: array<Node>): Node = oneNode("row", value, oneVi
 fun stack(value: Style, children: array<Node>): Node = oneNode("stack", value, oneVisible(children))
 fun scroll(value: Style, children: array<Node>): Node = oneNode("scroll", value, oneVisible(children))
 // A row that scrolls sideways when its children, at their natural widths, don't fit.
-fun scrollRow(value: Style, children: array<Node>): Node = oneNode("scrollRow", value, oneVisible(children))
+fun scrollRow(value: Style, children: array<Node>): Node {
+    oneUseScrollRows()
+    oneNode("scrollRow", value, oneVisible(children))
+}
 
 // A lazy keyed list. `anchor` is "top", "bottom" or "id"; with "id" the list
 // opens at the first child whose `item` attribute is greater than `anchorId`.

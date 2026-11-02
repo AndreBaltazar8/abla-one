@@ -9,6 +9,7 @@ TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab t
 test:
 	$(NIX) '$(ABLAC) test $(TESTS)'
 	tests/thin_config.sh
+	$(NIX) 'ABLAC=$(ABLAC) tests/layout_size.sh'
 
 # @server over real HTTP: the routes, server.lock, client binaries.
 test-remote:

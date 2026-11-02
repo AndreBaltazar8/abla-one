@@ -35,8 +35,8 @@ fun testScrollRow(): void {
     val fresh = oneLayout(tree, theme, "desktop", 200, 300, Map()).children[0]
     expectEqual(fresh.w, 200, "scrollRow: takes the width offered")
     expectEqual(fresh.h, 30, "scrollRow: as tall as its children")
-    expectEqual(fresh.contentW, 330, "scrollRow: content keeps natural widths")
-    expectEqual(fresh.scrollX, 0, "scrollRow: starts at the left")
+    expectEqual(fresh.contentH, 330, "scrollRow: content keeps natural widths")
+    expectEqual(fresh.scrollY, 0, "scrollRow: starts at the left")
     val frame = onePaintFrame(oneLayout(tree, theme, "desktop", 200, 300, Map()), 200, 300)
     var hit = -1
     var index = 0
@@ -48,15 +48,23 @@ fun testScrollRow(): void {
     val path = frame.hits[hit].key
     val offsets: Map<string, int> = Map()
     offsets.set(path, 60)
-    expectEqual(oneLayout(tree, theme, "desktop", 200, 300, offsets).children[0].scrollX, 60, "scrollRow: keeps its offset")
+    expectEqual(oneLayout(tree, theme, "desktop", 200, 300, offsets).children[0].scrollY, 60, "scrollRow: keeps its offset")
     offsets.set(path, 9999)
-    expectEqual(oneLayout(tree, theme, "desktop", 200, 300, offsets).children[0].scrollX, 130, "scrollRow: clamps at the end")
+    expectEqual(oneLayout(tree, theme, "desktop", 200, 300, offsets).children[0].scrollY, 130, "scrollRow: clamps at the end")
     offsets.set(path, -5)
-    expectEqual(oneLayout(tree, theme, "desktop", 200, 300, offsets).children[0].scrollX, 0, "scrollRow: clamps at the start")
+    expectEqual(oneLayout(tree, theme, "desktop", 200, 300, offsets).children[0].scrollY, 0, "scrollRow: clamps at the start")
     var moved = oneLayout(tree, theme, "desktop", 200, 300, Map())
     offsets.set(path, 40)
     oneLayoutRescroll(moved, offsets, "r")
-    expectEqual(moved.children[0].scrollX, 40, "scrollRow: rescroll applies without a new layout")
+    expectEqual(moved.children[0].scrollY, 40, "scrollRow: rescroll applies without a new layout")
+    expectEqual(moved.children[0].children[0].x, 5 - 40, "scrollRow: its children move with the offset")
+    oneLayoutRescroll(moved, offsets, "r")
+    expectEqual(moved.children[0].children[0].x, 5 - 40, "scrollRow: the same offset again moves nothing")
+    // A child scrolled out sideways isn't painted, so a press there can't reach it.
+    val offscreen = onePaintFrame(oneLayout(column(style().fill(), [scrollRow(style(), [block(300), block(300).set("onPress", "7")])]), theme, "desktop", 200, 300, Map()), 200, 300)
+    var pressHits = 0
+    for (found in offscreen.hits) if (found.kind == "press") pressHits = pressHits + 1
+    expectEqual(pressHits, 0, "scrollRow: nothing to press outside it")
     // What follows a scrollRow is painted outside its clip.
     val clips = onePaintFrame(oneLayout(column(style().fill(), [scrollRow(style(), [block(500)]), text("after", style())]), theme, "desktop", 200, 300, Map()), 200, 300)
     var depth = 0

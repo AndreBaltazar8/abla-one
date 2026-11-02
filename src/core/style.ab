@@ -1,3 +1,5 @@
+import "../layout/layout.ab"
+
 // Styles are ordered lists of entries. Each entry may be scoped to a target
 // (or target family) and to an interaction state; the last matching write wins.
 // Named builders are shorthands for `set`, which accepts any property, so a
@@ -76,8 +78,6 @@ class Style(val entries: array<StyleEntry>) {
     fun borderRight(width: int, color: string): Style = setInt("borderRight", width).set("borderColor", color)
     fun opacity(percent: int): Style = setInt("opacity", percent)
     fun clip(): Style = set("clip", "true")
-    // A row whose children flow onto more lines when they run out of width.
-    fun wrap(): Style = set("wrap", "true")
 
     // Text.
     fun text(preset: string): Style = set("text", preset)
@@ -111,3 +111,9 @@ fun oneTargetFamily(target: string): string =
 
 fun oneTargetMatches(scope: string, target: string): bool =
     scope == "" || scope == target || scope == oneTargetFamily(target)
+
+// A row whose children flow onto more lines when they run out of width. Outside the class, as its methods are all compiled.
+fun Style.wrap(): Style {
+    oneUseWrapRows()
+    set("wrap", "true")
+}

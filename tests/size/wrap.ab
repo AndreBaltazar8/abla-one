@@ -1,0 +1,4 @@
+import "../../src/one.ab"
+import "../../src/one_kit.ab"
+import "../../src/layout/layout.ab"
+fun main: int = oneLayout(column(style(), [row(style().wrap(), [text("a", style())])]), oneDefaultTheme(), "desktop", 200, 100, Map()).w
