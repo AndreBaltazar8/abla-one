@@ -29,6 +29,29 @@ fun testWrap(): void {
     return
 }
 
+// A column stretches its children, but one with its own alignSelf keeps its width, there, as in a browser.
+fun testAlignSelf(): void {
+    val theme = oneDefaultTheme()
+    var ui = oneUi("t", theme)
+    val laid = oneLayout(column(style().fill().padding(10), [
+        button(ui, "Enviar de novo", "plain", ui.press { }, style().alignSelf("start")),
+        button(ui, "Pagar", "primary", ui.press { }, style().alignSelf("start")),
+        button(ui, "Ao fim", "plain", ui.press { }, style().alignSelf("end")),
+        button(ui, "Esticado", "plain", ui.press { }, style())
+    ]), theme, "phone", 360, 600, Map())
+    expectEqual(boxAt(laid, 0).x, 10, "alignSelf start: at the start")
+    expectEqual(boxAt(laid, 0).w < 200, true, "alignSelf start: a plain button keeps its own width")
+    expectEqual(boxAt(laid, 1).w < 200, true, "alignSelf start: so does a primary one")
+    expectEqual(boxAt(laid, 2).x + boxAt(laid, 2).w, 350, "alignSelf end: at the end")
+    expectEqual(boxAt(laid, 3).w, 340, "without one: as wide as the column")
+    // At the end of a padded row and stack too: the padding counted once.
+    val inRow = oneLayout(column(style().fill(), [row(style().height(100).padding(10), [column(style().width(30).height(20).alignSelf("end"), [])])]), theme, "phone", 360, 600, Map()).children[0]
+    expectEqual(boxAt(inRow, 0).y + boxAt(inRow, 0).h, 90, "alignSelf end in a row: at its padding's edge")
+    val inStack = oneLayout(column(style().fill(), [stack(style().width(100).height(100).padding(10).align("end"), [column(style().width(30).height(20), [])])]), theme, "phone", 360, 600, Map()).children[0]
+    expectEqual(boxAt(inStack, 0).x + boxAt(inStack, 0).w, 90, "a stack's end: at its padding's edge")
+    return
+}
+
 fun testScrollRow(): void {
     val theme = oneDefaultTheme()
     val tree = column(style().fill(), [scrollRow(style().gap(10).padding(5), [block(100), block(100), block(100)])])
@@ -195,6 +218,7 @@ fun main: int {
     testFieldShowsItsEnd()
     testWrap()
     testScrollRow()
+    testAlignSelf()
     // A popover: only the anchor takes room, the panel is painted last and on the side asked for, and
     // while it's open a press anywhere else is its dismissal.
     var pop = oneUi("t", oneDefaultTheme())

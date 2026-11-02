@@ -380,8 +380,8 @@ fun oneMeasureFresh(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: 
         val align = r.get("align")
         var c = 0
         while (c < children.size) {
-            children[c].x = pl + (if (align == "center") (w - pl - pr - children[c].w) / 2 else if (align == "end") w - pr - children[c].w else 0)
-            children[c].y = pt + (if (align == "center") (h - pt - pb - children[c].h) / 2 else if (align == "end") h - pb - children[c].h else 0)
+            children[c].x = pl + (if (align == "center") (w - pl - pr - children[c].w) / 2 else if (align == "end") w - pl - pr - children[c].w else 0)
+            children[c].y = pt + (if (align == "center") (h - pt - pb - children[c].h) / 2 else if (align == "end") h - pt - pb - children[c].h else 0)
             c = c + 1
         }
     } else if (kind == "popover") {
@@ -408,6 +408,13 @@ fun oneMeasureFresh(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: 
 fun oneFeedFollows(node: Node): bool = node.kind == "feed" && node.attr("anchor") != "top"
 
 fun oneChildPath(path: string, child: Node, index: int): string = if (child.key != "") "$path/k:${child.key}" else "$path/$index"
+
+// Whether a column's child takes its width: its own alignSelf says so first, as CSS's align-self over align-items, and a
+// button aligned to the start keeps its own width, as in a browser.
+fun oneStretches(r: Resolved, columnStretches: bool): bool {
+    val self = r.get("alignSelf")
+    if (self != "") self == "stretch" else columnStretches
+}
 
 fun oneGrowOf(r: Resolved, axisFill: bool): int {
     val grow = r.int("grow", 0)
@@ -437,7 +444,7 @@ fun oneMeasureColumn(var ctx: OneLayoutContext, node: Node, r: Resolved, availW:
         val child = node.children[index]
         val cr = resolved[index]
         val grow = if (scrolls) 0 else oneGrowOf(cr, cr.get("height") == "fill")
-        val fixedW = if (cr.get("width") == "fill" || (stretch && cr.get("width") == "" && child.kind != "icon" && child.kind != "image" && child.kind != "bitmap" && child.kind != "spacer" && w >= 0)) innerW else -1
+        val fixedW = if (cr.get("width") == "fill" || (oneStretches(cr, stretch) && cr.get("width") == "" && child.kind != "icon" && child.kind != "image" && child.kind != "bitmap" && child.kind != "spacer" && w >= 0)) innerW else -1
         val box = oneMeasure(ctx, child, cr, innerW, if (scrolls) 1000000 else innerAvailH, fixedW, -1, oneChildPath(path, child, index))
         if (grow > 0) totalGrow = totalGrow + grow else used = used + box.h
         boxes.append(box)
@@ -473,7 +480,7 @@ fun oneMeasureColumn(var ctx: OneLayoutContext, node: Node, r: Resolved, availW:
             index = 0
             while (index < boxes.size) {
                 val child = node.children[index]
-                if (boxes[index].w < w - pl - pr && resolved[index].get("width") == "" && child.kind != "icon" && child.kind != "image" && child.kind != "bitmap" && child.kind != "spacer") {
+                if (boxes[index].w < w - pl - pr && oneStretches(resolved[index], true) && resolved[index].get("width") == "" && child.kind != "icon" && child.kind != "image" && child.kind != "bitmap" && child.kind != "spacer") {
                     boxes[index] = oneMeasure(ctx, child, resolved[index], w - pl - pr, innerAvailH, w - pl - pr, boxes[index].h, oneChildPath(path, child, index))
                 }
                 index = index + 1
@@ -496,7 +503,7 @@ fun oneMeasureColumn(var ctx: OneLayoutContext, node: Node, r: Resolved, availW:
         val self = resolved[index].get("alignSelf")
         val a = if (self != "") self else align
         boxes[index].y = cursor
-        boxes[index].x = pl + (if (a == "center") (w - pl - pr - boxes[index].w) / 2 else if (a == "end") w - pr - boxes[index].w else 0)
+        boxes[index].x = pl + (if (a == "center") (w - pl - pr - boxes[index].w) / 2 else if (a == "end") w - pl - pr - boxes[index].w else 0)
         cursor = cursor + boxes[index].h + gap + between
         index = index + 1
     }
@@ -693,7 +700,7 @@ fun oneMeasureRow(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: in
             boxes[index] = oneMeasure(ctx, node.children[index], resolved[index], boxes[index].w, h - pt - pb, boxes[index].w, h - pt - pb, oneChildPath(path, node.children[index], index))
         }
         boxes[index].x = cursor
-        boxes[index].y = pt + (if (a == "center") (h - pt - pb - boxes[index].h) / 2 else if (a == "end") h - pb - boxes[index].h else 0)
+        boxes[index].y = pt + (if (a == "center") (h - pt - pb - boxes[index].h) / 2 else if (a == "end") h - pt - pb - boxes[index].h else 0)
         cursor = cursor + boxes[index].w + gap + between
         index = index + 1
     }
