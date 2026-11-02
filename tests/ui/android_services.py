@@ -10,9 +10,14 @@ PACKAGE = 'dev.abla.one.services'
 CLOUDFLARED = subprocess.check_output('ls -d /nix/store/*cloudflared-2026.10.3/bin/cloudflared | head -1', shell=True).decode().strip()
 failures = 0
 
+# The emulator, whatever else is plugged in: with a phone too, a bare adb stops, or drives the phone.
+os.environ.setdefault('ANDROID_SERIAL', 'emulator-5554')
 def adb(*args): return subprocess.check_output(['adb', *args]).decode(errors='replace')
 def nodes():
-    adb('shell', 'uiautomator', 'dump', '/sdcard/one-ui.xml')
+    # While windows change, uiautomator can say "null root node", exit 0 and write nothing: there's no screen to read yet.
+    for _ in range(10):
+        if 'UI hierchary dumped' in adb('shell', 'uiautomator', 'dump', '/sdcard/one-ui.xml'): break
+        time.sleep(0.5)
     return list(ET.fromstring(adb('shell', 'cat', '/sdcard/one-ui.xml')).iter('node'))
 def find(text, tries=10, contains=False):
     for _ in range(tries):

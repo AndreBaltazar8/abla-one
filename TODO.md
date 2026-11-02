@@ -35,6 +35,8 @@
   on a device.
 - PaperMono: joining Wi-Fi in the background is tested on the host and builds; it hasn't run on a device. Check
   boots join without "Sem ligação".
+- `tools/build-android.sh` reads its shell from `../coder-auto/build/android-shell.nix`, not a git repository, so it has no commit to pin. NovaKind keeps its copy in `toolchain/android-shell.nix`.
+
 ## Tools in Python
 
 - [ ] `tools/vector2svg.py`, `tools/fonts.py` and `tools/icons-ab.py` are Python. NovaKind no longer calls

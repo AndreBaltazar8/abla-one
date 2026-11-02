@@ -1,14 +1,19 @@
 """Android UI test: installs the gallery APK on the running emulator, drives it
 through UI Automator and checks what the Compose host rendered."""
-import re, subprocess, sys, time, xml.etree.ElementTree as ET
+import os, re, subprocess, sys, time, xml.etree.ElementTree as ET
 
 APK = 'examples/gallery/android/android-app/build/outputs/apk/debug/android-app-debug.apk'
 PACKAGE = 'dev.abla.one.gallery'
 failures = 0
 
+# The emulator, whatever else is plugged in: with a phone too, a bare adb stops, or drives the phone.
+os.environ.setdefault('ANDROID_SERIAL', 'emulator-5554')
 def adb(*args): return subprocess.check_output(['adb', *args]).decode(errors='replace')
 def nodes():
-    adb('shell', 'uiautomator', 'dump', '/sdcard/one-ui.xml')
+    # While windows change, uiautomator can say "null root node", exit 0 and write nothing: there's no screen to read yet.
+    for _ in range(10):
+        if 'UI hierchary dumped' in adb('shell', 'uiautomator', 'dump', '/sdcard/one-ui.xml'): break
+        time.sleep(0.5)
     return list(ET.fromstring(adb('shell', 'cat', '/sdcard/one-ui.xml')).iter('node'))
 def bounds(n): return list(map(int, re.findall(r'\d+', n.get('bounds', ''))))
 def find(text, tries=8):
