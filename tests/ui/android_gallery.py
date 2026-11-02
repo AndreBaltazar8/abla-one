@@ -184,6 +184,24 @@ check(find('Formulário 7', tries=12) is not None, 'a cold start by link opens i
 adb('shell', 'input', 'keyevent', '4')
 check(find('Adicionar (0)') is not None, 'back from it: the first route')
 
+# A row that wraps: its children, kept inside the screen on more than one line. And one that goes sideways: one line, the rest reached by a swipe.
+link('abla-one-gallery://open/moment')
+first = find('Linha', tries=12)
+last = find('disponível', tries=4)
+width = bounds(nodes()[0])[2]
+check(first is not None and last is not None and bounds(last)[1] > bounds(first)[3] and bounds(last)[2] <= width, 'a wrapping row goes on to more lines, inside the screen')
+start = find('Desliza', tries=4)
+check(start is not None and find('o ecrã', tries=1) is None, 'a scrollRow starts with its end out of sight')
+if start is not None:
+    y = (bounds(start)[1] + bounds(start)[3]) // 2
+    # Well inside the screen: from its edge, it's the system's back gesture.
+    adb('shell', 'input', 'swipe', str(width - 100), str(y), '100', str(y), '300')
+    adb('shell', 'input', 'swipe', str(width - 100), str(y), '100', str(y), '300')
+    end = find('o ecrã', tries=6)
+    check(end is not None and bounds(end)[1] == bounds(start)[1], 'a swipe brings its end, on the same line')
+adb('shell', 'input', 'keyevent', '4')
+check(find('Adicionar (0)') is not None, 'back from it: the first route')
+
 # The dropdown on the bar: over the screen, closed by a press outside, the back button or a choice.
 check(find('Estúdio Norte') is not None, 'the switcher is on the bar')
 tap('Estúdio Norte')

@@ -43,4 +43,3 @@
 
 - [ ] `tools/vector2svg.py`, `tools/fonts.py` and `tools/icons-ab.py` are Python. NovaKind no longer calls
       `vector2svg.py` (`novakind-tool icons`, byte-identical on its 33 icons, could move here for other apps).
-- Android: scrollRow ran on a phone through Crew (2026-11-01); wrap compiles but hasn't been seen on a device.
