@@ -3,7 +3,7 @@
 // same screen, first painted on the server; a press raced with a move stays off the
 // new screen.
 import {chromium} from '/home/andre/Desktop/projects/dualkind/node_modules/playwright/index.mjs';
-const base = process.argv[2] || 'http://127.0.0.1:8950';
+const base = process.argv[2] || process.env.ONE_TEST_BASE;
 const browser = await chromium.launch({executablePath: '/nix/store/62wviylhmg1g9b3ypjxf4l6qzjspvvyw-playwright-chromium-headless-shell/chrome-linux/headless_shell'});
 let failures = 0;
 const check = (ok, label) => { console.log(ok ? `ok   ${label}` : `FAIL ${label}`); if (!ok) failures++; };

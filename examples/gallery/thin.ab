@@ -1,3 +1,4 @@
+import "../../tests/port.ab"
 import "abla/http"
 import "abla/net"
 import "gallery.ab"
@@ -18,5 +19,9 @@ fun main: int {
     val router = httpRouter()
     router.get("/one/thin/tree", galleryThin)
     router.post("/one/thin/event", galleryThin)
-    serveHttp(router, 8954)
+    if (processEnvironmentOr("ONE_TEST_PORT_FILE", "") == "") return serveHttp(router, 8954)
+    var listener = tcpListen(testPort())
+    if (listener.descriptor < 0) return 1
+    testPublishPort(listener.localPort())
+    serveHttpOnListener(router, listener)
 }

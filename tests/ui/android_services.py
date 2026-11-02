@@ -3,7 +3,7 @@ server behind a temporary HTTPS tunnel. Covers headers and methods, JSON,
 bytes, a 500 KB in-memory body, a picked file streamed as the body and as a
 multipart part, a 3 MB download saved to a file and read back by range,
 typed secure storage and timers."""
-import json, os, re, subprocess, sys, time, xml.etree.ElementTree as ET
+import json, os, re, subprocess, sys, tempfile, time, xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PACKAGE = 'dev.abla.one.services'
@@ -59,8 +59,14 @@ def check(ok, label, detail=''):
     else:
         print('ok  ', label)
 
-echo = subprocess.Popen([sys.executable, os.path.join(ROOT, 'tests/ui/echo.py'), '9188'])
-tunnel = subprocess.Popen([CLOUDFLARED, 'tunnel', '--no-autoupdate', '--url', 'http://127.0.0.1:9188'], stderr=subprocess.PIPE, text=True)
+portfile = tempfile.NamedTemporaryFile()
+echo = subprocess.Popen([sys.executable, os.path.join(ROOT, 'tests/ui/echo.py'), '0'], env=dict(os.environ, ONE_TEST_PORT_FILE=portfile.name))
+for _ in range(100):
+    if os.path.getsize(portfile.name): break
+    if echo.poll() is not None: raise SystemExit('echo server failed to start')
+    time.sleep(0.1)
+port = open(portfile.name).read()
+tunnel = subprocess.Popen([CLOUDFLARED, 'tunnel', '--no-autoupdate', '--url', 'http://127.0.0.1:' + port], stderr=subprocess.PIPE, text=True)
 try:
     url = ''
     for line in tunnel.stderr:

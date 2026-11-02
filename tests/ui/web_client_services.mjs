@@ -7,9 +7,16 @@
 import {chromium} from '/home/andre/Desktop/projects/dualkind/node_modules/playwright/index.mjs';
 import {spawn} from 'node:child_process';
 import fs from 'node:fs';
-const port = 8952;
-const base = `http://127.0.0.1:${port}`;
-const server = spawn('python3', ['tests/ui/echo.py', String(port), 'build/services'], {stdio: 'ignore'});
+import os from 'node:os';
+import path from 'node:path';
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'one-port-'));
+const portfile = path.join(temp, 'port');
+const server = spawn('python3', ['tests/ui/echo.py', '0', 'build/services'], {stdio: 'ignore', env: {...process.env, ONE_TEST_PORT_FILE: portfile}});
+for (let i = 0; i < 100 && !fs.existsSync(portfile); i++) {
+  if (server.exitCode !== null) throw new Error('echo server failed to start');
+  await new Promise(r => setTimeout(r, 100));
+}
+const base = `http://127.0.0.1:${fs.readFileSync(portfile, 'utf8')}`;
 const browser = await chromium.launch({executablePath: '/nix/store/62wviylhmg1g9b3ypjxf4l6qzjspvvyw-playwright-chromium-headless-shell/chrome-linux/headless_shell'});
 let failures = 0;
 const check = (ok, label, detail = '') => { console.log(ok ? `ok   ${label}` : `FAIL ${label} ${detail}`); if (!ok) failures++; };
@@ -70,6 +77,7 @@ try {
 } finally {
   await browser.close();
   server.kill();
+  fs.rmSync(temp, {recursive: true, force: true});
 }
 console.log(failures === 0 ? 'PASS tests/ui/web_client_services.mjs' : `${failures} failed`);
 process.exit(failures ? 1 : 0);

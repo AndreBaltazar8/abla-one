@@ -1,3 +1,4 @@
+import "../port.ab"
 import "abla/http"
 import "abla/net"
 import "abla/crypto"
@@ -31,6 +32,8 @@ class FileApp(val services: OneServices, var pending: int by State(0), var stage
 }
 fun fileApp(request: HttpRequest, session: string): OneApp = FileApp(oneLiveServices(session))
 fun main: int {
-    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", 8959), { r -> httpText("not found", 404) }, oneLivePaths(["/"]), fileApp, oneDefaultTheme(), OneLiveOptions("Files", "en", "#fff", "", "src/backends/web/host.js", ""))
+    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", testPort()), { r -> httpText("not found", 404) }, oneLivePaths(["/"]), fileApp, oneDefaultTheme(), OneLiveOptions("Files", "en", "#fff", "", "src/backends/web/host.js", ""))
+    if (!server.listening()) return 1
+    testPublishPort(server.listener.localPort())
     server.run()
 }

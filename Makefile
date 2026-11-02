@@ -64,7 +64,7 @@ ui-web-client: gallery-client services-client
 	node tests/ui/web_client_routes.mjs
 	node tests/ui/web_client_services.mjs
 
-# The gallery's app for thin devices, on this host (:8954), and a device's requests.
+# The gallery's app for thin devices and a device's requests.
 gallery-thin:
 	$(NIX) '$(ABLAC) build examples/gallery/thin.ab -o build/gallery-thin --fast'
 

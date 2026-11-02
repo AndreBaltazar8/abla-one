@@ -2,7 +2,7 @@
 // screen it was on, since the screen is in its URL, and carries on in a new session.
 import {chromium} from '/home/andre/Desktop/projects/dualkind/node_modules/playwright/index.mjs';
 import {spawn} from 'node:child_process';
-const base = 'http://127.0.0.1:8950';
+const base = process.env.ONE_TEST_BASE;
 const browser = await chromium.launch({executablePath: '/nix/store/62wviylhmg1g9b3ypjxf4l6qzjspvvyw-playwright-chromium-headless-shell/chrome-linux/headless_shell'});
 let failures = 0;
 const check = (ok, label) => { console.log(ok ? `ok   ${label}` : `FAIL ${label}`); if (!ok) failures++; };

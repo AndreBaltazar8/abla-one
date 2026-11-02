@@ -6,7 +6,7 @@ import "../../../src/server/remote.ab"
 // `$remoteCall` and `$remoteDecode`: the id, and the reply read apart from the call.
 fun main: int {
     var services: OneServices = oneRecordedServices()
-    println("${$remoteCall(services, "http://127.0.0.1:8977", shop.orders("open", 3))}")
+    println("${$remoteCall(services, "https://example.test", shop.orders("open", 3))}")
     val refused = oneRemoteReply(oneResponse("{\"requestId\":1,\"status\":410,\"body\":\"\\\"use orders\\\"\"}"))
     println("${refused.kind} ${refused.message}")
     val reply = oneRemoteReply(oneResponse("{\"requestId\":1,\"status\":200,\"body\":\"{\\\"items\\\":[{\\\"id\\\":7,\\\"lines\\\":[{\\\"sku\\\":\\\"a\\\",\\\"count\\\":2}]}]}\"}"))

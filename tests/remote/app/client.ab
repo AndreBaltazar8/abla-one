@@ -5,7 +5,7 @@ import "../../../src/server/remote.ab"
 
 fun main: int {
     var services: OneServices = oneRecordedServices()
-    val call = $remote(services, "http://127.0.0.1:8977", shop.orders("open", 3))
+    val call = $remote(services, "https://example.test", shop.orders("open", 3))
     println("${call.id}")
     0
 }

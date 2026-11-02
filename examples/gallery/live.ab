@@ -1,3 +1,4 @@
+import "../../tests/port.ab"
 import "abla/http"
 import "abla/net"
 import "abla/sys/linux"
@@ -21,7 +22,7 @@ fun main: int {
     val router = httpRouter()
     router.get("/icons/:name", icons)
     var server = oneLiveServer(
-        Ipv4SocketAddress("127.0.0.1", 8950),
+        Ipv4SocketAddress("127.0.0.1", if (processEnvironmentOr("ONE_TEST_PORT_FILE", "") != "") testPort() else 8950),
         { request -> router.dispatch(request) },
         oneLivePaths(["/", "/people", "/form/:n", "/moment", "/field/:n", "/same/:n"]),
         galleryApp,
@@ -30,5 +31,7 @@ fun main: int {
         // A page whose credentials are gone doesn't continue its session (tests/ui/web_live_routes.mjs).
         OneLiveStorage({ request -> Map<string, string>() }, { request, key, value -> array<string>() }, { request, stored -> oneLiveCookie(request, "gallery_signed_out") == "" })
     )
+    if (!server.listening()) return 1
+    testPublishPort(server.listener.localPort())
     server.run()
 }

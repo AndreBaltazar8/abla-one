@@ -67,4 +67,7 @@ class Echo(http.server.BaseHTTPRequestHandler):
             self.wfile.write(data)
         else: self.echo()
 
-http.server.ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), Echo).serve_forever()
+server = http.server.ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), Echo)
+if os.environ.get('ONE_TEST_PORT_FILE'):
+    with open(os.environ['ONE_TEST_PORT_FILE'], 'w') as f: f.write(str(server.server_port))
+server.serve_forever()

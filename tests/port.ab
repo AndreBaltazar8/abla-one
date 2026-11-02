@@ -1,0 +1,15 @@
+import "abla/fs"
+import "abla/process"
+
+// A test may ask for a port when restarting a server; otherwise bind port zero.
+fun testPort(): int {
+    val text = processEnvironmentOr("ONE_TEST_PORT", "")
+    var n = 0
+    for (c in text) { if (c < 48 || c > 57) return 0; n = n * 10 + c - 48 }
+    n
+}
+
+fun testPublishPort(port: int): void {
+    val file = processEnvironmentOr("ONE_TEST_PORT_FILE", "")
+    if (file != "" && !Path(file).writeText("$port")) exit(1)
+}

@@ -9,7 +9,7 @@ pid=0; failed=0
 trap 'rm -rf "$work"; [ "$pid" != 0 ] && kill "$pid" 2>/dev/null' EXIT
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', expected '$3'"; failed=1; fi; }
 
-copy() { rm -rf "$work/p"; mkdir -p "$work/p/tests"; cp -r src "$work/p/"; cp -r tests/remote "$work/p/tests/"; }
+copy() { rm -rf "$work/p"; mkdir -p "$work/p/tests"; cp -r src "$work/p/"; cp -r tests/remote "$work/p/tests/"; cp tests/port.ab "$work/p/tests/"; }
 build() { (cd "$work/p/tests/remote/app" && "$ablac" build "$1" -o "$work/$2" --fast 2>&1); }
 
 copy
@@ -17,9 +17,10 @@ build server.ab server > "$work/log" || { cat "$work/log"; exit 1; }
 lock="$work/p/tests/remote/app/server.lock"
 check "lock is written" "$(grep -c '^route orders' "$lock")" 1
 check "lock holds no checkout paths" "$(grep -c __abla_module "$lock")" 0
-"$work/server" & pid=$!
-sleep 1
-post() { curl -s -m 5 -o "$work/out" -w '%{http_code}' -X POST -d "$2" "http://127.0.0.1:8977/one/$1"; }
+ONE_TEST_PORT_FILE="$work/port" "$work/server" & pid=$!
+for _ in $(seq 100); do [ -s "$work/port" ] && break; kill -0 "$pid" 2>/dev/null || exit 1; sleep 0.1; done
+port=$(cat "$work/port")
+post() { curl -s -m 5 -o "$work/out" -w '%{http_code}' -X POST -d "$2" "http://127.0.0.1:$port/one/$1"; }
 check "route answers" "$(post orders '{"status":"open","limit":3}')" 200
 check "nested result" "$(grep -c '"sku":"a"' "$work/out")" 1
 check "retired route" "$(post oldOrders '{}')" 410
@@ -90,8 +91,10 @@ for n in $(seq 1 60); do
   printf '\nclass Many%d(val first: string, val third: array<Line>)\n@server\nfun many%d(first: string): Many%d = Many%d(first, [Line("a", 2)])\n' "$n" "$n" "$n" "$n" >> "$shop"
 done
 build server.ab server > "$work/log"; check "many routes build" "$?" 0
-"$work/server" & pid=$!
-sleep 1
+rm -f "$work/port"
+ONE_TEST_PORT_FILE="$work/port" "$work/server" & pid=$!
+for _ in $(seq 100); do [ -s "$work/port" ] && break; kill -0 "$pid" 2>/dev/null || exit 1; sleep 0.1; done
+port=$(cat "$work/port")
 check "the last answers" "$(post many60 '{"first":"x"}')" 200
 check "with its shape" "$(grep -c '"sku":"a"' "$work/out")" 1
 kill $pid; wait $pid 2>/dev/null; pid=0

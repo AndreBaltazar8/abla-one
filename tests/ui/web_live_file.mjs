@@ -4,7 +4,7 @@ const browser = await chromium.launch({executablePath: '/nix/store/62wviylhmg1g9
 try {
   {
     const page = await browser.newPage();
-    await page.goto('http://127.0.0.1:8959/');
+    await page.goto(process.env.ONE_TEST_BASE + '/');
     const bytes = Buffer.alloc(1200003);
     for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251;
     const chooser = page.waitForEvent('filechooser');
@@ -17,7 +17,7 @@ try {
   }
   {
     const page = await browser.newPage();
-    await page.goto('http://127.0.0.1:8959/');
+    await page.goto(process.env.ONE_TEST_BASE + '/');
     const chooser = page.waitForEvent('filechooser');
     await page.getByRole('button', {name: 'Pick file'}).click();
     await (await chooser).setFiles({name:'too-large.bin', mimeType:'application/octet-stream', buffer:Buffer.alloc(16777217)});
@@ -27,7 +27,7 @@ try {
   }
   for (const mode of ['http', 'network']) {
     const page = await browser.newPage();
-    await page.goto('http://127.0.0.1:8959/');
+    await page.goto(process.env.ONE_TEST_BASE + '/');
     await page.route('**/one/upload?**', route => mode === 'http' ? route.fulfill({status: 503, body: 'no'}) : route.abort());
     const chooser = page.waitForEvent('filechooser');
     await page.getByRole('button', {name: 'Pick file'}).click();

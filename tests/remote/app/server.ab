@@ -1,3 +1,5 @@
+import "../../port.ab"
+import "abla/net"
 import "abla/http"
 import "abla/compiler"
 import "../server/shop.ab" as shop
@@ -18,5 +20,8 @@ compile fun lock(): void {
 fun main: int {
     val router = httpRouter()
     router.post("/one/:route", oneServerHandler)
-    serveHttp(router, 8977)
+    var listener = tcpListen(testPort())
+    if (listener.descriptor < 0) return 1
+    testPublishPort(listener.localPort())
+    serveHttpOnListener(router, listener)
 }

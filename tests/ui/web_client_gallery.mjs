@@ -4,10 +4,18 @@
 // first paint without JavaScript, that the module takes over the existing
 // markup (hydration), and that presses, typing and navigation run locally.
 import {chromium} from '/home/andre/Desktop/projects/dualkind/node_modules/playwright/index.mjs';
-import {spawn} from 'node:child_process';
-const port = 8951;
-const base = `http://127.0.0.1:${port}`;
-const server = spawn('python3', ['-m', 'http.server', String(port), '--bind', '127.0.0.1', '--directory', 'build/gallery'], {stdio: 'ignore'});
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+const root = 'build/gallery';
+const server = http.createServer((req, res) => {
+  const file = path.join(root, decodeURIComponent(req.url.split('?')[0]));
+  if (!file.startsWith(root + '/') || !fs.existsSync(file)) { res.writeHead(404); return res.end(); }
+  res.writeHead(200, {'Content-Type': file.endsWith('.wasm') ? 'application/wasm' : file.endsWith('.js') ? 'text/javascript' : file.endsWith('.svg') ? 'image/svg+xml' : 'text/html; charset=utf-8'});
+  fs.createReadStream(file).pipe(res);
+}).listen(0, '127.0.0.1');
+await new Promise(resolve => server.once('listening', resolve));
+const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({executablePath: '/nix/store/62wviylhmg1g9b3ypjxf4l6qzjspvvyw-playwright-chromium-headless-shell/chrome-linux/headless_shell'});
 let failures = 0;
 const check = (ok, label) => { console.log(ok ? `ok   ${label}` : `FAIL ${label}`); if (!ok) failures++; };
@@ -75,7 +83,7 @@ try {
   await page.screenshot({path: 'build/ui/web-client-gallery.png'});
 } finally {
   await browser.close();
-  server.kill();
+  server.close();
 }
 console.log(failures === 0 ? 'PASS tests/ui/web_client_gallery.mjs' : `${failures} failed`);
 process.exit(failures ? 1 : 0);

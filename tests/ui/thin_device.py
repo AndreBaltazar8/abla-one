@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Plays a thin device against the gallery's app (make gallery-thin): gets the tree,
 presses a button by its event id, sees the new tree, and sees 204 with nothing new."""
-import json, subprocess, sys, time, urllib.request, urllib.error
+import json, os, subprocess, sys, tempfile, time, urllib.request, urllib.error
 
-server = subprocess.Popen(["build/gallery-thin"])
-base = "http://127.0.0.1:8954/one/thin"
+portfile = tempfile.NamedTemporaryFile()
+env = dict(os.environ, ONE_TEST_PORT_FILE=portfile.name)
+server = subprocess.Popen(["build/gallery-thin"], env=env)
+for _ in range(100):
+    if os.path.getsize(portfile.name): break
+    if server.poll() is not None: raise SystemExit("thin server failed to start")
+    time.sleep(0.1)
+base = "http://127.0.0.1:" + open(portfile.name).read() + "/one/thin"
 failures = 0
 
 def check(name, ok):
