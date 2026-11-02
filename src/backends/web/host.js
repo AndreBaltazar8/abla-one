@@ -523,7 +523,7 @@
       socket.send(JSON.stringify({t: 'hello', r: revision, w: innerWidth, e: entry.e}));
       while (queue.length) socket.send(queue.shift());
     };
-    socket.onmessage = (e) => receive(JSON.parse(e.data));
+    socket.onmessage = (e) => { receive(JSON.parse(e.data)); document.documentElement.removeAttribute('data-one-held'); };
     socket.onclose = (e) => {
       document.documentElement.setAttribute('data-one-offline', '');
       // An unknown or ended session needs a fresh page, unless one is already on its way.

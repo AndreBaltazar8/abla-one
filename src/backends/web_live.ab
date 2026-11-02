@@ -1,4 +1,5 @@
 import "abla/http"
+import "abla/io"
 import "abla/net"
 import "abla/json"
 import "abla/crypto"
@@ -540,7 +541,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val fill = if (session.document) "min-height:100%" else "height:100%"
     val body = "<!doctype html><html lang=\"${oneHtmlEscape(if (session.lang != "") session.lang else options.lang)}\"><head><meta charset=\"utf-8\"><base href=\"${oneRouteBase(route)}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(if (session.title != "") session.title else options.title)}</title>${session.meta}${options.head}" +
         "<style>html,body{margin:0;height:100%;background:${options.background}}#one-root{$fill}#one-root>.one{$fill}\n${oneWebBaseCss()}</style><style id=\"one-css\">${sessions[index].css.text()}</style>" +
-        "<script>window.__one=$boot</script><script src=\"one/${if (canvas) "canvas" else "host"}.js\" defer></script></head><body><div id=\"one-root\">$markup</div></body></html>"
+        "${if (remembered > 0 || canvas) "" else oneLiveHoldFirstPaint}<script>window.__one=$boot</script><script src=\"one/${if (canvas) "canvas" else "host"}.js\" defer></script></head><body><div id=\"one-root\">$markup</div></body></html>"
     val headers = [
         HttpHeader("Content-Type", "text/html; charset=utf-8"),
         HttpHeader("Cache-Control", "no-store"),
@@ -549,6 +550,11 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     if (sessions[index].queue.cookiesChanged) for (line in sessionCookies(request, index)) headers.append(HttpHeader("Set-Cookie", line))
     HttpResponse(200, headers, body)
 }
+
+// Without a width from an earlier page this render guessed a phone's, and the socket's first answer (host.js) has the real one,
+// about a round trip later. Painting the guess would show one layout and then another, and a press in between would land on the first.
+// Only with a script, so what can't run it still shows the page, and only for a moment should the answer not come.
+val oneLiveHoldFirstPaint = "<style>[data-one-held] #one-root{visibility:hidden}</style><script>document.documentElement.setAttribute('data-one-held','');setTimeout(()=>document.documentElement.removeAttribute('data-one-held'),1500)</script>"
 
 fun oneLiveCookie(request: HttpRequest, name: string): string {
     val header = request.header("cookie")
@@ -782,7 +788,14 @@ fun OneLiveServer.step(): void {
     return
 }
 
+fun OneLiveServer.listening(): bool = listener.descriptor >= 0
+
+// Stops at once, saying so, when it has no socket: most often another program has the address.
 fun OneLiveServer.run(): int {
+    if (listener.descriptor < 0) {
+        eprintln("The live server can't listen: is another one on its port? (error ${-listener.descriptor})")
+        return 1
+    }
     tcpEnableGracefulShutdown()
     while (!stopped && !tcpShutdownRequested()) step()
     0
