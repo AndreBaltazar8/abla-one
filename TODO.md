@@ -14,25 +14,14 @@
 
 PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not to be touched for now.
 
-## Toolchain
-
-- [x] `tools/check-native-buffer-host` in abla-embedded: all 1207 fixtures pass (097ae16). Nine
-      fixtures were stale; the IMU compile failure has a helper until ablac's `fixes` is merged.
-      The PM1 fixture's boost bit now follows the drivers (M5IOE1 pin 3): not checked on hardware.
-
-## ablac bugs seen (worked around, not fixed)
+## ablac bugs seen (worked around, not confirmed fixed)
 
 - A `when` over an f32 gives `when.match` for literal cases (documented).
 - A class's methods are all compiled, used or not, so what only one method reaches stays in every program that has the class (why `Style.wrap` is an extension). 0.2.29.
-- `bootstrapLlvmAddressTaken` counts a function's value taken in an unreachable function, so it's in `abla_llvm_call_indirect`'s table and linked. It only holds now because the frontend drops unused top-level functions first. 0.2.29.
-- A function value's or interface method's managed result can't be returned as it is (`ownership.managed-return-borrow-contract:return:nonfresh`) when the call takes parameters, nor can a nullable function type be called after a null check (`call.target`), or be assigned a function (`assignment.type`): `oneMeasureAnyRow` copies the box and holds its hooks in arrays. 0.2.29. The managed result only fails there: a small program returning `hooks[0](c, q)` compiles, while returning `oneWrapRowMeasure[0](...)` directly in the layout doesn't.
-
-## Abla One bugs seen
-
 
 ## Tests
 
-- The ui suites and tests/remote listen on fixed ports, so two checkouts running one at once fail each other, as tests/integration/live_sockets.ab did (exit 101, "it has the port", seen 2026-11-02).
+- The UI suites and `tests/remote` use fixed ports, so simultaneous runs in two checkouts can fail each other. `tests/integration/live_sockets.ab` now chooses a port from a range, but can still collide (exit 101, "it has the port", seen 2026-11-02); make concurrent runs independent.
 
 ## Tools in Python
 
