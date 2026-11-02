@@ -29,7 +29,9 @@ class OneHit(
     val key: string,       // layout path (scroll areas) or node key
     val value: string,
     val placeholder: string,
-    val multiline: bool    // or, for a scroll area, that it follows its end
+    val multiline: bool,   // or, for a scroll area, that it follows its end
+    val caretX: int = 0,   // input: where the caret goes, after the text
+    val caretY: int = 0    // input: the middle of the caret's line
 )
 
 // A feed row fully inside its viewport: deliver `event` with `item` to mark it read.
@@ -60,7 +62,7 @@ fun onePopoversIn(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: stri
     for (child in box.children) {
         val childPath = if (child.node.key != "") "$path/k:${child.node.key}" else "$path/$index"
         if (box.node.kind == "popover" && index == 1) {
-            frame.hits.append(OneHit("press", 0, 0, frame.width, frame.height, oneParseInt(box.node.attr("onDismiss"), 0), 0, "dismiss", "", "", false))
+            oneAddHit(frame, "press", 0, 0, frame.width, frame.height, oneParseInt(box.node.attr("onDismiss"), 0), 0, "dismiss", "", "", false, 0, 0)
             // Below the anchor, or above it when only that fits, and inside the window.
             val gap = 4
             var px = if (box.node.attr("side") == "end") x + box.w - child.w else x
@@ -76,7 +78,44 @@ fun onePopoversIn(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: stri
     return
 }
 
+val oneCaretWidth = 2
+
+// The end of `value`, from the first character that doesn't fit `room` on: it's only
+// partly seen, so what's left of the field is never empty. All of it when it fits.
+@noinline
+fun oneInputTail(value: string, size: int, weight: string, room: int): string {
+    var start = value.size
+    while (start > 0) {
+        start = start - 1
+        while (start > 0 && value[start] >= 128 && value[start] < 192) start = start - 1
+        val tail = value.slice(start, value.size)
+        if (oneTextWidth(tail, size, weight) > room) return tail
+    }
+    value
+}
+
 fun oneRect(op: string, x: int, y: int, w: int, h: int, radius: int, color: string): OnePaint = OnePaint(op, x, y, w, h, radius, color, "", 0, "", "")
+
+// Out of line, as what makes a paint or a hit is large where it's inlined, on a device above all.
+@noinline
+fun oneAddRect(var frame: OneFrame, op: string, x: int, y: int, w: int, h: int, radius: int, color: string): void {
+    frame.paints.append(oneRect(op, x, y, w, h, radius, color))
+    return
+}
+
+@noinline
+fun oneAddPaint(var frame: OneFrame, op: string, x: int, y: int, w: int, h: int, radius: int, color: string, text: string, size: int, weight: string, sides: string): void {
+    frame.paints.append(OnePaint(op, x, y, w, h, radius, color, text, size, weight, sides))
+    return
+}
+
+fun oneAddText(var frame: OneFrame, x: int, y: int, w: int, lh: int, color: string, text: string, size: int, weight: string): void = oneAddPaint(frame, "text", x, y, w, lh, 0, color, text, size, weight, "")
+
+@noinline
+fun oneAddHit(var frame: OneFrame, kind: string, x: int, y: int, w: int, h: int, event: int, submit: int, key: string, value: string, placeholder: string, multiline: bool, caretX: int, caretY: int): void {
+    frame.hits.append(OneHit(kind, x, y, w, h, event, submit, key, value, placeholder, multiline, caretX, caretY))
+    return
+}
 
 // `cx..cy` with `cw × ch` is the current clip, for visibility tests.
 // Out of line, as `onePaintBox`, which recurses, has a large frame.
@@ -91,7 +130,7 @@ fun onePaintText(box: OneBox, x: int, y: int, pl: int, pr: int, pt: int, var fra
         val tw = box.lineWidths[line]
         val inner = box.w - pl - pr
         val tx = x + pl + (if (align == "center") (inner - tw) / 2 else if (align == "end" || align == "right") inner - tw else 0)
-        frame.paints.append(OnePaint("text", tx, y + pt + line * lh, tw, lh, 0, if (r.get("color") != "") r.get("color") else "#111111", text, size, r.get("weight"), ""))
+        oneAddText(frame, tx, y + pt + line * lh, tw, lh, if (r.get("color") != "") r.get("color") else "#111111", text, size, r.get("weight"))
         line = line + 1
     }
     return
@@ -101,16 +140,44 @@ fun onePaintText(box: OneBox, x: int, y: int, pl: int, pr: int, pt: int, var fra
 fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneFrame, path: string): void {
     val r = box.r
     val value = box.node.attr("value")
+    val placeholder = box.node.attr("placeholder")
     val size = r.int("size", 16)
     val lh = oneLineHeight(r)
-    val shown = if (value == "") box.node.attr("placeholder") else value
+    val weight = r.get("weight")
+    val inner = box.w - pl - pr
+    val multiline = box.node.attr("multiline") == "true"
     val color = if (value == "") r.get("placeholderColor") else r.get("color")
-    var line = 0
-    for (text in oneWrap(shown, size, r.get("weight"), box.w - pl - pr, if (box.node.attr("multiline") == "true") r.int("maxLines", 5) else 1)) {
-        frame.paints.append(OnePaint("text", x + pl, y + (box.h - lh * (if (box.node.attr("multiline") == "true") 1 else 1)) / 2 + line * lh, box.w - pl - pr, lh, 0, if (color != "") color else "#888888", text, size, r.get("weight"), ""))
+    val ink = if (color != "") color else "#888888"
+    var caretX = x + pl
+    var caretY = y + box.h / 2
+    // The caret stays at the end, so the end is what shows. On a single line, text too long for
+    // the field slides left under a clip, keeping room for the caret itself. Otherwise it's
+    // the rows that fit: a value's last ones, as new text arrives at the end.
+    val slides = value != "" && !multiline
+    val most = if (multiline) r.int("maxLines", 5) else 1
+    val lines = if (slides) [oneInputTail(value, size, weight, inner - oneCaretWidth)] else oneWrap(if (value == "") placeholder else value, size, weight, inner, if (value == "") most else 0)
+    val first = if (lines.size > most) lines.size - most else 0
+    val top = y + (box.h - lh * (lines.size - first)) / 2
+    val width = if (slides) oneTextWidth(lines[0], size, weight) else inner
+    val over = if (slides) width + oneCaretWidth - inner else 0
+    val left = x + pl - (if (over > 0) over else 0)
+    if (over > 0) oneAddRect(frame, "clip", x + pl, y, inner, box.h, 0, "")
+    var line = first
+    while (line < lines.size) {
+        oneAddText(frame, left, top + (line - first) * lh, width, lh, ink, lines[line], size, weight)
         line = line + 1
     }
-    frame.hits.append(OneHit("input", x, y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), path, value, box.node.attr("placeholder"), box.node.attr("multiline") == "true"))
+    if (over > 0) oneAddRect(frame, "unclip", x + pl, y, inner, box.h, 0, "")
+    if (slides) caretX = left + width
+    else if (value != "") {
+        // The word wrapper drops the spaces at the end, so those are added back.
+        var end = value.size
+        while (end > 0 && value[end - 1] == 32) end = end - 1
+        caretX = left + oneTextWidth(lines[lines.size - 1], size, weight) + oneTextWidth(value.slice(end, value.size), size, weight)
+        caretY = top + (lines.size - first - 1) * lh + lh / 2
+    }
+    val rightmost = x + box.w - pr - oneCaretWidth
+    oneAddHit(frame, "input", x, y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), path, value, placeholder, multiline, if (caretX > rightmost) rightmost else caretX, caretY)
     return
 }
 
@@ -118,7 +185,7 @@ fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneF
 @noinline
 fun onePaintScrollHit(box: OneBox, across: bool, x: int, y: int, var frame: OneFrame, path: string): void {
     val most = box.contentH - (if (across) box.w else box.h)
-    if (!across || most > 0) frame.hits.append(OneHit(if (across) "scrollAcross" else "scroll", x, y, box.w, box.h, 0, 0, path, "${box.scrollY}", "$most", oneFeedFollows(box.node)))
+    if (!across || most > 0) oneAddHit(frame, if (across) "scrollAcross" else "scroll", x, y, box.w, box.h, 0, 0, path, "${box.scrollY}", "$most", oneFeedFollows(box.node), 0, 0)
     return
 }
 
@@ -129,32 +196,32 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     val kind = box.node.kind
     val radius = r.int("radius", 0)
     val background = r.get("background")
-    if (background != "" && background != "transparent" && kind != "icon") frame.paints.append(oneRect("rect", x, y, box.w, box.h, radius, background))
+    if (background != "" && background != "transparent" && kind != "icon") oneAddRect(frame, "rect", x, y, box.w, box.h, radius, background)
     val all = r.int("border", 0)
     val top = r.int("borderTop", all)
     val right = r.int("borderRight", all)
     val bottom = r.int("borderBottom", all)
     val left = r.int("borderLeft", all)
-    if (top + right + bottom + left > 0) frame.paints.append(OnePaint("border", x, y, box.w, box.h, radius, r.get("borderColor"), "", 0, "", "$top $right $bottom $left"))
+    if (top + right + bottom + left > 0) oneAddPaint(frame, "border", x, y, box.w, box.h, radius, r.get("borderColor"), "", 0, "", "$top $right $bottom $left")
     val pl = onePad(r, "Left")
     val pt = onePad(r, "Top")
     val pr = onePad(r, "Right")
     if (kind == "text" || kind == "rich") {
         onePaintText(box, x, y, pl, pr, pt, frame)
     } else if (kind == "icon") {
-        frame.paints.append(OnePaint("icon", x, y, box.w, box.h, 0, if (r.get("tint") != "") r.get("tint") else r.get("color"), box.node.attr("name"), 0, "", ""))
+        oneAddPaint(frame, "icon", x, y, box.w, box.h, 0, if (r.get("tint") != "") r.get("tint") else r.get("color"), box.node.attr("name"), 0, "", "")
     } else if (kind == "image") {
-        frame.paints.append(OnePaint("image", x, y, box.w, box.h, radius, "", box.node.attr("src"), 0, r.get("fit"), ""))
+        oneAddPaint(frame, "image", x, y, box.w, box.h, radius, "", box.node.attr("src"), 0, r.get("fit"), "")
     } else if (kind == "bitmap") {
-        frame.paints.append(OnePaint("bitmap", x, y, box.w, box.h, 0, "", box.node.attr("cells"), 0, box.node.attr("columns"), ""))
+        oneAddPaint(frame, "bitmap", x, y, box.w, box.h, 0, "", box.node.attr("cells"), 0, box.node.attr("columns"), "")
     } else if (kind == "input") {
         onePaintInput(box, x, y, pl, pr, frame, path)
     }
     if (kind == "pressable" || kind == "link") {
         val event = oneParseInt(box.node.attr("onPress"), 0)
-        if (event > 0 && box.node.attr("enabled") != "false") frame.hits.append(OneHit("press", x, y, box.w, box.h, event, 0, path, box.node.attr("label"), "", false))
+        if (event > 0 && box.node.attr("enabled") != "false") oneAddHit(frame, "press", x, y, box.w, box.h, event, 0, path, box.node.attr("label"), "", false, 0, 0)
     }
-    if (kind == "link" && box.node.attr("route") != "true") frame.hits.append(OneHit("link", x, y, box.w, box.h, 0, 0, path, box.node.attr("href"), "", false))
+    if (kind == "link" && box.node.attr("route") != "true") oneAddHit(frame, "link", x, y, box.w, box.h, 0, 0, path, box.node.attr("href"), "", false, 0, 0)
     val scrolls = kind == "scroll" || kind == "feed"
     // A scrollRow's children are already placed at its offset (oneMeasureScrollRow, oneLayoutRescroll), which keeps this short.
     val across = kind == "scrollRow"
@@ -164,7 +231,7 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     var ncw = cw
     var nch = ch
     if (scrolls || across || r.get("clip") == "true") {
-        frame.paints.append(oneRect("clip", x, y, box.w, box.h, radius, ""))
+        oneAddRect(frame, "clip", x, y, box.w, box.h, radius, "")
         ncx = x
         ncy = y
         ncw = box.w
@@ -189,7 +256,7 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
         val event = oneParseInt(box.node.attr("onVisible"), 0)
         if (event > 0) frame.visible.append(OneVisible(event, visibleItem))
     }
-    if (scrolls || across || r.get("clip") == "true") frame.paints.append(oneRect("unclip", x, y, box.w, box.h, 0, ""))
+    if (scrolls || across || r.get("clip") == "true") oneAddRect(frame, "unclip", x, y, box.w, box.h, 0, "")
     return
 }
 
@@ -204,27 +271,6 @@ fun oneFrameJson(frame: OneFrame): string {
         hits.append(jsonArray([jsonString(h.kind), jsonInteger(h.x), jsonInteger(h.y), jsonInteger(h.w), jsonInteger(h.h), jsonInteger(h.event), jsonInteger(h.submit), jsonString(h.key), jsonString(h.value), jsonString(h.placeholder), jsonBoolean(h.multiline)]))
     }
     jsonStringify(jsonObject(["w", "h", "paints", "hits"], [jsonInteger(frame.width), jsonInteger(frame.height), jsonArray(paints), jsonArray(hits)]))
-}
-
-// Where a caret goes in a field, after its text. What's painted went through
-// the word wrapper, which drops the spaces at the end, so those are added back.
-fun oneCaretX(frame: OneFrame, field: OneHit): int {
-    var x = field.x + 16
-    var size = 16
-    var weight = ""
-    if (field.value != "") {
-        for (p in frame.paints) {
-            if (p.op == "text" && p.x >= field.x && p.y >= field.y && p.x < field.x + field.w && p.y < field.y + field.h) {
-                x = p.x + oneTextWidth(p.text, p.size, p.weight)
-                size = p.size
-                weight = p.weight
-            }
-        }
-    }
-    var end = field.value.size
-    while (end > 0 && field.value[end - 1] == 32) end = end - 1
-    if (end < field.value.size) x = x + oneTextWidth(field.value.slice(end, field.value.size), size, weight)
-    x
 }
 
 // Scrolls a scroll area to `offset`. A feed left at its end has no saved offset,

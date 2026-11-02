@@ -60,6 +60,7 @@ fun oneTextMilli(text: string, size: int, weight: string): int {
     total
 }
 
+@noinline
 fun oneTextWidth(text: string, size: int, weight: string): int = (oneTextMilli(text, size, weight) + 999) / 1000
 
 // Breaks text into lines no wider than `width`. Words longer than a line are
