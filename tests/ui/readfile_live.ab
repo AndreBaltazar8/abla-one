@@ -1,0 +1,36 @@
+import "abla/http"
+import "abla/net"
+import "abla/crypto"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+
+class FileApp(val services: OneServices, var pending: int by State(0), var stage: int by State(0), var message: string by State(""), var file: OneFile = OneFile("", "", 0, ""), var offset: int = 0, var data: string = "") : OneApp {
+    fun render(var ui: Ui): Node = column(style(), [
+        button(ui, "Pick file", "secondary", ui.press { stage = 1; data = ""; offset = 0; pending = services.pickFiles([], false) }, style()),
+        text(message, style())
+    ])
+    fun receive(kind: string, value: string): void {
+        if (kind != "result") return
+        val r = oneResponse(value)
+        if (r.requestId != pending) return
+        if (!r.ok()) { message = "pick: error ${r.error}"; return }
+        if (stage == 1) {
+            val files = r.files()
+            if (files.size == 0) { message = "empty"; return }
+            file = files[0]
+            stage = 2
+        } else {
+            val bytes = base64Decode(r.bodyBase64)
+            if (bytes.size == 0) { message = "read: ${data.size} ${hexEncode(sha256(data))}"; return }
+            data = "$data$bytes"
+            offset = offset + bytes.size
+        }
+        pending = services.readFile(file, offset, 589824)
+        return
+    }
+}
+fun fileApp(request: HttpRequest, session: string): OneApp = FileApp(oneLiveServices(session))
+fun main: int {
+    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", 8959), { r -> httpText("not found", 404) }, oneLivePaths(["/"]), fileApp, oneDefaultTheme(), OneLiveOptions("Files", "en", "#fff", "", "src/backends/web/host.js", ""))
+    server.run()
+}

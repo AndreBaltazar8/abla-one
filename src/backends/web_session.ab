@@ -412,6 +412,9 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
             session.changed = true
         }
     }
+    else if (kind == "pick-error" && m.get("id").intAvailable()) {
+        session.queue.complete(oneResponsePayload(m.get("id").asInt(), 0, "", m.getString("error")))
+    }
     else if (kind == "hello") {
         session.htmlSent = ""
         session.cssSent = 0

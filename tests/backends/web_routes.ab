@@ -1,5 +1,6 @@
 import "abla/test"
 import "abla/json"
+import "abla/crypto"
 import "../../src/one_kit.ab"
 import "../../src/backends/web_session.ab"
 import "../../src/backends/web_live.ab"
@@ -135,12 +136,37 @@ fun main: int {
     expect(!same.has("html"), "no markup")
     expectEqual(same.get("ack").asInt(), 5, "still answered")
 
+    oneSessionMessage(m, t, jsonParse("{\"t\":\"pick-error\",\"id\":71,\"error\":\"upload failed\"}").value)
+    val failure = oneResponse(m.queue.takeCompletions()[0])
+    expect(failure.requestId == 71 && !failure.ok() && failure.error == "upload failed", "failed picker upload completes with its error")
+
     // The Wasm module: starts at the page's path, moves with its messages.
     val hello = oneClientMessage("{\"t\":\"hello\",\"r\":1,\"w\":400,\"e\":9000,\"p\":\"/b\"}", { name -> pagesApp(name) }, t, "/i")
     expect(has(hello, "\"title\":\"B\""), "a direct link's route is rendered first")
     expectEqual(oneLiveQueueList[oneLiveQueueIndex("client")].routes.entry(), 9000, "at the page's entry")
     val popped = oneClientMessage("{\"t\":\"route\",\"p\":\"/a\",\"e\":8000,\"n\":1}", { name -> pagesApp(name) }, t, "/i")
     expect(has(popped, "\"title\":\"A\"") && has(popped, "\"ack\":1"), "back in the module")
+
+    // A read larger than the host cap returns a short chunk; advancing by the
+    // bytes actually returned recovers every byte across the boundary.
+    val filesIndex = oneLiveQueueIndex("read-test")
+    var original = ""
+    while (original.size < 589824) original = "${original}0123456789abcdef"
+    oneLiveQueueList[filesIndex].addFile("large", original, "")
+    val file = OneFile("large", "large.bin", original.size, "application/octet-stream")
+    val services = oneLiveServices("read-test")
+    var result = ""
+    var offset = 0
+    while (offset < original.size) {
+        val id = services.readFile(file, offset, 589824)
+        val received = oneResponse(oneLiveQueueList[filesIndex].takeCompletions()[0])
+        expect(received.ok() && received.requestId == id, "large read completes")
+        val bytes = base64Decode(received.bodyBase64)
+        expect(bytes.size > 0, "read advances")
+        result = "$result$bytes"
+        offset = offset + bytes.size
+    }
+    expectEqual(result, original, "large file is read byte for byte across the cap")
 
     // Claimed paths
     val claim = oneLivePaths(["/", "/form/:n"])

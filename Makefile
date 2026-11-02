@@ -77,6 +77,8 @@ gallery-live: gallery-web
 # Live web (server-run sessions over WebSocket) as document and as canvas.
 ui-web-live: gallery-live
 	tests/ui/live.sh
+	$(NIX) '$(ABLAC) build tests/ui/readfile_live.ab -o build/readfile-live --fast'
+	tests/ui/readfile-live.sh
 
 # Linux desktop (abla-graphics window, one-layout, one-raster) under Xvfb.
 gallery-desktop: gallery-web

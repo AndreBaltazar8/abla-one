@@ -408,14 +408,21 @@
           return upload(`id=${message.id}&kind=cancel`, '');
         }
       }
-      let picked = '';
-      for (let i = 0; i < files.length; i++) {
-        const response = await upload(`id=${message.id}&kind=files&picked=${encodeURIComponent(picked)}`, files[i], {
-          'Content-Type': files[i].type || 'application/octet-stream',
-          'X-One-Name': encodeURIComponent(files[i].name),
-          'X-One-Last': i === files.length - 1 ? '1' : '0'});
-        const handle = await response.text();
-        picked = picked ? `${picked},${handle}` : handle;
+      try {
+        // Live sessions accept one file per HTTP request, at most 16 MiB.
+        if (!boot.wasm && files.some(file => file.size > 16777216)) throw new Error('File exceeds the 16 MiB upload limit');
+        let picked = '';
+        for (let i = 0; i < files.length; i++) {
+          const response = await upload(`id=${message.id}&kind=files&picked=${encodeURIComponent(picked)}`, files[i], {
+            'Content-Type': files[i].type || 'application/octet-stream',
+            'X-One-Name': encodeURIComponent(files[i].name),
+            'X-One-Last': i === files.length - 1 ? '1' : '0'});
+          if (response.ok === false) throw new Error(`File upload failed (${response.status})`);
+          const handle = await response.text();
+          picked = picked ? `${picked},${handle}` : handle;
+        }
+      } catch (error) {
+        send({t: 'pick-error', id: message.id, error: error.message || 'File upload failed'});
       }
     });
     input.click();
