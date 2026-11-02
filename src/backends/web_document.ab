@@ -143,8 +143,13 @@ fun oneWebClientDocument(title: string, lang: string, root: Node, theme: Theme, 
     val boot = jsonStringify(jsonObject(["s", "r", "icons", "wasm"], [jsonString(""), jsonInteger(1), jsonString(iconBase), jsonString(wasmUrl)]))
     "<!doctype html><html lang=\"${oneHtmlEscape(oneWebPageLang(root, lang))}\"><head><meta charset=\"utf-8\"><base href=\"${oneRouteBase(route)}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(oneWebPageTitle(root, title))}</title>${oneWebPageMeta(root)}" +
         "<style>html,body{margin:0;height:100%;background:$background}#one-root{$fill}#one-root>.one{$fill}\n${oneWebBaseCss()}</style><style id=\"one-css\">${page.css.slice(oneWebBaseCss().size, page.css.size)}</style>" +
-        "<script>window.__one=$boot</script><script src=\"${oneHtmlEscape(hostUrl)}\" defer></script></head><body><div id=\"one-root\">${page.html}</div></body></html>"
+        "$oneWebEarlyEvents<script>window.__one=$boot</script><script src=\"${oneHtmlEscape(hostUrl)}\" defer></script></head><body><div id=\"one-root\">${page.html}</div></body></html>"
 }
+
+// A page is painted before web/host.js has run, and what a person does then would go nowhere. This keeps what the host listens for, on
+// the same elements, for it to replay once it's listening (twice in a row is one: nothing answered the first). A link is
+// the browser's own, except one within the page, which <base> would send to the root. In the head, ahead of the markup.
+val oneWebEarlyEvents = "<script>(()=>{const q=window.__oneEarly=[],k=['click','input','keydown'],h=e=>{const t=e.target,c=t.closest&&t.closest('a[href]');let m=0;if(e.type==='click'){if(c&&c.getAttribute('href')[0]==='#'){e.preventDefault();m=1}else m=!c&&t.closest&&t.closest('[data-one-press]')}else if(e.type==='input')m=t.hasAttribute&&t.hasAttribute('data-one-change');else m=e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&t.hasAttribute&&t.hasAttribute('data-one-submit');if(!m)return;const l=q[q.length-1];if(!l||l.t!==t||l.k!==e.type)q.push({t,k:e.type})};for(const n of k)addEventListener(n,h,true);q.stop=()=>{for(const n of k)removeEventListener(n,h,true)}})()</script>"
 
 // What a `page(...)` root says about its document.
 fun oneWebPageTitle(root: Node, fallback: string): string = if (root.attr("page.title") != "") root.attr("page.title") else fallback

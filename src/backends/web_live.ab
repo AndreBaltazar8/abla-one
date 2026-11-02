@@ -541,7 +541,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val fill = if (session.document) "min-height:100%" else "height:100%"
     val body = "<!doctype html><html lang=\"${oneHtmlEscape(if (session.lang != "") session.lang else options.lang)}\"><head><meta charset=\"utf-8\"><base href=\"${oneRouteBase(route)}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(if (session.title != "") session.title else options.title)}</title>${session.meta}${options.head}" +
         "<style>html,body{margin:0;height:100%;background:${options.background}}#one-root{$fill}#one-root>.one{$fill}\n${oneWebBaseCss()}</style><style id=\"one-css\">${sessions[index].css.text()}</style>" +
-        "${if (remembered > 0 || canvas) "" else oneLiveHoldFirstPaint}<script>window.__one=$boot</script><script src=\"one/${if (canvas) "canvas" else "host"}.js\" defer></script></head><body><div id=\"one-root\">$markup</div></body></html>"
+        "${if (remembered > 0 || canvas) "" else oneLiveHoldFirstPaint}${if (canvas) "" else oneWebEarlyEvents}<script>window.__one=$boot</script><script src=\"one/${if (canvas) "canvas" else "host"}.js\" defer></script></head><body><div id=\"one-root\">$markup</div></body></html>"
     val headers = [
         HttpHeader("Content-Type", "text/html; charset=utf-8"),
         HttpHeader("Cache-Control", "no-store"),

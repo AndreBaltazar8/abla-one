@@ -151,6 +151,10 @@ On the web a press on a control that isn't live yet, while typing is on its way 
 waits for the answer (`c` in the patch) and lands then if the same control is there, says the same
 and now takes it: a send button that comes alive with its draft. Typing again or moving cancels it.
 
+A page is painted before its script has run. What a person does then (a press, typing, Enter in a field) is kept by a small script in the
+head and replayed when the host is listening, into the queue that waits for the session or the module; the same thing twice in a
+row counts once, as nothing answered the first. Plain links stay the browser's.
+
 Platform completions (HTTP, storage, timers, pickers) arrive as
 `receive("result", payload)`, pushes from the live server as
 `receive("push", payload)`, moves between routes as `receive("route", path)` (§9).

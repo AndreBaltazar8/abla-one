@@ -21,6 +21,17 @@ try {
   check(await noScript.getByText('Adicionar (0)').count() === 1, 'SSR renders the page without JavaScript');
   await noScript.close();
 
+  // A press on the painted page, before the host script has run at all.
+  const early = await browser.newPage({viewport: {width: 390, height: 844}});
+  let letGo;
+  const held = new Promise(resolve => { letGo = resolve; });
+  await early.route('**/host.js', async route => { await held; await route.continue(); });
+  await early.goto(base + '/client.html', {waitUntil: 'commit'});
+  await early.getByRole('button', {name: 'Adicionar (0)'}).click();
+  letGo();
+  await early.getByText('Adicionar (1)').waitFor({timeout: 5000}).then(() => check(true, 'a press before the script reaches the module'), () => check(false, 'a press before the script reaches the module'));
+  await early.close();
+
   const page = await browser.newPage({viewport: {width: 390, height: 844}});
   const errors = [];
   const sockets = [];

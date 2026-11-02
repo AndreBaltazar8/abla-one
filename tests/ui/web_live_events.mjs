@@ -108,6 +108,30 @@ try {
     await page.close();
   }
   {
+    // Before the script: the page is painted, nothing listens yet. No width cookie to hold the paint for, so this is the earliest a person can act.
+    const context = await browser.newContext({viewport: {width: 390, height: 844}});
+    await context.addCookies([{name: 'one_width', value: '390', url: base}]);
+    const page = await context.newPage();
+    let letGo;
+    const held = new Promise(resolve => { letGo = resolve; });
+    await page.route('**/one/host.js', async route => { await held; await route.continue(); });
+    await page.goto(base + '/moment', {waitUntil: 'commit'});
+    await page.getByText('Emitidas: 0').waitFor();
+    check(await page.evaluate(() => !window.__socket && Array.isArray(window.__oneEarly)), 'before the script, with the page already painted');
+    await page.getByRole('button', {name: 'Contar'}).click();
+    await page.getByRole('button', {name: 'Contar'}).click();
+    const field = page.locator('input[placeholder="Rascunho"]');
+    await field.fill('escrito cedo');
+    check(await page.getByText('Contadas: 0').count() === 1, 'nothing answers yet');
+    letGo();
+    await page.getByText('Contadas: 1').waitFor({timeout: 5000}).then(() => check(true, 'a press before the script lands when it runs, and the same press twice is one'), () => check(false, 'a press before the script'));
+    await page.getByRole('button', {name: 'Enviar'}).click();
+    await page.getByText('Enviado: escrito cedo').waitFor({timeout: 5000}).then(() => check(true, 'and what was typed reaches the session'), () => check(false, 'typing before the script'));
+    await settled(page);
+    check(await page.getByText('Contadas: 1').count() === 1, 'once');
+    await context.close();
+  }
+  {
     const page = await open();
     // Re-rendering with the same controls ages nothing, however often: only the text around them changed.
     await page.getByRole('button', {name: 'Contar'}).click();

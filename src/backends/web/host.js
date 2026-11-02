@@ -566,6 +566,16 @@
   popovers();
   const left = savedScroll(entry.e);
   if (left) placeScroll(left);
+  // What was done on the painted page before this script ran: it waits in the queue like anything else until the app can take it.
+  const early = window.__oneEarly;
+  if (early) {
+    early.stop();
+    for (const {t: target, k: kind} of early) {
+      if (kind === 'click') target.click();
+      else if (kind === 'input') target.dispatchEvent(new Event('input', {bubbles: true}));
+      else target.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    }
+  }
   if (boot.wasm) run().catch((error) => { console.error(error); document.documentElement.setAttribute('data-one-offline', ''); });
   else connect();
 })();
