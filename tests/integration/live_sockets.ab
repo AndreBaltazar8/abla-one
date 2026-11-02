@@ -65,7 +65,8 @@ fun connect(port: int): TcpConnection = tcpConnectIpv4("127.0.0.1", port, 2000)
 val upgrade = "HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
 
 fun main: int {
-    val port = 47990
+    // Not a fixed one: another checkout running this test holds it, and then this fails.
+    val port = 47000 + monotonicMilliseconds() % 2000
     var server = serve(port)
     expect(server.listening(), "it has the port")
     var second = serve(port)
