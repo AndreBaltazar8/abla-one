@@ -16,5 +16,5 @@ if [ ! -f "$RUNTIME/runtime/abla_runtime.c" ]; then
     git -C "$P/ablac" archive 3da080eed592269c17297e0896a1f2a33a888d7f runtime stdlib | tar -x -C "$RUNTIME"
 fi
 (cd "examples/$example" && "$ABLAC" build android_build.ab -o "../../build/$example-android-driver" --fast --no-cache)
-NIXPKGS_ALLOW_UNFREE=1 nix-shell "$P/coder-auto/build/android-shell.nix" --run "android-gradle -p '$PWD/examples/$example/android' :android-app:assembleDebug -PablaMobileConfiguration=debug -PablaCompilerRoot='$RUNTIME' --console=plain"
+NIXPKGS_ALLOW_UNFREE=1 nix-shell "$PWD/shell-android.nix" --run "android-gradle -p '$PWD/examples/$example/android' :android-app:assembleDebug -PablaMobileConfiguration=debug -PablaCompilerRoot='$RUNTIME' --console=plain"
 echo "examples/$example/android/android-app/build/outputs/apk/debug/android-app-debug.apk"
