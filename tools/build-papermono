@@ -21,7 +21,7 @@ mkdir -p build/papermono
 if compgen -G "$project/../icons/*.xml" > /dev/null; then
   mkdir -p build/papermono/icons
   "$root/tools/vector2svg" build/papermono/icons --tint "$project"/../icons/*.xml
-  python3 "$root/tools/icons-ab.py" build/papermono/icons.ab build/papermono/icons
+  "$root/tools/icons-ab" build/papermono/icons.ab build/papermono/icons
 fi
 driver=build.ab
 # The gallery's code now spreads past CALL8's reach in the catch-all flash statement:

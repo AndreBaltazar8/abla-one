@@ -25,5 +25,4 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Tools in Python
 
-- [ ] `tools/vector2svg.py`, `tools/fonts.py` and `tools/icons-ab.py` are Python. NovaKind no longer calls
-      `vector2svg.py` (`novakind-tool icons`, byte-identical on its 33 icons, could move here for other apps).
+- [ ] `tools/fonts.py` uses Python and FontTools to regenerate the Inter font assets and data.
