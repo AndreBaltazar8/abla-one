@@ -69,6 +69,22 @@ try {
   await page.waitForTimeout(500);
   const scrolled = await page.evaluate(() => window.__oneFrame.hits.find(h => h[0] === 'scroll')[8]);
   check(Number(scrolled) > 0, `wheel scrolls the scroll area (${scrolled})`);
+  // An external link opens a new tab and leaves this page where it was.
+  let outside = null;
+  for (let i = 0; i < 20; i++) {
+    outside = await page.evaluate(() => window.__oneFrame.hits.find(h => h[0] === 'link' && h[9] === 'true'));
+    if (outside && outside[2] + outside[4] <= 480 && outside[2] >= 0) break;
+    await page.mouse.wheel(0, 300);
+    await page.waitForTimeout(250);
+  }
+  check(!!outside, 'an external link carries its flag in the hit');
+  const at = page.url();
+  const [tab] = await Promise.all([page.context().waitForEvent('page', {timeout: 5000}).catch(() => null), page.mouse.click(outside[1] + outside[3] / 2, outside[2] + outside[4] / 2)]);
+  if (tab) await tab.waitForLoadState().catch(() => {});
+  check(!!tab && new URL(tab.url()).pathname === '/people' && new URL(tab.url()).searchParams.get('q') === 'ti', `it opens in a new tab (${tab && tab.url()})`);
+  await page.waitForTimeout(300);
+  check(page.url() === at, `and this page stays (${page.url()})`);
+  if (tab) await tab.close();
   check(errors.length === 0, `no page errors ${errors.join(' ')}`);
 } finally {
   await browser.close();

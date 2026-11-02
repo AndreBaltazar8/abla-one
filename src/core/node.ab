@@ -94,6 +94,8 @@ fun page(title: string, lang: string, meta: Map<string, string>, content: Node):
 
 // A link: a document anchor on the web (`href` may be "#section" or a URL);
 // elsewhere a container that opens it through the platform when pressed.
+// `.set("external", "true")` marks a page outside the app: a new tab on the web,
+// in the document and on the canvas, and the system's browser on Android.
 fun link(href: string, look: Style, children: array<Node>): Node = oneNode("link", look, oneVisible(children)).set("href", href)
 // A link that also delivers an event (`ui.press`) as it is followed.
 fun linkPress(href: string, event: int, look: Style, children: array<Node>): Node = link(href, look, children).setInt("onPress", event)

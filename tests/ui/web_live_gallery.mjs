@@ -45,6 +45,18 @@ try {
   await noScript.goto(base + '/');
   check(await noScript.getByText('Adicionar (0)').count() === 1, 'SSR renders the page without JavaScript');
   await noScript.close();
+  {
+    // An external link opens a new tab, and this page stays.
+    const page = await browser.newPage({viewport: {width: 390, height: 844}});
+    await page.goto(base + '/');
+    const outside = page.getByRole('link', {name: 'Abrir noutro separador'});
+    check(await outside.getAttribute('target') === '_blank', 'an external link is a link to a new tab');
+    const [tab] = await Promise.all([page.context().waitForEvent('page', {timeout: 5000}).catch(() => null), outside.click()]);
+    check(!!tab && new URL(tab.url()).pathname === '/people', `it opens one (${tab && tab.url()})`);
+    check(new URL(page.url()).pathname === '/', 'and this page stays');
+    if (tab) await tab.close();
+    await page.close();
+  }
 
   const page = await browser.newPage({viewport: {width: 390, height: 844}});
   const errors = [];

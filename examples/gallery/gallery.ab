@@ -108,6 +108,10 @@ class Gallery(
         column(style().paddingX(16), [
             bitmap("1110111" + "1010101" + "1110111" + "0001000" + "1110111" + "1010001" + "1110111", 7, "Código de exemplo", style().size(84))
         ]),
+        sectionHeader(ui, "FORA DA APP", none()),
+        column(style().paddingX(16).alignSelf("start"), [
+            linkButton(ui, "Abrir noutro separador", "secondary", "./people?q=ti", style()).set("external", "true")
+        ]),
         spacer(24)
     ])
 

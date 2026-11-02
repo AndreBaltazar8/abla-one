@@ -179,7 +179,13 @@
     if (moved) return;
     const hit = hitAt(e.clientX, e.clientY, ['press', 'input', 'link']);
     if (!hit) { if (editor) editor.blur(); return; }
-    if (hit[0] === 'link') { if (!hit[8].startsWith('#')) { followed = true; setTimeout(() => { followed = false; }, 1000); location.href = new URL(hit[8], base).href; } return; }
+    if (hit[0] === 'link') {
+      if (hit[8].startsWith('#')) return;
+      // An external link opens in a new tab, as the document page's target=_blank does; this page stays.
+      if (hit[9] === 'true') { open(new URL(hit[8], base).href, '_blank', 'noopener'); return; }
+      followed = true; setTimeout(() => { followed = false; }, 1000); location.href = new URL(hit[8], base).href;
+      return;
+    }
     if (hit[0] === 'input') openEditor(hit);
     else if (hit[5]) event(hit[5], '');
   });

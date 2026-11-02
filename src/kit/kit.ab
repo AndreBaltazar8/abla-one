@@ -19,6 +19,13 @@ fun button(ui: Ui, label: string, variant: string, onPress: int, look: Style): N
         text(label, oneParts(ui.theme, "Button", variant, "label", style()))
     ]).set("label", label)
 
+// A button that is a link: a real link on the web, which can open in a new tab. With
+// `.set("external", "true")` it always does, and Android opens it in the system's browser.
+fun linkButton(ui: Ui, label: string, variant: string, href: string, look: Style): Node =
+    link(href, oneParts(ui.theme, "Button", variant, "", look), [
+        text(label, oneParts(ui.theme, "Button", variant, "label", style()))
+    ]).set("label", label)
+
 fun iconButton(ui: Ui, name: string, label: string, onPress: int, look: Style): Node =
     pressable(onPress, oneParts(ui.theme, "IconButton", "", "", look), [
         icon(name, label, oneParts(ui.theme, "IconButton", "", "icon", style()))
