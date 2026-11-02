@@ -1,0 +1,16 @@
+import "abla/io"
+import "../../src/one.ab"
+import "../../src/one_kit.ab"
+import "../../src/core/wire.ab"
+import "../../src/backends/thin_client.ab"
+import "../../src/layout/layout.ab"
+fun block(): Node = column(style().width(80).height(20), [])
+// The server's tree on a thin device, whose program makes no such row itself: written with oneNode, as the server's own calls to Style.wrap and scrollRow aren't here.
+fun main: int {
+    var app = oneThinApp()
+    val sent = column(style(), [row(style().set("wrap", "true").width(100), [block(), block()]), oneNode("scrollRow", style().width(100), [block(), block()])])
+    app.update(oneTreeJson(sent, 1))
+    val box = oneLayout(app.tree, oneDefaultTheme(), "desktop", 200, 100, Map())
+    println("height ${box.children[0].h} across ${box.children[1].contentH}")
+    0
+}

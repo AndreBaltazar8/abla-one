@@ -32,6 +32,11 @@ fun oneStyleSet(base: Style, target: string, state: string, property: string, va
     if (target != "") base.on(target, inner) else base.with(inner)
 }
 
+fun oneStyleWrapping(base: Style): Style {
+    oneUseWrapRows()
+    base
+}
+
 fun oneAttrSet(node: Node, name: string, value: string): Node = node.set(name, value)
 
 fun oneKey(node: Node, key: string): Node = node.keyed(key)

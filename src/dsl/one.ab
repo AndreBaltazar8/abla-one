@@ -205,6 +205,8 @@ compile fun oneDslStyle(cursor: ParserCursor, tag: string, var a: OneDslAttribut
                 }
                 j = j + 1
             }
+            // Only a program that writes it pays for wrapping rows, as with `Style.wrap`.
+            if (property == "wrap") result = syntaxCall("oneStyleWrapping", [result])
             result = syntaxCall("oneStyleSet", [result, syntaxString(target), syntaxString(state), syntaxString(property), oneDslString(a, i)])
         }
         i = i + 1

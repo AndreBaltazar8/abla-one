@@ -1,3 +1,4 @@
+import "abla/io"
 import "../one.ab"
 import "inter_metrics.ab"
 
@@ -524,6 +525,8 @@ fun oneMeasureAnyRow(var ctx: OneLayoutContext, node: Node, r: Resolved, availW:
             val b = measure[0](ctx, node, r, OneRowRoom(availW, availH, givenW, givenH), path)
             return OneBox(b.node, b.r, b.x, b.y, b.w, b.h, b.children, b.lines, b.contentH, b.scrollY, b.lineWidths)
         }
+        // Asked for by hand, `set("wrap", "true")` or `oneNode("scrollRow", ...)`: no code here, so a plain row. Each layout says so, as a flag to say it once costs a device more than the words.
+        println("one: plain row: make it with Style.wrap() or scrollRow()")
     }
     val box = oneMeasureRow(ctx, node, r, availW, availH, givenW, givenH, pl, pr, pt, pb, path)
     box

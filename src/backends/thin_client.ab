@@ -10,7 +10,12 @@ class OneThinApp(var tree: Node, var revision: int) : OneApp {
     }
 }
 
-fun oneThinApp(): OneThinApp = OneThinApp(column(style(), [text("…", style())]), -1)
+// The server's tree can hold any row, and nothing here makes one, so their code is asked for by hand.
+fun oneThinApp(): OneThinApp {
+    oneUseWrapRows()
+    oneUseScrollRows()
+    OneThinApp(column(style(), [text("…", style())]), -1)
+}
 
 // Takes a tree the server sent. Whether the screen needs drawing.
 fun OneThinApp.update(body: string): bool {

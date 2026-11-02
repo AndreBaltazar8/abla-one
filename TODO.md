@@ -39,11 +39,6 @@
 - PaperMono: joining Wi-Fi in the background is tested on the host and builds; it hasn't run on a device. Check
   boots join without "Sem ligação".
 
-## Layout
-
-- `Style.wrap` and `scrollRow` add their code when called, so a hand-written `set("wrap", "true")` or `oneNode("scrollRow", ...)` lays out as a plain row on self-drawn targets, and
-  nothing says so. Nothing does this today.
-
 ## Tools in Python
 
 - [ ] `tools/vector2svg.py`, `tools/fonts.py` and `tools/icons-ab.py` are Python. NovaKind no longer calls

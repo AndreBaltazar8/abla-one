@@ -1,0 +1,16 @@
+import "abla/io"
+import "../../src/one.ab"
+import "../../src/one_kit.ab"
+import "../../src/dsl/one.ab"
+import "../../src/layout/layout.ab"
+fun tree(): Node = $one
+    <Row wrap=true width=100>
+      <Column width=80 height=20 />
+      <Column width=80 height=20 />
+    </Row>
+// `wrap` in the markup is the row that wraps, with nothing else asking for its code.
+fun main: int {
+    val box = oneLayout(column(style(), [tree()]), oneDefaultTheme(), "desktop", 200, 100, Map()).children[0]
+    println("height ${box.h}")
+    0
+}
