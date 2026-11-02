@@ -32,6 +32,8 @@ class Counter(var count: int by State(0)) : OneApp {
 - `examples/gallery/`: one shared app (`gallery.ab`) with `android.ab` and `web.ab` entry files.
 - `tools/`: `build-android.sh`, `vector2svg` (Android vector drawables to SVG icons for the web), `shoot.mjs` (screenshots).
 
+`tools/vector2svg` builds on first use and needs sibling `ablac` and `abla-xml` checkouts; `tools/icons-ab` embeds SVGs into an Abla module and needs sibling `ablac`.
+
 ## Tests
 
 ```sh

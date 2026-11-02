@@ -23,6 +23,6 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 - The UI suites and `tests/remote` use fixed ports, so simultaneous runs in two checkouts can fail each other. `tests/integration/live_sockets.ab` now chooses a port from a range, but can still collide (exit 101, "it has the port", seen 2026-11-02); make concurrent runs independent.
 
-## Tools in Python
+## Font regeneration
 
-- [ ] `tools/fonts.py` uses Python and FontTools to regenerate the Inter font assets and data.
+- [ ] An Abla tool for fonts, if they ever need regenerating. The previous generator is in git history at `f43b77f`; see `docs/fonts.md` for its inputs and outputs.
