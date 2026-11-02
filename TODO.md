@@ -29,7 +29,7 @@
 - A `when` over an f32 gives `when.match` for literal cases (documented).
 - A class's methods are all compiled, used or not, so what only one method reaches stays in every program that has the class (why `Style.wrap` is an extension). 0.2.29.
 - `bootstrapLlvmAddressTaken` counts a function's value taken in an unreachable function, so it's in `abla_llvm_call_indirect`'s table and linked. It only holds now because the frontend drops unused top-level functions first. 0.2.29.
-- A function value's or interface method's managed result can't be returned as it is (`ownership.managed-return-borrow-contract:return:nonfresh`) when the call takes parameters, nor can a nullable function type be called after a null check (`call.target`), or be assigned a function (`assignment.type`): `oneMeasureAnyRow` copies the box and holds its hooks in arrays. 0.2.29.
+- A function value's or interface method's managed result can't be returned as it is (`ownership.managed-return-borrow-contract:return:nonfresh`) when the call takes parameters, nor can a nullable function type be called after a null check (`call.target`), or be assigned a function (`assignment.type`): `oneMeasureAnyRow` copies the box and holds its hooks in arrays. 0.2.29. The managed result only fails there: a small program returning `hooks[0](c, q)` compiles, while returning `oneWrapRowMeasure[0](...)` directly in the layout doesn't.
 
 ## Abla One bugs seen
 
@@ -38,6 +38,10 @@
   on a device.
 - PaperMono: joining Wi-Fi in the background is tested on the host and builds; it hasn't run on a device. Check
   boots join without "Sem ligação".
+
+## Tests
+
+- The ui suites and tests/remote listen on fixed ports, so two checkouts running one at once fail each other, as tests/integration/live_sockets.ab did (exit 101, "it has the port", seen 2026-11-02).
 
 ## Tools in Python
 
