@@ -520,8 +520,11 @@
     socket.onopen = () => {
       retry = 0;
       document.documentElement.removeAttribute('data-one-offline');
-      socket.send(JSON.stringify({t: 'hello', r: revision, w: innerWidth, e: entry.e}));
+      // What's waiting was made on the layout shown, which a first paint guessed: it lands there, and then the width counts.
+      const waiting = queue.length > 0;
+      socket.send(JSON.stringify(waiting ? {t: 'hello', r: revision, e: entry.e} : {t: 'hello', r: revision, w: innerWidth, e: entry.e}));
       while (queue.length) socket.send(queue.shift());
+      if (waiting) socket.send(JSON.stringify({t: 'viewport', w: innerWidth}));
     };
     socket.onmessage = (e) => { receive(JSON.parse(e.data)); document.documentElement.removeAttribute('data-one-held'); };
     socket.onclose = (e) => {

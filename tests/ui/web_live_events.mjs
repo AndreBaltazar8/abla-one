@@ -115,6 +115,8 @@ try {
     let letGo;
     const held = new Promise(resolve => { letGo = resolve; });
     await page.route('**/one/host.js', async route => { await held; await route.continue(); });
+    const sent = [];
+    page.on('websocket', ws => ws.on('framesent', f => sent.push(JSON.parse(f.payload))));
     await page.goto(base + '/moment', {waitUntil: 'commit'});
     await page.getByText('Emitidas: 0').waitFor();
     check(await page.evaluate(() => !window.__socket && Array.isArray(window.__oneEarly)), 'before the script, with the page already painted');
@@ -125,6 +127,7 @@ try {
     check(await page.getByText('Contadas: 0').count() === 1, 'nothing answers yet');
     letGo();
     await page.getByText('Contadas: 1').waitFor({timeout: 5000}).then(() => check(true, 'a press before the script lands when it runs, and the same press twice is one'), () => check(false, 'a press before the script'));
+    check(sent[0].t === 'hello' && sent[0].w === undefined && sent[1].t === 'event' && sent.find(m => m.t === 'viewport').w === 390 && sent.findIndex(m => m.t === 'viewport') > 1, 'it lands on the layout it was made on, and then the width counts');
     await page.getByRole('button', {name: 'Enviar'}).click();
     await page.getByText('Enviado: escrito cedo').waitFor({timeout: 5000}).then(() => check(true, 'and what was typed reaches the session'), () => check(false, 'typing before the script'));
     await settled(page);

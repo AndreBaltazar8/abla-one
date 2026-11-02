@@ -153,7 +153,8 @@ and now takes it: a send button that comes alive with its draft. Typing again or
 
 A page is painted before its script has run. What a person does then (a press, typing, Enter in a field) is kept by a small script in the
 head and replayed when the host is listening, into the queue that waits for the session or the module; the same thing twice in a
-row counts once, as nothing answered the first. Plain links stay the browser's.
+row counts once, as nothing answered the first. Plain links stay the browser's. The session hears the page's width after what
+was waiting, which was made on the layout shown.
 
 Platform completions (HTTP, storage, timers, pickers) arrive as
 `receive("result", payload)`, pushes from the live server as
