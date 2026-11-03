@@ -14,8 +14,6 @@
 
 PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not to be touched for now.
 
-- [ ] Narrow live-server timer gate for asynchronous dependency catch-up; preserve HTTP/platform work and avoid busy polls while due timers are deferred (novakind-cc).
-
 ## ablac bugs seen (worked around, not confirmed fixed)
 
 - A `when` over an f32 gives `when.match` for literal cases (documented).

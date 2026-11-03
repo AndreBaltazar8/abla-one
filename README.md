@@ -94,3 +94,15 @@ Gradle/CMake fallback searches neighboring checkouts.
 paths in active native build files. With CMake installed, `--configure-test`
 checks every mobile consumer against a synthetic SDK in a path containing spaces.
 PaperMono is parked and explicitly excluded from this active-target check.
+
+## Live dependency catch-up
+
+`OneLiveServer.step(beforeSettle, timersReady)` accepts an optional per-session
+timer gate. Return false from `timersReady(session)` while an external source
+reconnects or catches up. Due timers keep their deadlines and fire once after
+the gate opens; the `beforeSettle` pushes apply first. HTTP I/O, platform
+completions, broadcasts, rendering and output continue while timers are gated.
+Deferred timers are excluded from `nextTimeout` so an overdue timer cannot
+spin the poll loop. `settle` and `nextTimeout` accept the same gate; defaults
+allow every timer and preserve existing callers. Gates should inspect cached
+state and never wait on network I/O.
