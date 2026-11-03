@@ -758,9 +758,12 @@
           return;
         }
       }
+      // This local limit is safe to explain; remote failures remain generic.
+      if (!boot.wasm && files.some(file => file.size > 16777216)) {
+        send({t: 'pick-error', id: message.id, error: 'File exceeds the 16 MiB upload limit'});
+        return;
+      }
       try {
-        // Live sessions accept one file per HTTP request, at most 16 MiB.
-        if (!boot.wasm && files.some(file => file.size > 16777216)) throw new Error('File exceeds the 16 MiB upload limit');
         let picked = '';
         for (let i = 0; i < files.length; i++) {
           const response = await upload(`id=${message.id}&kind=files&picked=${encodeURIComponent(picked)}`, files[i], {
