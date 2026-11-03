@@ -1,0 +1,67 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_checkpoint.ab"
+
+class CheckpointApp(var label: string, var draft: string, var hits: int = 0) : OneApp {
+    fun render(var ui: Ui): Node = column(style(), [
+        button(ui, label, "", ui.press { hits = hits + 1 }, style()),
+        input(draft, "Memo", ui.change { value -> draft = value }, style()).keyed("memo")
+    ])
+    fun receive(kind: string, value: string): void { return }
+}
+
+fun replace(value: Json, key: string, next: Json): Json {
+    val keys: array<string> = []
+    val values: array<Json> = []
+    for (name in value.keys) { keys.append(name); values.append(if (name == key) next else value.get(name)) }
+    jsonObject(keys, values)
+}
+
+fun main: int {
+    val aQueue = oneLiveQueue()
+    aQueue.browser = true
+    aQueue.routes.start("/draft?q=a%C3%A7%C3%A3o")
+    aQueue.storage.set("test-session", "old-credential")
+    aQueue.nextId = 41
+    val aApp = CheckpointApp("Submit invoice", "ação 📝")
+    var a = oneSession("node-a", aApp, aQueue)
+    a.eventFrontier = 7
+    a.render(oneDefaultTheme(), "/icons")
+    val encoded = oneCheckpoint(a, jsonObject(["text"], [jsonString(aApp.draft)]))
+    val saved = oneCheckpointRead(encoded)
+    expect(saved != null, "bounded checkpoint round-trips a Unicode draft and transport state")
+    if (saved == null) return testsPassed()
+    expectEqual(saved.get("app").get("text").asString(), "ação 📝", "draft is data, not markup or a callback")
+    expectEqual(saved.get("route").asString(), "/draft?q=a%C3%A7%C3%A3o", "route query survives recovery")
+    val bQueue = oneLiveQueue()
+    oneCheckpointSeed(bQueue, saved)
+    expect(bQueue.nextId == 41 && bQueue.storage.get("test-session") == "old-credential", "factory receives durable secure storage and noncolliding request ids")
+    // Hydration can rotate credentials. Restoring UI/event metadata must never
+    // put the old credential back afterwards.
+    bQueue.storage.set("test-session", "fresh-credential")
+    val bApp = CheckpointApp("Delete customer", saved.get("app").get("text").asString())
+    var b = oneSession("node-b", bApp, bQueue)
+    oneCheckpointRestore(b, saved)
+    expect(b.eventFrontier == 7 && b.durableFrontier == 7 && b.deferEventAck, "recovery starts from the durable event frontier")
+    expect(bQueue.storage.get("test-session") == "fresh-credential", "authorization hydration wins over old checkpoint credentials")
+    expect(b.changed && b.htmlSent == "" && b.cssSent == 0, "restored session sends a full fresh authorized render")
+    b.render(oneDefaultTheme(), "/icons")
+    expectEqual(oneEventLanding(b.maps, 1, 1, false), 0, "an old submit press cannot become a new destructive action at the same position")
+    expectEqual(bApp.hits, 0, "restoring metadata never executes an old handler")
+
+    expect(oneCheckpointRead("{") == null, "malformed JSON is refused")
+    expect(oneCheckpointRead(jsonStringify(replace(saved, "v", jsonInteger(2)))) == null, "incompatible snapshot versions are refused")
+    expect(oneCheckpointRead(jsonStringify(replace(saved, "frontier", jsonString("7")))) == null, "frontier strings are not coerced")
+    expect(oneCheckpointRead(jsonStringify(replace(saved, "revision", jsonNumberText("1.5")))) == null, "fractional revisions are refused")
+    expect(oneCheckpointRead(jsonStringify(replace(saved, "route", jsonString("//foreign.test/path")))) == null, "external route targets are refused")
+    expect(oneCheckpointRead(jsonStringify(replace(saved, "app", jsonArray([])))) == null, "application checkpoint must be an object")
+    expect(oneCheckpointRead(jsonStringify(replace(saved, "storage", jsonObject(["token"], [jsonInteger(1)])))) == null, "stored values retain exact string types")
+    expect(oneCheckpointRead(jsonStringify(replace(saved, "width", jsonInteger(1000000)))) == null, "corrupt viewport sizes are bounded")
+    val tooMany: array<Json> = []
+    for (map in saved.get("maps").values) { var i = 0; while (i < 9) { tooMany.append(map); i = i + 1 } }
+    expect(oneCheckpointRead(jsonStringify(replace(saved, "maps", jsonArray(tooMany)))) == null, "event history remains bounded at eight revisions")
+    var huge = "x"
+    while (huge.size <= oneRecoveryCheckpointLimit) huge = "$huge$huge"
+    expect(oneCheckpointRead(huge) == null, "oversized data is rejected before parsing")
+    testsPassed()
+}

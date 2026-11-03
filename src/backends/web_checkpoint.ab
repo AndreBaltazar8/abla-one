@@ -1,0 +1,120 @@
+import "web_session.ab"
+import "web_recovery.ab"
+
+// Checkpoints contain data, never app instances or event closures. Factories
+// rehydrate authorization and render new handlers before old controls can replay.
+fun oneCheckpointInt(value: Json): bool = value.isNumber() && value.asNumber().integer && value.intAvailable()
+fun oneCheckpointCounter(value: Json): bool = oneCheckpointInt(value) && value.asInt() >= 0 && value.asInt() <= 9007199254740991
+fun oneCheckpointRoute(path: string): bool = path.size > 0 && path.size <= 2048 && path[0] == 47 && !path.startsWith("//") && !path.contains("\r") && !path.contains("\n")
+
+fun oneCheckpointMap(map: OneEventMap): Json {
+    val events: array<Json> = []
+    for (id in map.byId.keys()) {
+        val place = map.byId.get(id) ?? ""
+        events.append(jsonObject(["id", "place", "says", "field"], [jsonInteger(id), jsonString(place), jsonString(map.says.get(place) ?? ""), jsonString(map.fieldOf.get(id) ?? "")]))
+    }
+    jsonObject(["screen", "events"], [jsonInteger(map.screen), jsonArray(events)])
+}
+
+fun oneCheckpointStringMap(map: Map<string, string>): Json {
+    val keys: array<string> = []
+    val values: array<Json> = []
+    for (key in map.keys()) {
+        keys.append(key)
+        values.append(jsonString(map.get(key) ?? ""))
+    }
+    jsonObject(keys, values)
+}
+
+fun oneCheckpoint(session: OneLiveSession, draft: Json): string {
+    val maps: array<Json> = []
+    for (map in session.maps) maps.append(oneCheckpointMap(map))
+    jsonStringify(jsonObject(
+        ["v", "app", "route", "entry", "epoch", "revision", "nextId", "storage", "maps", "fenceFrom", "frontier", "shown", "width", "height", "canvas"],
+        [jsonInteger(1), draft, jsonString(session.queue.routes.current()), jsonInteger(session.queue.routes.entry()), jsonInteger(session.queue.routes.epoch), jsonInteger(session.revision), jsonInteger(session.queue.nextId), oneCheckpointStringMap(session.queue.storage), jsonArray(maps), jsonInteger(session.fence.from), jsonInteger(session.eventFrontier), jsonInteger(session.shown), jsonInteger(session.width), jsonInteger(session.height), jsonBoolean(session.canvas)]))
+}
+
+fun oneCheckpointStringObject(value: Json): bool {
+    if (!value.isObject() || value.keys.size > 128) return false
+    for (key in value.keys) if (key.size > 256 || !value.get(key).isString()) return false
+    true
+}
+
+fun oneCheckpointValid(value: Json): bool {
+    if (!value.isObject() || !oneCheckpointInt(value.get("v")) || value.get("v").asInt() != 1 || !value.get("app").isObject()) return false
+    if (!value.get("route").isString() || !oneCheckpointRoute(value.get("route").asString()) || !oneCheckpointStringObject(value.get("storage"))) return false
+    for (key in ["entry", "epoch", "revision", "nextId", "fenceFrom", "frontier", "width", "height"]) if (!oneCheckpointCounter(value.get(key))) return false
+    if (!oneCheckpointInt(value.get("shown")) || !value.get("canvas").isBoolean()) return false
+    if (value.get("width").asInt() > 65536 || value.get("height").asInt() > 65536 || value.get("fenceFrom").asInt() > value.get("revision").asInt()) return false
+    val maps = value.get("maps")
+    if (!maps.isArray() || maps.values.size > 8 || maps.values.size > value.get("revision").asInt()) return false
+    for (map in maps.values) {
+        if (!map.isObject() || !oneCheckpointInt(map.get("screen")) || !map.get("events").isArray() || map.get("events").values.size > 4096) return false
+        val ids: Map<int, bool> = Map()
+        val places: Map<string, bool> = Map()
+        for (event in map.get("events").values) {
+            if (!event.isObject() || !oneCheckpointCounter(event.get("id")) || event.get("id").asInt() == 0) return false
+            for (key in ["place", "says", "field"]) if (!event.get(key).isString() || event.get(key).asString().size > 8192) return false
+            val id = event.get("id").asInt()
+            val place = event.get("place").asString()
+            if (place == "" || ids.has(id) || places.has(place)) return false
+            ids.set(id, true)
+            places.set(place, true)
+        }
+    }
+    true
+}
+
+fun oneCheckpointRead(text: string): Json? {
+    if (text.size > oneRecoveryCheckpointLimit) return null
+    val parsed = jsonParse(text)
+    if (!parsed.succeeded || !oneCheckpointValid(parsed.value)) return null
+    parsed.value
+}
+
+// Before the new factory runs, secureRead sees the durable server-only values;
+// it can refresh tokens and obtain current permissions through its usual start.
+fun oneCheckpointSeed(var queue: OneLiveQueue, value: Json): void {
+    val stored = value.get("storage")
+    for (key in stored.keys) queue.storage.set(key, stored.get(key).asString())
+    queue.nextId = value.get("nextId").asInt()
+    queue.browser = true
+    queue.routes.start(value.get("route").asString())
+    queue.routes.adopt(value.get("entry").asInt())
+    return
+}
+
+// Apply transport metadata after the fresh app has hydrated and accepted its
+// whitelisted draft. Do not overwrite credentials changed during hydration.
+fun oneCheckpointRestore(var session: OneLiveSession, value: Json): void {
+    session.maps.clear()
+    for (saved in value.get("maps").values) {
+        val map = OneEventMap(Map(), Map(), Map(), Map(), Map(), saved.get("screen").asInt())
+        for (event in saved.get("events").values) {
+            val id = event.get("id").asInt()
+            val place = event.get("place").asString()
+            val field = event.get("field").asString()
+            map.byId.set(id, place)
+            map.byPlace.set(place, id)
+            map.says.set(place, event.get("says").asString())
+            if (field != "") { map.fieldIds.set(field, id); map.fieldOf.set(id, field) }
+        }
+        session.maps.append(map)
+    }
+    session.revision = value.get("revision").asInt()
+    session.queue.routes.epoch = value.get("epoch").asInt()
+    session.fence.epoch = session.queue.routes.epoch
+    session.fence.from = value.get("fenceFrom").asInt()
+    session.eventFrontier = value.get("frontier").asInt()
+    session.durableFrontier = session.eventFrontier
+    session.eventAckSent = -1
+    session.deferEventAck = true
+    session.shown = value.get("shown").asInt()
+    session.width = value.get("width").asInt()
+    session.height = value.get("height").asInt()
+    session.canvas = value.get("canvas").asBoolean()
+    session.cssSent = 0
+    session.htmlSent = ""
+    session.changed = true
+    return
+}

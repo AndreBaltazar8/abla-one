@@ -1,0 +1,92 @@
+import "abla/http"
+import "abla/json"
+import "web_recovery.ab"
+
+// Adapters distinguish unavailable (503), absent/expired (404), unauthorized
+// (403) and fenced/version-conflicting (409). No failure is a fresh session.
+class OneRecoveryResult(val status: int, val epoch: int = 0, val version: int = 0, val payload: string = "")
+class OneRecoveryCompletion(val id: string, val payload: string)
+class OneRecoveryInbox(val status: int, val items: array<OneRecoveryCompletion> = [])
+
+// The SDK never picks a database, key or bucket. Applications supply bounded
+// authenticated persistence and off-path blob IO. The save CAS must atomically
+// consume only the inbox IDs represented by its checkpoint. Reads leave inbox
+// rows available until that CAS, so death between delivery and save loses none.
+class OneLiveRecoveryStore(
+    val enabled: bool,
+    val create: (HttpRequest, string, string, string, string) -> OneRecoveryResult,
+    val attach: (HttpRequest, string, string, string) -> OneRecoveryResult,
+    val inspect: (HttpRequest, string, string) -> OneRecoveryResult,
+    val save: (string, string, int, int, string, array<string>) -> OneRecoveryResult,
+    val fence: (string, string, int) -> int,
+    val end: (string, string, int) -> int,
+    val inbox: (string, string, int) -> OneRecoveryInbox,
+    // Claims an upload's HTTP ticket; the application answers it from its
+    // off-path worker. False rejects it with503, never a node-local fallback.
+    val upload: (HttpRequest, int) -> bool,
+    // Accepted jobs complete through inbox, not by blocking the live loop on
+    // object storage. Handles are scoped to session and fenced owner epoch.
+    val readFile: (string, string, int, int, string, int, int) -> int,
+    val deleteFile: (string, string, int, int, string) -> int
+)
+
+fun oneLiveNoRecovery(): OneLiveRecoveryStore = OneLiveRecoveryStore(false,
+    { request, id, proof, owner, body -> OneRecoveryResult(503) },
+    { request, id, proof, owner -> OneRecoveryResult(503) },
+    { request, id, proof -> OneRecoveryResult(503) },
+    { id, owner, epoch, version, body, consumed -> OneRecoveryResult(503) },
+    { id, owner, epoch -> 503 }, { id, owner, epoch -> 503 },
+    { id, owner, epoch -> OneRecoveryInbox(503) },
+    { request, ticket -> false },
+    { id, owner, epoch, request, handle, offset, length -> 503 },
+    { id, owner, epoch, request, handle -> 503 })
+
+class OneRecoveryState(
+    val id: string,
+    val proof: string,
+    val owner: string,
+    val store: OneLiveRecoveryStore,
+    var epoch: int = 0,
+    var version: int = 0,
+    val batch: OneRecoveryBatch = OneRecoveryBatch(),
+    var draft: Json = jsonNull(),
+    var captured: bool = false,
+    var restored: bool = false,
+    var ready: bool = false,
+    var checkedAt: int = -1000,
+    var status: int = 200,
+    val consumed: array<string> = []
+)
+
+val oneRecoverySessions: Map<string, OneRecoveryState> = Map()
+
+fun oneRecoveryCapture(id: string, text: string): bool {
+    val state = oneRecoverySessions.get(id)
+    if (state == null || text.size > oneRecoveryCheckpointLimit) return false
+    val parsed = jsonParse(text)
+    if (!parsed.succeeded || !parsed.value.isObject()) return false
+    state.draft = parsed.value
+    state.captured = true
+    true
+}
+
+fun oneRecoveryReady(id: string): bool {
+    val state = oneRecoverySessions.get(id)
+    if (state == null || !state.restored) return false
+    state.ready = true
+    true
+}
+
+fun oneRecoveryFileRead(id: string, request: int, handle: string, offset: int, length: int): int {
+    val state = oneRecoverySessions.get(id)
+    if (state == null || state.status != 200) return 503
+    val read = state.store.readFile
+    read(id, state.owner, state.epoch, request, handle, offset, length)
+}
+
+fun oneRecoveryFileDelete(id: string, request: int, handle: string): int {
+    val state = oneRecoverySessions.get(id)
+    if (state == null || state.status != 200) return 503
+    val remove = state.store.deleteFile
+    remove(id, state.owner, state.epoch, request, handle)
+}
