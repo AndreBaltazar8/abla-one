@@ -1,0 +1,46 @@
+import "abla/http"
+import "abla/net"
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+
+val observed: array<string> = []
+val hooks: array<int> = []
+
+class TimerProbe(var current: string = "old") : OneApp {
+    fun render(var ui: Ui): Node = text("probe", style())
+    fun receive(kind: string, payload: string): void {
+        if (kind == "push") current = payload
+        if (kind == "result") observed.append(current)
+        return
+    }
+}
+
+fun probeApp(request: HttpRequest, id: string): OneApp = TimerProbe()
+
+fun main: int {
+    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", 0),
+        { request -> httpText("ok") }, oneLivePaths(["/page"]),
+        probeApp, oneDefaultTheme(),
+        OneLiveOptions("probe", "en", "#fff", "/i", "src/backends/web/host.js", ""))
+    expect(server.listening(), "the server owns an assigned port")
+    server.page(httpRequest("GET", "/page", "", [HttpHeader("Cookie", "one_width=1200")]))
+    expectEqual(server.sessions.size, 1, "a real live session exists")
+    server.sessions[0].queue.subscribe("probe")
+    server.sessions[0].queue.schedule(OneLiveTimer(1, 0))
+    server.step()
+    expectEqual(observed[0], "old", "default step keeps its original behavior")
+
+    server.sessions[0].queue.schedule(OneLiveTimer(2, 0))
+    server.step({ sessions ->
+        hooks.append(1)
+        [OneLivePush("probe", "fresh")]
+    })
+    expectEqual(hooks.size, 1, "the hook runs once after IO")
+    expectEqual(observed[1], "fresh", "a due timer observes the hook's update")
+    server.sessions[0].queue.schedule(OneLiveTimer(3, 0))
+    server.step()
+    expectEqual(hooks.size, 1, "a later default step does not retain the hook")
+    expectEqual(observed[2], "fresh", "the session retains its updated state")
+    testsPassed()
+}
