@@ -17,6 +17,7 @@ let socketNode = 'b';
 let pageNode = 'a';
 let proofs = 0;
 let browser;
+const trace=[];
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const wait = async (test, label, milliseconds = 15000) => {
   const deadline = Date.now() + milliseconds;
@@ -82,6 +83,15 @@ try {
   const context = await browser.newContext({viewport: {width: 1280, height: 900}, extraHTTPHeaders: {'X-Test-User': 'alice'}});
   await context.addCookies([{name: 'test-user', value: 'alice', url: base}]);
   const page = await context.newPage();
+  page.on('websocket', socket => {
+    for (const direction of ['framereceived','framesent']) socket.on(direction, ({payload}) => {
+      try {
+        const v=JSON.parse(String(payload));
+        trace.push({direction,t:v.t,r:v.r,a:v.a,c:v.c,ack:v.ack,n:v.n,id:v.id,at:v.at,p:v.p,nav:v.nav,effect:v.message?.t});
+        if(trace.length>4096) trace.shift();
+      } catch {}
+    });
+  });
   let navigations = 0;
   page.on('request', request => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) navigations++; });
   page.on('pageerror', error => console.error('browser error:', error.message));
@@ -148,18 +158,25 @@ try {
   check(requests.some(request => request.url.startsWith('/one/cookies') && request.port === nodes.get('b').port), 'cookie request reaches a node without the attached app');
 
   fs.writeFileSync(path.join(directory, 'hold-reads'), '1');
+  await fetch(`http://127.0.0.1:${nodes.get('a').port}/arm-effect-kill`, {headers: {'X-Test-User': 'alice'}});
+  socketNode = 'b';
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', {name: 'Pick file', exact: true}).click();
-  await (await chooser).setFiles({name: 'ação.txt', mimeType: 'text/plain', buffer: Buffer.from('shared opaque bytes ç')});
+  const recoveredChooser = await chooser;
+  await wait(() => !alive(nodes.get('a')), 'owner exits after checkpoint commit and before picker delivery');
+  check(checkpoint().effects.some(effect => JSON.parse(effect.message).t === 'pick'), 'a committed picker effect survives owner death before browser delivery');
+  await start('a');
+  const uploadNode = nodes.get('a').port;
+  await recoveredChooser.setFiles({name: 'ação.txt', mimeType: 'text/plain', buffer: Buffer.from('shared opaque bytes ç')});
   await wait(() => checkpoint().files?.length === 1 && checkpoint().app.reading > 0, 'pending file read descriptor is durable before owner loss');
-  socketNode = 'b';
-  await kill(nodes.get('a'));
+  socketNode = 'a';
+  await kill(nodes.get('b'));
   fs.unlinkSync(path.join(directory, 'hold-reads'));
   await page.getByText('Read bytes: shared opaque bytes ç', {exact: true}).waitFor();
   check(checkpoint().app.reading === 0 && checkpoint().files.length === 0, 'pending file read is resubmitted on the next owner and consumed with its checkpoint');
-  check(requests.some(request => request.url.startsWith('/one/upload') && request.port === nodes.get('b').port), 'upload completes on a different node and attached owner reads its opaque handle');
+  check(requests.some(request => request.url.startsWith('/one/upload') && request.port === uploadNode), 'upload completes on a different node and attached owner reads its opaque handle');
   check(navigations === 1, 'cookie and upload recovery keep the document alive');
-  await start('a');
+  await start('b');
 
   pageNode = 'b'; socketNode = 'b';
   await page.reload();
@@ -170,6 +187,13 @@ try {
   await page.waitForURL(`${base}/recovery`);
   await stored('after reload');
   check(checkpoint().typed > 250, 'fresh page counters resume above saved typing and held submit is released');
+  await page.getByRole('button', {name: 'Back', exact: true}).click();
+  await page.waitForURL(`${base}/recovery/other`);
+  check(await page.getByRole('textbox').inputValue() === 'after reload', 'durable navigation effects preserve draft and browser history');
+  await page.locator('[data-one="view-title"]').filter({hasText: 'Other view'}).waitFor();
+  await page.getByRole('button', {name: 'Edit view', exact: true}).click();
+  await page.waitForURL(`${base}/recovery`);
+  check(await page.evaluate(() => !Object.values(sessionStorage).some(value => value.includes('after reload') || value.includes('ação 📝'))), 'browser persistence contains opaque delivery IDs and no draft payload');
 
   fs.writeFileSync(path.join(directory, 'unavailable'), '1');
   await page.getByRole('textbox').fill('unacked during outage');
@@ -250,6 +274,7 @@ try {
   await rawContext.close();
   console.log(`PASS recovery: ${proofs} checks`);
 } finally {
+  fs.writeFileSync(path.join(directory,'transport.json'),JSON.stringify(trace));
   if (browser) await browser.close();
   for (const socket of sockets) socket.destroy();
   await new Promise(resolve => proxy.close(resolve));

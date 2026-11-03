@@ -4,10 +4,11 @@ import "../../src/one_kit.ab"
 
 class RecoveryProof(val services: OneServices, var draft: string = "", var view: string = "/recovery", var picker: int = 0, var reading: int = 0, var file: OneFile = OneFile("", "", 0, ""), var content: string = "", var mutation: int = 0, var count: int = 0, var awaitingReady: bool = false) : OneApp {
     fun render(var ui: Ui): Node = column(style().padding(20).gap(12), [
-        text(if (view == "/recovery/other") "Other view" else "Draft view", style()),
+        text(if (view == "/recovery/other") "Other view" else "Draft view", style()).keyed("view-title"),
         input(draft, "Draft text", ui.change { value -> draft = value }, style()).keyed("draft-text").set("label", "Draft text"),
         button(ui, "Other view", "", ui.press { services.navigate("/recovery/other") }, style()),
         button(ui, "Edit view", "", ui.press { services.navigate("/recovery") }, style()),
+        button(ui, "Back", "", ui.press { services.back("/recovery") }, style()),
         button(ui, "Store cookie", "", ui.press { services.secureWrite("test-cookie", jsonString("cookie-value")); return }, style()),
         button(ui, "Pick file", "", ui.press { picker = services.pickFiles(["text/plain"], false) }, style()),
         text("Picked file: ${file.name}", style()).keyed("picked-file"),
@@ -54,6 +55,7 @@ var proofKillAfterMutation = false
 fun proofHandler(request: HttpRequest): HttpResponse {
     if (request.path == "/health") return httpText("ok")
     if (request.path == "/arm-kill" && proofUser(request) == "alice") { proofKillAfterMutation = true; return httpText("armed") }
+    if (request.path == "/arm-effect-kill" && proofUser(request) == "alice") { proofKillAfterEffect = true; return httpText("armed") }
     if (request.path != "/mutation" || request.method != "POST") return httpText("not found", 404)
     val operation = request.header("x-one-live-operation")
     if (operation == "" || operation.size > 512) return httpText("operation required", 400)

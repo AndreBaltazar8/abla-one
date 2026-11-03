@@ -407,7 +407,7 @@ fun OneLiveServer.httpWithPeer(slot: int): void {
         val id = request.queryParameter("s")
         if (recovery.enabled) {
             if (!oneRecoveryIdentifier(id)) { queue(slot, httpText("Invalid session", 400).render()); slots[slot].closing = true; return }
-            slots[slot].recoveryRequest = request
+            slots[slot].recoveryRequest = oneRecoveryAttachRequest(request)
             slots[slot].awaitingRecovery = true
             slots[slot].recoveryStarted = oneLiveNow()
             slots[slot].upgraded = true
@@ -694,8 +694,18 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     if (persisted != null) {
         val kind = m.getString("t")
         if (!persisted.ready && kind != "hello" && kind != "viewport") return
+        if (kind == "effect-ack") {
+            val id = m.getString("id")
+            val existing = persisted.effects.get(id)
+            if (existing != null && jsonParse(existing).value.getString("t") != "pick") {
+                oneRecoveryEffectForget(persisted,id)
+                persisted.batch.changed()
+            }
+            return
+        }
         if (kind != "hello" && kind != "event" && kind != "route" && kind != "viewport" && kind != "scroll" && kind != "pick-error") return
         if (kind == "event" && (!m.has("n") || !m.has("u"))) return
+        if (kind == "pick-error" && oneCheckpointCounter(m.get("id"))) oneRecoveryPickerEnd(persisted,m.getInt("id"))
     }
     sessions[index].lastSeen = oneLiveNow()
     oneSessionMessage(sessions[index], theme, m)

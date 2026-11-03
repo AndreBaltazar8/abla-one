@@ -69,6 +69,8 @@ class OneRecoveryState(
     var active: bool = true,
     val pickers: Map<int, string> = Map(),
     val files: Map<int, OneRecoveryFileJob> = Map(),
+    val effects: Map<string, string> = Map(),
+    val effectOrder: array<string> = [],
     var prepared: OneRecoveryWrite? = null,
     var activitySerial: int = 0,
     var committedActivity: int = -1,
@@ -128,4 +130,22 @@ fun oneRecoveryPickerBegin(id: string, request: int, kind: string): bool {
     state.pickers.set(request, kind)
     state.batch.changed(true)
     true
+}
+
+fun oneRecoveryPickerEnd(var state: OneRecoveryState, request: int): void {
+    state.pickers.remove(request)
+    for (id in state.effects.keys()) {
+        val effect = jsonParse(state.effects.get(id) ?? "")
+        if (effect.succeeded && effect.value.getString("t") == "pick" && effect.value.getInt("id") == request) oneRecoveryEffectForget(state,id)
+    }
+    return
+}
+
+fun oneRecoveryEffectForget(var state: OneRecoveryState, id: string): void {
+    state.effects.remove(id)
+    val kept: array<string> = []
+    for (existing in state.effectOrder) if (state.effects.has(existing)) kept.append(existing)
+    state.effectOrder.clear()
+    for (existing in kept) state.effectOrder.append(existing)
+    return
 }

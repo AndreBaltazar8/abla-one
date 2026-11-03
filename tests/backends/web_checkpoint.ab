@@ -1,6 +1,7 @@
 import "abla/test"
 import "../../src/one_kit.ab"
 import "../../src/backends/web_checkpoint.ab"
+import "../../src/backends/web_recovery_live.ab"
 
 class CheckpointApp(var label: string, var draft: string, var hits: int = 0) : OneApp {
     fun render(var ui: Ui): Node = column(style(), [
@@ -31,6 +32,9 @@ fun main: int {
     val aState = OneRecoveryState("node-a", "test-proof", "test-owner", oneLiveNoRecovery())
     aState.pickers.set(40, "files")
     aState.files.set(39, OneRecoveryFileJob(39, "opaque-handle", 100, 262144, false, true))
+    val effectId="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    aState.effects.set(effectId,"{\"t\":\"back\",\"to\":\"/draft\"}")
+    aState.effectOrder.append(effectId)
     oneRecoverySessions.set("node-a", aState)
     aQueue.eventContext = "opaque-operation"
     aQueue.eventOrdinal = 1
@@ -59,6 +63,11 @@ fun main: int {
     expect(bState.pickers.get(40) == "files", "pending picker metadata survives owner loss")
     val fileJob = bState.files.get(39)
     expect(fileJob != null && fileJob.handle == "opaque-handle" && fileJob.offset == 100 && fileJob.length == 262144 && !fileJob.admitted, "file job descriptors survive owner loss and require idempotent readmission")
+    expect(bState.effects.get(effectId)=="{\"t\":\"back\",\"to\":\"/draft\"}" && bState.effectOrder.size==1,"committed browser effects survive owner loss in their original order")
+    val effect=saved.get("effects").values[0]
+    expect(oneCheckpointRead(jsonStringify(replace(saved,"effects",jsonArray([effect,effect]))))==null,"duplicate effect IDs are rejected before restore")
+    expect(!oneCheckpointEffect("{\"t\":\"fetch\",\"request\":{}}") && !oneCheckpointEffect("{\"t\":\"forward\",\"secret\":\"unexpected\"}"),"raw HTTP requests and unknown effect fields never enter the durable UI outbox")
+    expect(!oneCheckpointEffect("{\"t\":\"back\",\"to\":\"//foreign.test\"}"),"durable browser back effects cannot introduce an external target")
     val badJob = jsonObject(["id", "handle", "offset", "length", "delete"], [jsonInteger(39), jsonString("opaque-handle"), jsonInteger(0), jsonInteger(262145), jsonBoolean(false)])
     expect(oneCheckpointRead(jsonStringify(replace(saved, "files", jsonArray([badJob])))) == null, "restored file reads cannot bypass the chunk bound")
     expect(bQueue.eventContext == "opaque-operation" && bQueue.requestContexts.get(40) == "opaque-operation/r1", "opaque pending-operation ancestry survives without raw HTTP requests")
@@ -86,6 +95,11 @@ fun main: int {
     expect(oneRecoveryPickerBegin("node-b", 41, "files") && oneRecoveryPickerBegin("node-b", 42, "profile") && oneRecoveryPickerBegin("node-b", 43, "emoji"), "four pending pickers can coexist")
     expect(!oneRecoveryPickerBegin("node-b", 44, "files"), "a fifth picker is refused before exposing another browser dialog")
     expect(oneRecoveryPickerBegin("node-b", 40, "files") && bState.pickers.keys().size == 4, "registering an existing picker does not consume capacity twice")
+    val original=httpRequest("GET","/one/live?s=synthetic","",[HttpHeader("X-One-Recovery-Claim","attacker"),HttpHeader("Cookie","test=1")])
+    val firstClaim=oneRecoveryAttachRequest(original)
+    val secondClaim=oneRecoveryAttachRequest(original)
+    expect(firstClaim.header("x-one-recovery-claim").size==32 && oneRecoveryIdentifier(firstClaim.header("x-one-recovery-claim")) && firstClaim.header("x-one-recovery-claim")!=secondClaim.header("x-one-recovery-claim"),"every accepted socket gets a fresh server-generated attach identity")
+    expect(firstClaim.headers.size==2 && firstClaim.header("cookie")=="test=1","an app-supplied attach header is stripped while the actual browser identity is retained")
     oneRecoverySessions.remove("node-a")
     oneRecoverySessions.remove("node-b")
     testsPassed()

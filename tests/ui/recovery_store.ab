@@ -79,6 +79,7 @@ fun proofAttach(request: HttpRequest, id: string, proof: string, owner: string):
     if (ok) proofResult(next) else OneRecoveryResult(503)
 }
 val proofPendingSaves: Map<string, int> = Map()
+var proofKillAfterEffect = false
 fun proofSave(id: string, owner: string, epoch: int, version: int, payload: string, active: bool, consumed: array<string>): OneRecoveryResult {
     val delay = oneParseInt(processEnvironmentOr("ONE_RECOVERY_TEST_ASYNC_MS", "0"), 0)
     if (delay > 0) {
@@ -103,6 +104,7 @@ fun proofSave(id: string, owner: string, epoch: int, version: int, payload: stri
     if (active) next = proofWith(next, "expires", jsonInteger(proofNow() + oneRecoveryIdleMilliseconds))
     val ok = proofWrite(id, next)
     proofRelease(lock)
+    if (ok && proofKillAfterEffect && jsonParse(payload).value.get("pickers").values.size > 0) exit(18)
     if (ok) proofResult(next) else OneRecoveryResult(503)
 }
 fun proofFence(id: string, owner: string, epoch: int): int {

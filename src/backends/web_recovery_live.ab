@@ -8,6 +8,15 @@ fun oneRecoveryIdentifier(value: string): bool {
     true
 }
 
+// A fresh server-generated claim distinguishes new sockets from retries of
+// one pending attach, including clients that reuse a Sec-WebSocket-Key.
+fun oneRecoveryAttachRequest(request: HttpRequest): HttpRequest {
+    val headers: array<HttpHeader> = []
+    for (header in request.headers) if (header.name.lowercase() != "x-one-recovery-claim") headers.append(header)
+    headers.append(HttpHeader("X-One-Recovery-Claim",oneLiveSessionId()))
+    HttpRequest(request.method,request.path,request.query,headers,request.body,request.parameterNames,request.parameterValues)
+}
+
 fun OneLiveServer.recoveryCapture(index: int): string? {
     val state = oneRecoverySessions.get(sessions[index].id)
     if (state == null) return null
@@ -130,6 +139,7 @@ fun OneLiveServer.recoveryOpen(request: HttpRequest, id: string, proof: string, 
     recoveryForgetLocal(id, currentSlot)
     val state = OneRecoveryState(id, proof, recoveryOwner, recovery, loaded.epoch, loaded.version)
     state.restored = true
+    state.draft = saved.get("app")
     state.checkedAt = oneLiveNow()
     oneRecoverySessions.set(id, state)
     val queueIndex = oneLiveQueueIndex(id)
@@ -154,14 +164,16 @@ fun OneLiveServer.recoveryCookies(request: HttpRequest): HttpResponse {
     val loaded = recovery.inspect(request, id, proof)
     if (loaded.status == 202) return oneRecoveryPendingResponse("cookies", id)
     if (loaded.status != 200) return httpText("Session unavailable", loaded.status)
+    val headers: array<HttpHeader> = [HttpHeader("Cache-Control", "no-store")]
+    if (loaded.cookiesReady) {
+        for (cookie in loaded.cookies) headers.append(HttpHeader("Set-Cookie", cookie))
+        return HttpResponse(204,headers,"")
+    }
     val saved = oneCheckpointRead(loaded.payload)
     if (saved == null) return httpText("Session unavailable", 503)
     val stored: Map<string, string> = Map()
     for (key in saved.get("storage").keys) stored.set(key, saved.get("storage").get(key).asString())
-    val headers: array<HttpHeader> = [HttpHeader("Cache-Control", "no-store")]
-    if (loaded.cookiesReady) {
-        for (cookie in loaded.cookies) headers.append(HttpHeader("Set-Cookie", cookie))
-    } else for (key in stored.keys()) for (cookie in storage.cookies(request, key, stored.get(key) ?? "")) headers.append(HttpHeader("Set-Cookie", cookie))
+    for (key in stored.keys()) for (cookie in storage.cookies(request, key, stored.get(key) ?? "")) headers.append(HttpHeader("Set-Cookie", cookie))
     HttpResponse(204, headers, "")
 }
 
@@ -215,7 +227,7 @@ fun OneLiveServer.recoverySettle(index: int): void {
             state.consumed.append(item.id)
             val response = oneResponse(item.payload)
             if (!response.valid) { state.status = 503; return }
-            state.pickers.remove(response.requestId)
+            oneRecoveryPickerEnd(state,response.requestId)
             state.files.remove(response.requestId)
             sessions[index].queue.complete(item.payload)
         }
@@ -229,6 +241,7 @@ fun OneLiveServer.recoverySettle(index: int): void {
     else if (sessions[index].changed && !state.batch.pending) state.batch.changed()
     val now = oneLiveNow()
     if (!state.batch.due(now)) return
+    if (!recoveryEffects(index)) { state.batch.failed(now); return }
     val previous = sessions[index].durableFrontier
     val routeAnswer = sessions[index].routeAnswer
     val changeAnswer = sessions[index].changeAnswer
@@ -248,7 +261,11 @@ fun OneLiveServer.recoverySettle(index: int): void {
         return
     }
     sessions[index].durableFrontier = previous
-    val outgoing = sessions[index].queue.takeOutbox()
+    val outgoing: array<string> = []
+    for (id in state.effectOrder) {
+        val effect = state.effects.get(id)
+        if (effect != null) outgoing.append(jsonStringify(jsonObject(["t","id","message"],[jsonString("effect"),jsonString(id),jsonParse(effect).value])))
+    }
     val cookies = sessions[index].queue.cookiesChanged
     sessions[index].queue.cookiesChanged = false
     val consumed: array<string> = []
@@ -256,6 +273,25 @@ fun OneLiveServer.recoverySettle(index: int): void {
     state.prepared = OneRecoveryWrite(state.batch.changes, sessions[index].eventFrontier, body, message, outgoing, cookies, consumed, state.activitySerial, state.activitySerial != state.committedActivity)
     recoveryFinishWrite(index)
     return
+}
+
+fun OneLiveServer.recoveryEffects(index: int): bool {
+    val state = oneRecoverySessions.get(sessions[index].id)
+    if (state == null) return false
+    if (state.effects.keys().size + sessions[index].queue.outbox.size > 32) return false
+    var bytes = 0
+    for (id in state.effectOrder) bytes = bytes + (state.effects.get(id) ?? "").size
+    for (message in sessions[index].queue.outbox) {
+        if (!oneCheckpointEffect(message)) return false
+        bytes = bytes + message.size
+    }
+    if (bytes > 65536) return false
+    for (message in sessions[index].queue.takeOutbox()) {
+        val id = oneLiveSessionId()
+        state.effects.set(id,message)
+        state.effectOrder.append(id)
+    }
+    true
 }
 
 fun OneLiveServer.recoveryFinishWrite(index: int): void {
@@ -286,9 +322,11 @@ fun OneLiveServer.recoveryFinishWrite(index: int): void {
     state.batch.saved(prepared.generation, oneLiveNow())
     sessions[index].durableFrontier = prepared.frontier
     val slot = sessions[index].slot
-    for (outgoing in prepared.outbox) queue(slot, webSocketEncodeFrame(outgoing, 1))
-    if (prepared.cookies) queue(slot, webSocketEncodeFrame("{\"t\":\"cookies\"}", 1))
+    // Paint/ack the committed route before invoking browser history controls;
+    // an older patch must not replace the URL after back/forward has run.
     if (prepared.patch != "") queue(slot, webSocketEncodeFrame(prepared.patch, 1))
+    if (prepared.cookies) queue(slot, webSocketEncodeFrame("{\"t\":\"cookies\"}", 1))
+    for (outgoing in prepared.outbox) queue(slot, webSocketEncodeFrame(outgoing, 1))
     state.prepared = null
     return
 }

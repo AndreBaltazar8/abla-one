@@ -742,8 +742,40 @@
   };
 
   // --- connection -------------------------------------------------------------
+  const seenEffects = new Set();
+  const savedEffects = new Set();
+  let effectsFor = '';
+  const rememberEffect = (id, persistent) => {
+    if (effectsFor !== boot.s) {
+      effectsFor = boot.s;
+      seenEffects.clear(); savedEffects.clear();
+      try {
+        const ids = JSON.parse(sessionStorage.getItem(`one:effects:${boot.s}`));
+        if (Array.isArray(ids)) for (const value of ids.slice(-256)) if (typeof value === 'string' && /^[a-f0-9]{32}$/.test(value)) savedEffects.add(value);
+      } catch (_) {}
+    }
+    const existed = seenEffects.has(id) || savedEffects.has(id);
+    seenEffects.add(id);
+    if (seenEffects.size > 256) seenEffects.delete(seenEffects.values().next().value);
+    if (persistent) {
+      savedEffects.add(id);
+      if (savedEffects.size > 256) savedEffects.delete(savedEffects.values().next().value);
+      try { sessionStorage.setItem(`one:effects:${boot.s}`, JSON.stringify([...savedEffects])); } catch (_) {}
+    }
+    return existed;
+  };
   const receive = (message) => {
     if (manualRecovery) return;
+    if (message.t === 'effect') {
+      if (!boot.proof || typeof message.id !== 'string' || !/^[a-f0-9]{32}$/.test(message.id) || !message.message || !['pick', 'back', 'forward'].includes(message.message.t)) return;
+      const picker = message.message.t === 'pick';
+      const repeated = rememberEffect(message.id, !picker);
+      if (!repeated) receive(message.message);
+      // Pick delivery remains durable until its scoped result is consumed;
+      // acknowledging the chooser alone must not lose a pending selection.
+      if (!picker) send({t: 'effect-ack', id: message.id});
+      return;
+    }
     const first = !boot.wasm && !eventReady && message.t === 'patch' && Number.isSafeInteger(message.a) && message.a >= 0;
     if (first) {
       const savedTyped = Number.isSafeInteger(message.c) && message.c >= 0 ? message.c : 0;

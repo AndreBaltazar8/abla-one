@@ -37,6 +37,28 @@ fun oneCheckpointFiles(session: OneLiveSession): Json {
     jsonArray(items)
 }
 
+fun oneCheckpointEffects(session: OneLiveSession): Json {
+    val items: array<Json> = []
+    val state = oneRecoverySessions.get(session.id)
+    if (state != null) for (id in state.effectOrder) if (state.effects.has(id)) items.append(jsonObject(["id","message"],[jsonString(id),jsonString(state.effects.get(id) ?? "")]))
+    jsonArray(items)
+}
+
+fun oneCheckpointEffect(message: string): bool {
+    if (message.size > 16384) return false
+    val parsed = jsonParse(message)
+    if (!parsed.succeeded || !parsed.value.isObject()) return false
+    val value = parsed.value
+    val kind = value.getString("t")
+    if (kind == "forward") return value.keys.size == 1
+    if (kind == "back") return value.keys.size == 2 && value.get("to").isString() && (value.getString("to") == "" || oneCheckpointRoute(value.getString("to")))
+    if (kind != "pick" || value.keys.size != 5 || !oneCheckpointCounter(value.get("id")) || value.getInt("id") == 0 || !value.get("kind").isString() || !value.get("accept").isArray() || !value.get("multiple").isBoolean()) return false
+    if (value.getString("kind") != "files" && value.getString("kind") != "profile" && value.getString("kind") != "emoji") return false
+    if (value.get("accept").values.size > 64) return false
+    for (mime in value.get("accept").values) if (!mime.isString() || mime.asString().size > 128) return false
+    true
+}
+
 fun oneCheckpointStringMap(map: Map<string, string>): Json {
     val keys: array<string> = []
     val values: array<Json> = []
@@ -51,8 +73,8 @@ fun oneCheckpoint(session: OneLiveSession, draft: Json): string {
     val maps: array<Json> = []
     for (map in session.maps) maps.append(oneCheckpointMap(map))
     jsonStringify(jsonObject(
-        ["v", "app", "route", "entry", "epoch", "revision", "nextId", "storage", "maps", "fenceFrom", "frontier", "typed", "asked", "operations", "pickers", "shown", "width", "height", "canvas", "files"],
-        [jsonInteger(1), draft, jsonString(session.queue.routes.current()), jsonInteger(session.queue.routes.entry()), jsonInteger(session.queue.routes.epoch), jsonInteger(session.revision), jsonInteger(session.queue.nextId), oneCheckpointStringMap(session.queue.storage), jsonArray(maps), jsonInteger(session.fence.from), jsonInteger(session.eventFrontier), jsonInteger(session.changeFrontier), jsonInteger(session.routeFrontier), oneLiveOperationCheckpoint(session.queue), oneCheckpointPickers(session), jsonInteger(session.shown), jsonInteger(session.width), jsonInteger(session.height), jsonBoolean(session.canvas), oneCheckpointFiles(session)]))
+        ["v", "app", "route", "entry", "epoch", "revision", "nextId", "storage", "maps", "fenceFrom", "frontier", "typed", "asked", "operations", "pickers", "shown", "width", "height", "canvas", "files", "effects"],
+        [jsonInteger(1), draft, jsonString(session.queue.routes.current()), jsonInteger(session.queue.routes.entry()), jsonInteger(session.queue.routes.epoch), jsonInteger(session.revision), jsonInteger(session.queue.nextId), oneCheckpointStringMap(session.queue.storage), jsonArray(maps), jsonInteger(session.fence.from), jsonInteger(session.eventFrontier), jsonInteger(session.changeFrontier), jsonInteger(session.routeFrontier), oneLiveOperationCheckpoint(session.queue), oneCheckpointPickers(session), jsonInteger(session.shown), jsonInteger(session.width), jsonInteger(session.height), jsonBoolean(session.canvas), oneCheckpointFiles(session), oneCheckpointEffects(session)]))
 }
 
 fun oneCheckpointStringObject(value: Json): bool {
@@ -68,6 +90,23 @@ fun oneCheckpointValid(value: Json): bool {
     val protocol = oneLiveQueue()
     protocol.nextId = value.get("nextId").asInt()
     if (!oneLiveOperationRestore(protocol, value.get("operations"))) return false
+    if (value.has("effects")) {
+        val effects = value.get("effects")
+        if (!effects.isArray() || effects.values.size > 32) return false
+        val seen: Map<string,bool> = Map()
+        var bytes = 0
+        for (effect in effects.values) {
+            if (!effect.isObject() || !effect.get("id").isString() || effect.getString("id").size != 32 || !effect.get("message").isString()) return false
+            val id = effect.getString("id")
+            for (b in id) if (!((b>=48 && b<=57) || (b>=97 && b<=102))) return false
+            if (seen.has(id) || !oneCheckpointEffect(effect.getString("message"))) return false
+            val message = jsonParse(effect.getString("message")).value
+            if (message.getString("t") == "pick" && message.getInt("id") > protocol.nextId) return false
+            seen.set(id,true)
+            bytes = bytes + effect.getString("message").size
+        }
+        if (bytes > 65536) return false
+    }
     if (value.has("files")) {
         val files = value.get("files")
         if (!files.isArray() || files.values.size > 64) return false
@@ -171,6 +210,12 @@ fun oneCheckpointRestore(var session: OneLiveSession, value: Json): void {
         for (picker in value.get("pickers").values) state.pickers.set(picker.get("id").asInt(), picker.get("kind").asString())
         state.files.clear()
         for (job in value.get("files").values) state.files.set(job.getInt("id"), OneRecoveryFileJob(job.getInt("id"), job.getString("handle"), job.getInt("offset"), job.getInt("length"), job.get("delete").asBoolean()))
+        state.effects.clear()
+        state.effectOrder.clear()
+        for (effect in value.get("effects").values) {
+            state.effects.set(effect.getString("id"),effect.getString("message"))
+            state.effectOrder.append(effect.getString("id"))
+        }
     }
     return
 }
