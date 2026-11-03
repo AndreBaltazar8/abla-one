@@ -288,7 +288,9 @@ class OneLiveServices(val session: string) : OneServices {
         complete(nextId(), 204, "", "")
     }
     fun timer(milliseconds: int): int {
-        val id = nextId()
+        // Polling timers may live for the whole session: they must not keep a
+        // press's ancestry alive indefinitely or generate a claim each tick.
+        val id = oneLiveQueueList[oneLiveQueueIndex(session)].allocate()
         oneLiveQueueList[oneLiveQueueIndex(session)].schedule(OneLiveTimer(id, oneLiveNow() + milliseconds))
         id
     }

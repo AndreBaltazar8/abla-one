@@ -199,6 +199,9 @@ fun main: int {
     expectEqual(chain.queue.takeRequests()[0].operation, "root-id.1.1", "a result's follow-up keeps its parent operation")
     val seen = oneLiveExecute({ request -> httpText(request.header("x-one-live-operation")) }, requests[1])
     expectEqual(oneResponse(seen).body, "root-id.2", "the in-process request carries its operation ID")
+    chain.queue.eventContext = "root-id"
+    val timerId = chainApp.services.timer(1000)
+    expect(!chain.queue.requestContexts.has(timerId), "a periodic timer cannot retain an event ancestry indefinitely")
 
     oneSessionMessage(m, t, jsonParse("{\"t\":\"pick-error\",\"id\":71,\"error\":\"upload failed\"}").value)
     val failure = oneResponse(m.queue.takeCompletions()[0])
