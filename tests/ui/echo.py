@@ -48,6 +48,9 @@ class Echo(http.server.BaseHTTPRequestHandler):
     do_POST = do_PUT = do_PATCH = echo
     def do_GET(self):
         if self.path == '/big':
+            if self.headers.get('Authorization') != 'Bearer one-services-fixture':
+                self.send_error(401)
+                return
             self.send_response(200)
             self.send_header('Content-Type', 'application/zip')
             self.send_header('Content-Length', str(len(BIG)))

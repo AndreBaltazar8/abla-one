@@ -170,7 +170,8 @@ interface OneServices {
     // with the image as base64 in `body`, or 204 if cancelled.
     fun pickImage(kind: string): int
     fun clearImageCache(): void
-    // kind: "toast", "copy", "openUrl" or "haptic".
+    // kind: "toast", "copy", "openUrl", "haptic", and on Android "saveFile"/"shareFile".
+    // File effects use oneFileExportPayload; listen for fileExport {status:saved|shared|cancelled|failed}.
     fun effect(kind: string, payload: string): bool
     // Soft navigation: gives the current screen a new path ("/people?q=ma") with no
     // page load. The app hears every move as `receive("route", path)` before the next
@@ -286,3 +287,12 @@ fun oneLowerAscii(value: string): string {
     }
     "$out${value.slice(start, value.size)}"
 }
+
+// A file already obtained with send(...saveToFile()), not a URL or native path.
+// Authorization belongs to that HTTP request and never appears in an Android intent.
+fun oneFileExportPayload(file: OneFile, name: string, mime: string): string =
+    jsonStringify(jsonObject(["handle", "name", "mime"], [jsonString(file.handle), jsonString(name), jsonString(mime)]))
+fun oneSaveFile(var services: OneServices, file: OneFile, name: string, mime: string): bool =
+    services.effect("saveFile", oneFileExportPayload(file, name, mime))
+fun oneShareFile(var services: OneServices, file: OneFile, name: string, mime: string): bool =
+    services.effect("shareFile", oneFileExportPayload(file, name, mime))

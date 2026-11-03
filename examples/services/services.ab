@@ -28,6 +28,7 @@ class ServicesDemo(
 
     fun render(var ui: Ui): Node = column(style().fill().background("@surface"), [
         topBar(ui, [], text("Serviços", style().text("title")), []),
+        text(log, style().padding(12).text("caption").color("@muted").maxLines(4)).set("label", "log"),
         scroll(style().grow(1).padding(16).gap(8), [
             button(ui, "JSON PUT", "secondary", ui.press { run("json", services.send(oneRequest("PUT", "$base/echo").header("X-Abla", "one").json(jsonObject(["n"], [jsonInteger(7)])))) }, style()),
             button(ui, "Bytes POST", "secondary", ui.press { run("bytes", services.send(oneRequest("POST", "$base/echo").bytes("AAECAwQ=", "application/octet-stream"))) }, style()),
@@ -35,16 +36,19 @@ class ServicesDemo(
             button(ui, "Pick file", "secondary", ui.press { run("pick", services.pickFiles([], false)) }, style()),
             button(ui, "Upload file", "secondary", ui.press { if (picked.values.size > 0) run("upload", services.send(oneRequest("POST", "$base/echo").file(file()))) }, style()),
             button(ui, "Multipart", "secondary", ui.press { if (picked.values.size > 0) run("multipart", services.send(oneRequest("POST", "$base/echo").multipart([oneTextPart("title", "Fatura"), oneFilePart("document", file())]))) }, style()),
-            button(ui, "Download to file", "secondary", ui.press { run("download", services.send(oneRequest("GET", "$base/big").saveToFile())) }, style()),
+            button(ui, "Download to file", "secondary", ui.press { run("download", services.send(oneRequest("GET", "$base/big").header("Authorization", "Bearer one-services-fixture").saveToFile())) }, style()),
+            button(ui, "Save response file", "secondary", ui.press { if (!saved.isNull()) oneSaveFile(services, oneFileFrom(saved), "one-authenticated-export.bin", "application/octet-stream"); return }, style()),
+            button(ui, "Share response file", "secondary", ui.press { if (!saved.isNull()) oneShareFile(services, oneFileFrom(saved), "one-authenticated-export.bin", "application/octet-stream"); return }, style()),
+            button(ui, "Reject forged export", "secondary", ui.press { oneSaveFile(services, OneFile("file-forged", "", 0, ""), "../private", "application/octet-stream"); return }, style()),
             button(ui, "Read saved file", "secondary", ui.press { if (!saved.isNull()) run("read", services.readFile(oneFileFrom(saved), 1000000, 16)) }, style()),
             button(ui, "Secure write", "secondary", ui.press { run("store", services.secureWrite("demo", jsonObject(["count", "on"], [jsonInteger(3), jsonBoolean(true)]))) }, style()),
             button(ui, "Secure read", "secondary", ui.press { run("load", services.secureRead("demo")) }, style()),
-            button(ui, "Timer", "secondary", ui.press { run("timer", services.timer(300)) }, style()),
-            text(log, style().text("caption").color("@muted")).set("label", "log")
+            button(ui, "Timer", "secondary", ui.press { run("timer", services.timer(300)) }, style())
         ])
     ])
 
     fun receive(kind: string, value: string): void {
+        if (kind == "fileExport") { write("export: ${jsonParse(value).value.getString("status")}"); return }
         if (kind != "result") return
         val r = oneResponse(value)
         if (r.requestId != pending) return

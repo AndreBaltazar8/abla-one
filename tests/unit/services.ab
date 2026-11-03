@@ -51,6 +51,14 @@ fun main: int {
     expectEqual(picked.files().size, 1, "picked files")
     expectEqual(picked.files()[0].mime, "application/pdf", "picked file type")
 
+    val export = jsonParse(oneFileExportPayload(saved.file, "contabilidade.xml", "application/xml")).value
+    expectEqual(export.getString("handle"), "file-9", "export uses the opaque response handle")
+    expectEqual(export.getString("name"), "contabilidade.xml", "safe caller filename")
+    expectEqual(export.getString("mime"), "application/xml", "export MIME")
+    expect(!export.has("url") && !export.has("headers") && !export.has("body"), "export contains no URL, auth headers or response content")
+    val authenticatedDownload = oneRequest("GET", "https://x/private/export").header("Authorization", "Bearer secret").saveToFile()
+    expectEqual(jsonParse(authenticatedDownload.envelope()).value.get("headers").getString("Authorization"), "Bearer secret", "download retains app authentication on HTTP request")
+    expect(authenticatedDownload.saveResponse, "authenticated download streams to host file")
     var s = oneRecordedServices()
     expectEqual(s.send(r), 1, "first id")
     expectEqual(s.lastRequest().url, "https://api.example/items/1", "requests are kept")

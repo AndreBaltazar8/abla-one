@@ -1,8 +1,9 @@
 import "../../../abla-mobile/src/android_build.ab"
-// Built from this directory by tools/build-android.sh.
+// Built from this directory by tools/build-android.sh. This test-only app permits
+// loopback HTTP through adb reverse; real applications keep cleartext disabled.
 val galleryAndroid = #mobileBuildAndroid(MobileAndroidConfiguration(
     "abla-one-services", "android.ab", "android/android-app", "debug",
-    mobileAndroidApplication("dev.abla.one.services", "Abla One Services", 1, "0.0.1"),
+    MobileAndroidApplication("dev.abla.one.services", "Abla One Services", 1, "0.0.1", 24, 36, 36, false, true, true),
     MobileAndroidBranding("@drawable/gallery_mark", "@drawable/gallery_mark", "#FFFFFF", "@drawable/gallery_mark", "@android:style/Theme.Material.Light.NoActionBar"),
     [mobileAndroidInternetPermission()], [mobileAndroidLauncher()], true, false
 ))

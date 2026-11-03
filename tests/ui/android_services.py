@@ -1,5 +1,5 @@
 """Android services test: real requests from the abla-mobile host to an echo
-server behind a temporary HTTPS tunnel. Covers headers and methods, JSON,
+server on loopback through a private adb reverse mapping. Covers headers and methods, JSON,
 bytes, a 500 KB in-memory body, a picked file streamed as the body and as a
 multipart part, a 3 MB download saved to a file and read back by range,
 typed secure storage and timers."""
@@ -7,8 +7,8 @@ import json, os, re, subprocess, sys, tempfile, time, xml.etree.ElementTree as E
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PACKAGE = 'dev.abla.one.services'
-CLOUDFLARED = subprocess.check_output('ls -d /nix/store/*cloudflared-2026.10.3/bin/cloudflared | head -1', shell=True).decode().strip()
 failures = 0
+emulator_lock = None
 
 # The emulator, whatever else is plugged in: with a phone too, a bare adb stops, or drives the phone.
 os.environ.setdefault('ANDROID_SERIAL', 'emulator-5554')
@@ -65,24 +65,21 @@ for _ in range(100):
     if os.path.getsize(portfile.name): break
     if echo.poll() is not None: raise SystemExit('echo server failed to start')
     time.sleep(0.1)
+echo_exe=os.path.realpath(f'/proc/{echo.pid}/exe')
 port = open(portfile.name).read()
-tunnel = subprocess.Popen([CLOUDFLARED, 'tunnel', '--no-autoupdate', '--url', 'http://127.0.0.1:' + port], stderr=subprocess.PIPE, text=True)
+device_port = os.environ.get('ONE_SERVICES_DEVICE_PORT', '38147')
 try:
-    url = ''
-    for line in tunnel.stderr:
-        m = re.search(r'https://[a-z0-9-]+\.trycloudflare\.com', line)
-        if m:
-            url = m.group(0)
-            break
+    url = 'http://127.0.0.1:' + device_port
     open(os.path.join(ROOT, 'examples/services/echo_url.ab'), 'w').write(f'fun echoUrl(): string = "{url}"\n')
-    # New tunnel hostnames take a moment to resolve; a failed lookup is cached by
-    # the device, so wait until both this machine and the emulator resolve it.
-    host = url.split('//')[1]
-    for _ in range(60):
-        if subprocess.run(['curl', '-sf', '-o', '/dev/null', url + '/echo']).returncode == 0 and \
-           'unknown host' not in subprocess.run(['adb', 'shell', 'ping', '-c', '1', '-W', '2', host], capture_output=True, text=True).stdout: break
-        time.sleep(2)
-    subprocess.run([os.path.join(ROOT, 'tools/build-android.sh'), 'services'], check=True, stdout=subprocess.DEVNULL)
+    if os.environ.get('ONE_SERVICES_SKIP_BUILD') != '1':
+        subprocess.run([os.path.join(ROOT, 'tools/build-android.sh'), 'services'], check=True, stdout=subprocess.DEVNULL)
+    if os.environ.get('ONE_SERVICES_TAKE_LOCK') == '1':
+        import fcntl
+        emulator_lock = open('/tmp/android-emulator.lock', 'a')
+        fcntl.flock(emulator_lock, fcntl.LOCK_EX)
+    if any(line.split()[1:2] == ['tcp:'+device_port] for line in adb('reverse','--list').splitlines()):
+        raise SystemExit('fixture device port is already in use; choose ONE_SERVICES_DEVICE_PORT')
+    adb('reverse', 'tcp:'+device_port, 'tcp:'+port)
     adb('install', '-r', os.path.join(ROOT, 'examples/services/android/android-app/build/outputs/apk/debug/android-app-debug.apk'))
     # A file for the document picker: 1.5 MB in Downloads.
     subprocess.run(['dd', 'if=/dev/urandom', 'of=/tmp/abla-one-upload.bin', 'bs=1024', 'count=1536'], check=True, capture_output=True)
@@ -93,37 +90,75 @@ try:
     adb('shell', 'monkey', '-p', PACKAGE, '1')
     find('JSON PUT')
 
-    tap('JSON PUT'); line = log_line('json')
-    check('"m": "PUT"' in line and '"x": "one"' in line and '"type": "application/json"' in line and '\\"n\\":7' in line, 'PUT with custom header and JSON body', line)
-    tap('Bytes POST'); line = log_line('bytes')
-    check('"len": 5' in line and '"type": "application/octet-stream"' in line, 'byte body', line)
-    tap('Large body'); line = log_line('large')
-    check('"len": 500000' in line, '500 KB in-memory body', line)
-    tap('Pick file')
-    picker = find('abla-one-upload.bin', tries=20)
-    if picker is None:
-        tap('Downloads') if find('Downloads', tries=4) else None
+    if os.environ.get('ONE_EXPORT_ONLY') != '1':
+        tap('JSON PUT'); line = log_line('json')
+        check('"m": "PUT"' in line and '"x": "one"' in line and '"type": "application/json"' in line and '\\"n\\":7' in line, 'PUT with custom header and JSON body', line)
+        tap('Bytes POST'); line = log_line('bytes')
+        check('"len": 5' in line and '"type": "application/octet-stream"' in line, 'byte body', line)
+        tap('Large body'); line = log_line('large')
+        check('"len": 500000' in line, '500 KB in-memory body', line)
+        tap('Pick file')
         picker = find('abla-one-upload.bin', tries=20)
-    check(picker is not None, 'document picker shows the file')
-    if picker is not None: tap_node(picker)
-    line = log_line('pick')
-    check('abla-one-upload.bin 1572864' in line, 'picked file handle with name and size', line)
-    tap('Upload file'); line = log_line('upload', 90)
-    check('"len": 1572864' in line, '1.5 MB file streamed as the body', line)
-    tap('Multipart'); line = log_line('multipart', 90)
-    check('"title:6"' in line and '"document:1572864"' in line and 'multipart/form-data' in line, 'multipart with a text part and a file part', line)
+        if picker is None:
+            tap('Downloads') if find('Downloads', tries=4) else None
+            picker = find('abla-one-upload.bin', tries=20)
+        check(picker is not None, 'document picker shows the file')
+        if picker is not None: tap_node(picker)
+        line = log_line('pick')
+        check('abla-one-upload.bin 1572864' in line, 'picked file handle with name and size', line)
+        tap('Upload file'); line = log_line('upload', 90)
+        check('"len": 1572864' in line, '1.5 MB file streamed as the body', line)
+        tap('Multipart'); line = log_line('multipart', 90)
+        check('"title:6"' in line and '"document:1572864"' in line and 'multipart/form-data' in line, 'multipart with a text part and a file part', line)
     tap('Download to file'); line = log_line('download', 90)
     check('3145728' in line and 'application/zip' in line, '3 MB response saved to a file', line)
     tap('Read saved file'); line = log_line('read')
     expected = __import__('base64').b64encode(bytes((1000000 + i) % 251 for i in range(16))).decode()
     check(line.endswith(expected), 'ranged read of the saved file', line)
+    # A URL opened in another app would lack this header: /big rejects it.
+    import hashlib
+    adb('shell','rm','-f','/sdcard/Download/one-authenticated-export.bin')
+    tap('Save response file')
+    find('Save', tries=10) or find('SAVE', tries=3)
+    save_node = find('Save', tries=2) or find('SAVE', tries=2)
+    if save_node is None:
+        subprocess.run(['adb','exec-out','screencap','-p'],stdout=open(os.path.join(ROOT,'build/ui/android-export-failure.png'),'wb'))
+        raise SystemExit('FAIL system create-document save action missing')
+    tap_node(save_node)
+    check(log_line('export', 40).endswith('saved'), 'system document save completed')
+    destination='/sdcard/Download/one-authenticated-export.bin'
+    payload=subprocess.check_output(['adb','exec-out','cat',destination])
+    check(hashlib.sha256(payload).digest()==hashlib.sha256(bytes(i%251 for i in range(3*1024*1024))).digest(), 'saved authenticated response is byte-identical')
+    tap('Share response file')
+    time.sleep(1)
+    tree=nodes()
+    check(any('one-authenticated-export' in (n.get('text') or '') or 'Sharing' in (n.get('text') or '') or 'Nearby' in (n.get('text') or '') for n in tree), 'Android share chooser receives opaque-file copy')
+    check(not any('Bearer' in (n.get('text') or '') for n in tree), 'share UI contains no authentication header')
+    adb('shell','input','keyevent','4')
+    tap('Reject forged export')
+    end=time.time()+20
+    while time.time()<end:
+        if log_line('export',2).endswith('failed'): break
+        time.sleep(.2)
+    check(log_line('export',2).endswith('failed'), 'unregistered handle and unsafe filename fail closed')
+    adb('shell','rm',destination)
     tap('Secure write'); check(log_line('store').endswith('204'), 'typed secure write')
     tap('Secure read'); line = log_line('load')
     check('200 count=3' in line, 'typed secure read', line)
     tap('Timer'); check(log_line('timer').endswith('200'), 'timer')
     subprocess.run(['adb', 'exec-out', 'screencap', '-p'], stdout=open(os.path.join(ROOT, 'build/ui/android-services.png'), 'wb'))
 finally:
-    tunnel.terminate()
-    echo.terminate()
+    if emulator_lock is not None:
+        subprocess.run(['adb','shell','am','force-stop',PACKAGE],capture_output=True)
+        subprocess.run(['adb','shell','rm','-f','/sdcard/Download/abla-one-upload.bin'],capture_output=True)
+        subprocess.run(['adb','reverse','--remove','tcp:'+device_port],capture_output=True)
+        emulator_lock.close()
+    for process, executable in [(echo,echo_exe)]:
+        if process.poll() is None and os.path.realpath(f'/proc/{process.pid}/exe') == os.path.realpath(executable):
+            process.terminate()
+            process.wait(timeout=10)
+    os.unlink(portfile.name)
+    generated=os.path.join(ROOT,'examples/services/echo_url.ab')
+    if os.path.isfile(generated): os.unlink(generated)
 print('PASS tests/ui/android_services.py' if failures == 0 else f'{failures} failed')
 sys.exit(1 if failures else 0)

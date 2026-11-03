@@ -103,6 +103,8 @@ class OneAndroidServices() : OneServices {
         else if (kind == "copy") mobileCopyText(payload)
         else if (kind == "openUrl") mobileOpenUrl(payload)
         else if (kind == "haptic") mobileHaptic()
+        else if (kind == "saveFile") mobileSaveFile(payload)
+        else if (kind == "shareFile") mobileShareFile(payload)
         else false
     fun navigate(path: string, replace: bool = false): void {
         oneAppRoutes.navigate(path, replace)
