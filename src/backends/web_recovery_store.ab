@@ -41,7 +41,7 @@ class OneLiveRecoveryStore(
     val deleteFile: (string, string, int, int, string) -> int,
     // A trusted app policy, evaluated once for a newly constructed SSR app.
     // Public pages with no drafts can retain the dependency-free legacy path.
-    val participates: (HttpRequest)->bool = oneRecoveryAllPages()
+    val participates: (HttpRequest)->bool
 )
 
 fun oneLiveNoRecovery(): OneLiveRecoveryStore = OneLiveRecoveryStore(false,
@@ -53,7 +53,7 @@ fun oneLiveNoRecovery(): OneLiveRecoveryStore = OneLiveRecoveryStore(false,
     { id, owner, epoch, requests -> OneRecoveryInbox(503) },
     { request, ticket -> false },
     { id, owner, epoch, request, handle, offset, length -> 503 },
-    { id, owner, epoch, request, handle -> 503 })
+    { id, owner, epoch, request, handle -> 503 },oneRecoveryAllPages())
 
 class OneRecoveryState(
     val id: string,
