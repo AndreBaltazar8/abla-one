@@ -18,6 +18,7 @@ const open = async () => {
         super.onmessage = event => {
           const message = JSON.parse(event.data);
           if (window.__dropAck && message.a > 0) { window.__dropAck = false; this.close(); return; }
+          if (window.__dropRouteAck && message.ack > 0) { window.__dropRouteAck = false; this.close(); return; }
           handler(event);
         };
       }
@@ -50,6 +51,18 @@ try {
     await page.evaluate((f) => window.__socket.send(f), frame);
     await settled(page);
     check(await page.getByText('Contadas: 1').count() === 1, 'a replayed event ID is handled once');
+    await page.close();
+  }
+  {
+    const page = await open();
+    await page.evaluate(() => {
+      window.__dropRouteAck = true;
+      history.replaceState(history.state, '', '/moment?route-retry=1');
+      dispatchEvent(new PopStateEvent('popstate', {state: history.state}));
+    });
+    await page.waitForFunction(() => window.__frames.map(JSON.parse).filter(m => m.t === 'route').length >= 2, null, {timeout: 10000});
+    const routes = await page.evaluate(() => window.__frames.map(JSON.parse).filter(m => m.t === 'route'));
+    check(routes[0].n === routes[1].n && routes[0].p === routes[1].p, 'a lost route acknowledgement replays the same navigation');
     await page.close();
   }
   {

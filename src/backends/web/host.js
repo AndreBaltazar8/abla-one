@@ -16,6 +16,7 @@
   // Do not discard an event when the socket sends it: it may reach the server
   // just before the connection breaks. Keep it until a durable acknowledgement.
   const unacked = [];
+  const unackedRoutes = [];
   const beforeHello = [];
   let eventSequence = 0;
   let sendOrder = 0;
@@ -42,6 +43,12 @@
     if (message.t === 'event') {
       if (eventReady) liveEvent(message);
       else beforeHello.push(message);
+      return;
+    }
+    if (message.t === 'route') {
+      const item = {message, order: ++sendOrder};
+      unackedRoutes.push(item);
+      if (socket && socket.readyState === 1) socket.send(JSON.stringify(message));
       return;
     }
     const text = JSON.stringify(message);
@@ -465,6 +472,9 @@
     else if (message.t === 'fetch') request(message);
     else if (message.t === 'store') store(message.storage);
     else if (message.t === 'wait') { clearTimeout(ticking); ticking = setTimeout(() => send({t: 'tick'}), message.ms); }
+    if (!boot.wasm && message.t === 'patch' && Number.isSafeInteger(message.ack) && message.ack > 0) {
+      while (unackedRoutes.length && unackedRoutes[0].message.n <= message.ack) unackedRoutes.shift();
+    }
     if (!boot.wasm && message.t === 'patch' && Number.isSafeInteger(message.a) && message.a >= 0) {
       if (!eventReady) {
         eventSequence = message.a;
@@ -567,11 +577,11 @@
       retry = 0;
       document.documentElement.removeAttribute('data-one-offline');
       // Early scripted intents were made on the SSR revision: replay them there, then acknowledge the real viewport.
-      const waiting = queue.length > 0 || unacked.length > 0 || beforeHello.length > 0;
+      const waiting = queue.length > 0 || unacked.length > 0 || unackedRoutes.length > 0 || beforeHello.length > 0;
       socket.send(JSON.stringify(waiting ? {t: 'hello', r: revision, e: entry.e} : {t: 'hello', r: revision, w: innerWidth, e: entry.e}));
       // Keep queued route/viewport messages in their original order relative
       // to events made while disconnected.
-      const pending = [...queue, ...unacked].sort((a, b) => a.order - b.order);
+      const pending = [...queue, ...unacked, ...unackedRoutes].sort((a, b) => a.order - b.order);
       queue.length = 0;
       for (const item of pending) socket.send(item.text || JSON.stringify(item.message));
       if (waiting && !eventReady && beforeHello.length) viewportAfterHello = true;
