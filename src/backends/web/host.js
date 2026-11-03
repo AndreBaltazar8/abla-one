@@ -13,16 +13,34 @@
   let socket = null;
   let retry = 0;
   const queue = [];
+  // Do not discard an event when the socket sends it: it may reach the server
+  // just before the connection breaks. Keep it until a durable acknowledgement.
+  const unacked = [];
+  const beforeHello = [];
+  let eventSequence = 0;
+  let eventReady = false;
+  let viewportAfterHello = false;
   // Relative URLs mean the app's root on every route: the page's <base> is fixed
   // when it loads, whatever pushState does later.
   const base = document.baseURI;
   const basePath = new URL(base).pathname;
 
   let local = null;
+  const liveEvent = (message) => {
+    message.n = ++eventSequence;
+    message.u = crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+    unacked.push(message);
+    if (socket && socket.readyState === 1) socket.send(JSON.stringify(message));
+  };
   const send = (message) => {
     if (boot.wasm) {
       if (local) local(message);
       else queue.push(message);
+      return;
+    }
+    if (message.t === 'event') {
+      if (eventReady) liveEvent(message);
+      else beforeHello.push(message);
       return;
     }
     const text = JSON.stringify(message);
@@ -445,6 +463,19 @@
     else if (message.t === 'fetch') request(message);
     else if (message.t === 'store') store(message.storage);
     else if (message.t === 'wait') { clearTimeout(ticking); ticking = setTimeout(() => send({t: 'tick'}), message.ms); }
+    if (!boot.wasm && message.t === 'patch' && Number.isSafeInteger(message.a) && message.a >= 0) {
+      if (!eventReady) {
+        eventSequence = message.a;
+        eventReady = true;
+        while (beforeHello.length) liveEvent(beforeHello.shift());
+        if (viewportAfterHello) {
+          viewportAfterHello = false;
+          send({t: 'viewport', w: innerWidth});
+        }
+      } else if (message.a <= eventSequence) {
+        while (unacked.length && unacked[0].n <= message.a) unacked.shift();
+      }
+    }
   };
 
   // Wasm mode: the module's requests, storage and timers.
@@ -534,10 +565,12 @@
       retry = 0;
       document.documentElement.removeAttribute('data-one-offline');
       // Early scripted intents were made on the SSR revision: replay them there, then acknowledge the real viewport.
-      const waiting = queue.length > 0;
+      const waiting = queue.length > 0 || unacked.length > 0 || beforeHello.length > 0;
       socket.send(JSON.stringify(waiting ? {t: 'hello', r: revision, e: entry.e} : {t: 'hello', r: revision, w: innerWidth, e: entry.e}));
       while (queue.length) socket.send(queue.shift());
-      if (waiting) socket.send(JSON.stringify({t: 'viewport', w: innerWidth}));
+      for (const message of unacked) socket.send(JSON.stringify(message));
+      if (waiting && !eventReady && beforeHello.length) viewportAfterHello = true;
+      else if (waiting) socket.send(JSON.stringify({t: 'viewport', w: innerWidth}));
     };
     socket.onmessage = (e) => receive(JSON.parse(e.data));
     socket.onclose = (e) => {

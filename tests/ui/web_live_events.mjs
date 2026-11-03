@@ -14,6 +14,13 @@ const open = async () => {
     window.WebSocket = class extends Native {
       constructor(...args) { super(...args); window.__socket = this; }
       send(text) { window.__frames.push(text); if (window.__lag) setTimeout(() => super.send(text), window.__lag); else super.send(text); }
+      set onmessage(handler) {
+        super.onmessage = event => {
+          const message = JSON.parse(event.data);
+          if (window.__dropAck && message.a > 0) { window.__dropAck = false; this.close(); return; }
+          handler(event);
+        };
+      }
     };
   });
   await page.goto(base + '/moment');
@@ -24,7 +31,9 @@ const open = async () => {
 };
 const button = (name) => `[...document.querySelectorAll('button')].find(b => b.textContent === ${JSON.stringify(name)})`;
 const lastPress = (page) => page.evaluate(() => [...window.__frames].reverse().find(f => { const m = JSON.parse(f); return m.t === 'event' && !m.c; }));
-const resend = (page, frame) => page.evaluate((f) => window.__socket.send(f), frame);
+// The revision tests deliberately make a new, legacy event. Replaying an
+// actual sequenced frame is tested separately below.
+const resend = (page, frame) => page.evaluate((f) => { const m = JSON.parse(f); delete m.n; delete m.u; window.__socket.send(JSON.stringify(m)); }, frame);
 const settled = (page) => page.waitForTimeout(200);
 const typeNow = (page, text, then) => page.evaluate(({text, then}) => {
   const field = document.querySelector('input[placeholder="Rascunho"]');
@@ -33,6 +42,27 @@ const typeNow = (page, text, then) => page.evaluate(({text, then}) => {
   if (then) [...document.querySelectorAll('button')].find(b => b.textContent === then).click();
 }, {text, then});
 try {
+  {
+    const page = await open();
+    await page.getByRole('button', {name: 'Contar'}).click();
+    await page.getByText('Contadas: 1').waitFor({timeout: 5000});
+    const frame = await lastPress(page);
+    await page.evaluate((f) => window.__socket.send(f), frame);
+    await settled(page);
+    check(await page.getByText('Contadas: 1').count() === 1, 'a replayed event ID is handled once');
+    await page.close();
+  }
+  {
+    const page = await open();
+    await page.evaluate(() => { window.__dropAck = true; });
+    await page.getByRole('button', {name: 'Contar'}).click();
+    await page.getByText('Contadas: 1').waitFor({timeout: 10000});
+    await settled(page);
+    const events = await page.evaluate(() => window.__frames.map(JSON.parse).filter(m => m.t === 'event'));
+    check(events.length >= 2 && events[0].u === events[1].u && events[0].n === events[1].n && await page.getByText('Contadas: 1').count() === 1,
+      'a lost acknowledgement reconnects and replays the same ID once');
+    await page.close();
+  }
   {
     const page = await open();
     // Keys faster than the round trip: the session's echoes of older text change nothing.
