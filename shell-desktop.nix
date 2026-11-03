@@ -2,7 +2,8 @@
 # X11, GL and OpenSSL libraries a desktop app links. They are build inputs, so
 # the Nix toolchain records their paths in the executable.
 let
-  base = import ../ablac/shell.nix {};
+  compilerSourceRoot = builtins.getEnv "ABLA_COMPILER_SOURCE_ROOT";
+  base = assert compilerSourceRoot != ""; import (builtins.toPath (compilerSourceRoot + "/shell.nix")) {};
   # The system channel: its libraries share the C library the compiled
   # program links against.
   pkgs = import <nixpkgs> {};

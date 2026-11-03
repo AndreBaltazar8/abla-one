@@ -7,6 +7,7 @@ TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab t
 
 # Unit, backend and integration tests (host only).
 test:
+	python3 tools/check-native-build-roots.py --self-test
 	$(NIX) '$(ABLAC) test $(TESTS)'
 	tests/thin_config.sh
 	tests/android_shell.sh

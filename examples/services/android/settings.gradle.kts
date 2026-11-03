@@ -17,5 +17,5 @@ dependencyResolutionManagement {
 rootProject.name = "abla-one-services"
 include(":android-app")
 include(":runtime:android-host")
-project(":runtime:android-host").projectDir = file("../../../../abla-mobile/runtime/android-host")
+project(":runtime:android-host").projectDir = file(requireNotNull(System.getenv("ABLA_MOBILE_ROOT")) { "Run tools/build-android.sh with a selected mobile SDK" } + "/runtime/android-host")
 

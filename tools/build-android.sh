@@ -8,13 +8,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 example="${1:?example name}"
-P="$(cd .. && pwd)"
-ABLAC="${ABLAC:-$P/ablac/build/ablac}"
-RUNTIME="$PWD/build/abla-runtime-v0.2.22"
+source tools/native-build-roots.sh
+RUNTIME="${ABLA_COMPILER_ROOT:-$PWD/build/abla-runtime-v0.2.22}"
 if [ ! -f "$RUNTIME/runtime/abla_runtime.c" ]; then
     mkdir -p "$RUNTIME"
-    git -C "$P/ablac" archive 3da080eed592269c17297e0896a1f2a33a888d7f runtime stdlib | tar -x -C "$RUNTIME"
+    git -C "$ABLA_COMPILER_SOURCE_ROOT" archive 3da080eed592269c17297e0896a1f2a33a888d7f runtime stdlib | tar -x -C "$RUNTIME"
 fi
-(cd "examples/$example" && "$ABLAC" build android_build.ab -o "../../build/$example-android-driver" --fast --no-cache)
+export ABLA_COMPILER_ROOT="$RUNTIME"
+(cd "$one_native_tree/abla-one/examples/$example" && "$ABLAC" build "$one_native_tree/abla-one/examples/$example/android_build.ab" -o "$one_project_root/build/$example-android-driver" --fast --no-cache)
 NIXPKGS_ALLOW_UNFREE=1 nix-shell "$PWD/shell-android.nix" --run "android-gradle -p '$PWD/examples/$example/android' :android-app:assembleDebug -PablaMobileConfiguration=debug -PablaCompilerRoot='$RUNTIME' --console=plain"
 echo "examples/$example/android/android-app/build/outputs/apk/debug/android-app-debug.apk"

@@ -77,3 +77,20 @@ Abla One needs the current compiler (generics, the runtime written in Abla), so 
 ## License
 
 Mozilla Public License 2.0. See [LICENSE](LICENSE).
+
+## Native SDK roots
+
+Native build entry points select dependency roots once and pass them to source
+imports, host Gradle and CMake. Set `ABLA_COMPILER_SOURCE_ROOT` for the compiler
+checkout/shell and `ABLA_COMPILER_ROOT` for a selected runtime archive; `ABLAC`
+selects the compiler executable; `ABLA_ANDROID_SHELL` can select a matching Android Nix shell. Mobile example scripts use the SDK containing
+the script itself. One's examples additionally accept `ABLA_MOBILE_ROOT`,
+`ABLA_GRAPHICS_ROOT` and `ABLA_XML_ROOT`, including prepared pinned snapshots.
+One stages source imports through `build/native-tree` so they agree with these
+selected roots. Direct Gradle calls must provide the selected roots too; no
+Gradle/CMake fallback searches neighboring checkouts.
+
+`python3 tools/check-native-build-roots.py --self-test` rejects unselected sibling
+paths in active native build files. With CMake installed, `--configure-test`
+checks every mobile consumer against a synthetic SDK in a path containing spaces.
+PaperMono is parked and explicitly excluded from this active-target check.
