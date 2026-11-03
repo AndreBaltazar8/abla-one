@@ -264,6 +264,13 @@ try {
       const field = document.querySelector('input[placeholder="Mantido"]');
       field.value = 'after-nav';
       field.dispatchEvent(new Event('input', {bubbles: true}));
+      dispatchEvent(new Event('resize'));
+    });
+    await orderPage.waitForTimeout(250);
+    await orderPage.evaluate(() => {
+      const field = document.querySelector('input[placeholder="Mantido"]');
+      field.value = 'after-control';
+      field.dispatchEvent(new Event('input', {bubbles: true}));
     });
     await orderPage.waitForTimeout(500);
     paused = false;
@@ -274,7 +281,10 @@ try {
     const route = frames.findIndex(message => message.t === 'route');
     const viewport = frames.findIndex(message => message.t === 'viewport');
     const last = frames.findIndex(message => message.v === 'after-nav');
-    check(first >= 0 && route > first && viewport > route && last > viewport, 'navigation, viewport and a non-cancelable edit retain their order');
+    const secondViewport = frames.findIndex((message, i) => i > last && message.t === 'viewport');
+    const afterControl = frames.findIndex(message => message.v === 'after-control');
+    check(first >= 0 && route > first && viewport > route && last > viewport && secondViewport > last && afterControl > secondViewport,
+      'navigation, viewports and non-cancelable edits retain their order');
     await orderPage.close();
   }
   {

@@ -179,7 +179,7 @@
   let typed = 0;
   let typedSeen = 0;
   let held = null;
-  const change = (id, value, target, admittingDeferred = false) => {
+  const change = (id, value, target) => {
     if (manualRecovery) return;
     held = null;
     const message = {t: 'event', r: revision, id: Number(id), v: String(value), c: typed + 1};
@@ -192,13 +192,13 @@
       deferredEdit = null;
       clearNotice();
     }
-    if (!boot.wasm && (deferredEdit || !fits(message))) {
+    if (!boot.wasm && (blocked() || !fits(message))) {
       const boundedValue = message.v.length <= pendingByteLimit && new TextEncoder().encode(message.v).length <= pendingByteLimit;
       const edit = {id, target, field: message._field, entry: message._entry, revision, value: boundedValue ? message.v : null, order: 0};
       if (!deferredEdit) { edit.order = ++sendOrder; deferredEdit = edit; }
       else {
         const last = deferredRest.length ? deferredRest[deferredRest.length - 1] : deferredEdit;
-        if (last.field === edit.field && last.entry === edit.entry && (!deferredNavigation || last.order > deferredNavigation.order) && (!deferredRoute || last.order > deferredRoute.order)) {
+        if (last.field === edit.field && last.entry === edit.entry && (!deferredNavigation || last.order > deferredNavigation.order) && (!deferredRoute || last.order > deferredRoute.order) && (!deferredControls.length || last.order > deferredControls[deferredControls.length - 1].order)) {
           last.target = target;
           last.value = edit.value;
           last.id = id;
@@ -224,7 +224,7 @@
       return;
     }
     typed++;
-    send(message, admittingDeferred);
+    send(message);
   };
   const live = (target) => {
     const id = target.getAttribute('data-one-press');
