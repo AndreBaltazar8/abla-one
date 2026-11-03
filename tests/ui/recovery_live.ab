@@ -91,6 +91,12 @@ fun main: int {
     testPublishPort(server.listener.localPort())
     while (!server.stopped) {
         server.step()
+        val ending = proofDirectory().child("end-session")
+        if (ending.exists()) {
+            val index = server.findSession(ending.readText())
+            ending.remove()
+            if (index >= 0) server.endSession(index)
+        }
         if (!proofDirectory().child("hold-ready").exists()) for (session in server.sessions) session.app.receive("proof-ready", "")
         proofUploadPump(server)
     }

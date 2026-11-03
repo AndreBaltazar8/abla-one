@@ -289,6 +289,8 @@ fun OneLiveServer.closeSlot(slot: int): void {
 // Ends a session now: its page is told to reload, and nothing of it stays to resume.
 fun OneLiveServer.endSession(index: int): void {
     val id = sessions[index].id
+    val ending = oneRecoverySessions.get(id)
+    if (ending != null) ending.ending = true
     val slot = sessions[index].slot
     if (slot >= 0 && slots[slot].descriptor >= 0) {
         queue(slot, webSocketEncodeFrame(webSocketClosePayload(1008, "session ended"), 8))
@@ -621,6 +623,10 @@ fun OneLiveServer.pageRender(request: HttpRequest, index: int): HttpResponse {
         HttpHeader("Set-Cookie", "one_resume=; SameSite=Lax; Max-Age=0"),
         HttpHeader("Set-Cookie", "one_resume_proof=; SameSite=Lax; Max-Age=0")
     ]
+    if (recoverable != null) {
+        for (line in recoverable.pageCookies) headers.append(HttpHeader("Set-Cookie", line))
+        recoverable.pageCookies.clear()
+    }
     if (sessions[index].queue.cookiesChanged) for (line in sessionCookies(request, index)) headers.append(HttpHeader("Set-Cookie", line))
     HttpResponse(200, headers, body)
 }
@@ -883,6 +889,7 @@ fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimer
         else {
             oneLiveForget(session.id)
             oneMemoForget(session.id)
+            oneRecoverySessions.remove(session.id)
         }
     }
     if (kept.size != sessions.size) {

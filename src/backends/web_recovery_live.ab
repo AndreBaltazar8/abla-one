@@ -41,6 +41,7 @@ fun OneLiveServer.recoveryStart(request: HttpRequest, index: int): int {
     if (stored.status == 202) { state.pendingPage = true; return 202 }
     if (stored.status != 200) { state.pendingPage = false; return stored.status }
     state.pendingPage = false
+    for (cookie in stored.cookies) state.pageCookies.append(cookie)
     state.initialPayload = ""
     state.epoch = stored.epoch
     state.version = stored.version
@@ -336,6 +337,13 @@ fun OneLiveServer.recoveryWaitHttp(slot: int, request: HttpRequest, response: Ht
 // WebSocket sees no patch/ack until hydration and the durable CAS have finished.
 fun OneLiveServer.recoveryPending(): void {
     val now = oneLiveNow()
+    for (id in oneRecoverySessions.keys()) {
+        val ending = oneRecoverySessions.get(id)
+        if (ending == null || !ending.ending || ending.owner != recoveryOwner || now < ending.endRetryAt) continue
+        val status = ending.store.end(id, ending.owner, ending.epoch)
+        if (status == 200 || status == 403 || status == 404 || status == 409 || status == 410) oneRecoverySessions.remove(id)
+        else ending.endRetryAt = now + (if (status == 202) 10 else 1000)
+    }
     var slot = 0
     while (slot < slots.size) {
         if (slots[slot].awaitingRecovery && !slots[slot].closing && slots[slot].recoveryMessage != "") {

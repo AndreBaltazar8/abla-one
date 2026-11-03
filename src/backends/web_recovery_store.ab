@@ -74,7 +74,10 @@ class OneRecoveryState(
     var committedActivity: int = -1,
     var initialPayload: string = "",
     var pendingPage: bool = false,
-    var inboxPending: bool = false
+    var inboxPending: bool = false,
+    val pageCookies: array<string> = [],
+    var ending: bool = false,
+    var endRetryAt: int = 0
 )
 
 class OneRecoveryHttp(val owner: string, val ticket: int, val request: HttpRequest, var stage: string, var session: string, val started: int)

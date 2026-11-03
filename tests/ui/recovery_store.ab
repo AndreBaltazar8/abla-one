@@ -53,7 +53,7 @@ fun proofCreate(request: HttpRequest, id: string, proof: string, owner: string, 
         [jsonString(proof), jsonString(proofUser(request)), jsonString(owner), jsonInteger(1), jsonInteger(1), jsonString(payload), jsonInteger(proofNow() + oneRecoveryIdleMilliseconds), jsonInteger(1), jsonBoolean(false), jsonArray([]), jsonArray([])])
     val ok = proofWrite(id, row)
     proofRelease(lock)
-    if (ok) proofResult(row) else OneRecoveryResult(503)
+    if (ok) OneRecoveryResult(200,row.getInt("epoch"),row.getInt("version"),row.getString("payload"),["proof-bootstrap=present; Path=/; HttpOnly; SameSite=Lax"],true) else OneRecoveryResult(503)
 }
 fun proofInspect(request: HttpRequest, id: string, proof: string): OneRecoveryResult {
     if (proofDelayed("inspect/$id/${hexEncode(sha256(proof))}/${proofUser(request)}")) return OneRecoveryResult(202)
@@ -116,6 +116,7 @@ fun proofFence(id: string, owner: string, epoch: int): int {
     result
 }
 fun proofEnd(id: string, owner: string, epoch: int): int {
+    if (proofDelayed("end/$id/$owner/$epoch")) return 202
     val lock = proofDirectory().child("store.lock").fileLock()
     if (!lock.tryHold()) { proofRelease(lock); return 503 }
     val row = proofLoad(id)
