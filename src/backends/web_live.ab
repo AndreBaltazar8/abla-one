@@ -658,10 +658,19 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     val parsed = jsonParse(payload)
     if (!parsed.succeeded) return
     val m = parsed.value
+    val persisted = oneRecoverySessions.get(sessions[index].id)
+    val before = sessions[index].eventFrontier
+    if (persisted != null) {
+        val kind = m.getString("t")
+        if (kind != "hello" && kind != "event" && kind != "route" && kind != "viewport" && kind != "scroll" && kind != "pick-error") return
+        if (kind == "event" && (!m.has("n") || !m.has("u"))) return
+    }
     sessions[index].lastSeen = oneLiveNow()
     oneSessionMessage(sessions[index], theme, m)
-    val persisted = oneRecoverySessions.get(sessions[index].id)
-    if (persisted != null) persisted.batch.changed(m.getString("t") != "event" || m.get("id").asInt() <= oneChangeBase)
+    if (persisted != null && (m.getString("t") != "event" || sessions[index].eventFrontier > before)) {
+        persisted.batch.changed(m.getString("t") != "event" || m.get("id").asInt() <= oneChangeBase)
+        persisted.active = true
+    }
     return
 }
 

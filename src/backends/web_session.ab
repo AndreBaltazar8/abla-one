@@ -299,6 +299,7 @@ class OneLiveServices(val session: string) : OneServices {
     // to /one/upload; the completion arrives when the upload does.
     fun pickFiles(mime: array<string>, multiple: bool): int {
         val id = nextId()
+        if (!oneRecoveryPickerBegin(session, id, "files")) return complete(id, 429, "", "Too many pending file pickers")
         val types: array<Json> = []
         for (item in mime) types.append(jsonString(item))
         oneLiveQueueList[oneLiveQueueIndex(session)].toPage(jsonStringify(jsonObject(["t", "id", "kind", "accept", "multiple"], [jsonString("pick"), jsonInteger(id), jsonString("files"), jsonArray(types), jsonBoolean(multiple)])))
@@ -334,6 +335,7 @@ class OneLiveServices(val session: string) : OneServices {
     // square JPEG, "emoji" a small transparent PNG, both at most 10 KB.
     fun pickImage(kind: string): int {
         val id = nextId()
+        if (!oneRecoveryPickerBegin(session, id, if (kind == "emoji") "emoji" else "profile")) return complete(id, 429, "", "Too many pending file pickers")
         oneLiveQueueList[oneLiveQueueIndex(session)].toPage(jsonStringify(jsonObject(["t", "id", "kind", "accept", "multiple"], [jsonString("pick"), jsonInteger(id), jsonString(if (kind == "emoji") "emoji" else "profile"), jsonArray([jsonString("image/*")]), jsonBoolean(false)])))
         id
     }
@@ -412,7 +414,8 @@ class OneLiveSession(
     var deferEventAck: bool = false,
     // Retained separately: changeAnswer is consumed while preparing a patch,
     // but a new node must acknowledge typing whose durable patch was lost.
-    var changeFrontier: int = 0
+    var changeFrontier: int = 0,
+    var routeFrontier: int = 0
 ) {
     // The tree of the current state, with its event map: a new revision.
     fun tree(theme: Theme): Node {
@@ -550,8 +553,14 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
         if (m.get("h").intAvailable()) session.height = m.get("h").asInt()
         if (m.get("e").intAvailable()) session.queue.routes.adopt(m.get("e").asInt())
     } else if (kind == "route") {
+        if (m.get("n").intAvailable() && m.get("n").asInt() > 0 && m.get("n").asInt() <= session.routeFrontier) {
+            session.routeAnswer = session.routeFrontier
+            session.changed = true
+            return
+        }
         session.queue.routes.arrive(m.getString("p"), m.get("e").asInt())
         session.routeAnswer = m.get("n").asInt()
+        session.routeFrontier = session.routeAnswer
         session.changed = true
     } else if (kind == "viewport" && m.get("w").intAvailable()) {
         session.width = m.get("w").asInt()

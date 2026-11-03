@@ -33,7 +33,7 @@ fun OneLiveServer.recoveryStart(request: HttpRequest, index: int): int {
     val body = recoveryCapture(index)
     if (body == null) return 503
     val stored = if (state.epoch == 0) recovery.create(request, id, state.proof, recoveryOwner, body)
-        else recovery.save(id, recoveryOwner, state.epoch, state.version, body, [])
+        else recovery.save(id, recoveryOwner, state.epoch, state.version, body, true, [])
     if (stored.status != 200) return stored.status
     state.epoch = stored.epoch
     state.version = stored.version
@@ -156,15 +156,23 @@ fun OneLiveServer.recoveryFence(index: int, immediate: bool): bool {
 fun OneLiveServer.recoverySettle(index: int): void {
     val state = oneRecoverySessions.get(sessions[index].id)
     if (state == null || sessions[index].slot < 0 || !state.ready || !recoveryFence(index, false)) return
-    val inbox = recovery.inbox(state.id, recoveryOwner, state.epoch)
-    if (inbox.status != 200) { state.status = inbox.status; return }
-    for (item in inbox.items) if (!oneRecoveryConsumed(state, item.id)) {
-        state.consumed.append(item.id)
-        sessions[index].queue.complete(item.payload)
-    }
-    if (inbox.items.size > 0) {
-        var rounds = 0
-        while (rounds < 8 && pump(index)) rounds = rounds + 1
+    if (oneLiveNow() - state.inboxAt >= oneRecoveryBatchMilliseconds && state.consumed.size < 64) {
+        state.inboxAt = oneLiveNow()
+        val inbox = recovery.inbox(state.id, recoveryOwner, state.epoch)
+        if (inbox.status != 200) { state.status = inbox.status; return }
+        if (inbox.items.size > 64) { state.status = 503; return }
+        for (item in inbox.items) if (!oneRecoveryConsumed(state, item.id)) {
+            if (item.id.size == 0 || item.id.size > 128 || item.payload.size > 524288) { state.status = 503; return }
+            state.consumed.append(item.id)
+            val response = oneResponse(item.payload)
+            if (!response.valid) { state.status = 503; return }
+            state.pickers.remove(response.requestId)
+            sessions[index].queue.complete(item.payload)
+        }
+        if (inbox.items.size > 0) {
+            var rounds = 0
+            while (rounds < 8 && pump(index)) rounds = rounds + 1
+        }
     }
     val force = sessions[index].queue.cookiesChanged || sessions[index].queue.outbox.size > 0 || sessions[index].queue.moves.size > 0
     if (force) state.batch.changed(true)
@@ -189,7 +197,7 @@ fun OneLiveServer.recoverySettle(index: int): void {
         state.batch.failed(now)
         return
     }
-    val saved = recovery.save(state.id, recoveryOwner, state.epoch, state.version, body, state.consumed)
+    val saved = recovery.save(state.id, recoveryOwner, state.epoch, state.version, body, state.active, state.consumed)
     if (saved.status != 200) {
         sessions[index].durableFrontier = previous
         sessions[index].cssSent = 0; sessions[index].htmlSent = ""; sessions[index].changed = true
@@ -200,6 +208,7 @@ fun OneLiveServer.recoverySettle(index: int): void {
     }
     state.version = saved.version
     state.consumed.clear()
+    state.active = false
     state.batch.saved(state.batch.changes, now)
     val slot = sessions[index].slot
     for (outgoing in sessions[index].queue.takeOutbox()) queue(slot, webSocketEncodeFrame(outgoing, 1))

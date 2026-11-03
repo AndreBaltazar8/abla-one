@@ -17,7 +17,7 @@ class OneLiveRecoveryStore(
     val create: (HttpRequest, string, string, string, string) -> OneRecoveryResult,
     val attach: (HttpRequest, string, string, string) -> OneRecoveryResult,
     val inspect: (HttpRequest, string, string) -> OneRecoveryResult,
-    val save: (string, string, int, int, string, array<string>) -> OneRecoveryResult,
+    val save: (string, string, int, int, string, bool, array<string>) -> OneRecoveryResult,
     val fence: (string, string, int) -> int,
     val end: (string, string, int) -> int,
     val inbox: (string, string, int) -> OneRecoveryInbox,
@@ -34,7 +34,7 @@ fun oneLiveNoRecovery(): OneLiveRecoveryStore = OneLiveRecoveryStore(false,
     { request, id, proof, owner, body -> OneRecoveryResult(503) },
     { request, id, proof, owner -> OneRecoveryResult(503) },
     { request, id, proof -> OneRecoveryResult(503) },
-    { id, owner, epoch, version, body, consumed -> OneRecoveryResult(503) },
+    { id, owner, epoch, version, body, active, consumed -> OneRecoveryResult(503) },
     { id, owner, epoch -> 503 }, { id, owner, epoch -> 503 },
     { id, owner, epoch -> OneRecoveryInbox(503) },
     { request, ticket -> false },
@@ -55,7 +55,10 @@ class OneRecoveryState(
     var ready: bool = false,
     var checkedAt: int = -1000,
     var status: int = 200,
-    val consumed: array<string> = []
+    val consumed: array<string> = [],
+    var inboxAt: int = -1000,
+    var active: bool = true,
+    val pickers: Map<int, string> = Map()
 )
 
 val oneRecoverySessions: Map<string, OneRecoveryState> = Map()
@@ -89,4 +92,14 @@ fun oneRecoveryFileDelete(id: string, request: int, handle: string): int {
     if (state == null || state.status != 200) return 503
     val remove = state.store.deleteFile
     remove(id, state.owner, state.epoch, request, handle)
+}
+
+fun oneRecoveryPickerBegin(id: string, request: int, kind: string): bool {
+    val state = oneRecoverySessions.get(id)
+    if (state == null) return true
+    if (state.pickers.has(request)) return state.pickers.get(request) == kind
+    if (state.pickers.keys().size >= oneRecoveryPickerLimit) return false
+    state.pickers.set(request, kind)
+    state.batch.changed(true)
+    true
 }

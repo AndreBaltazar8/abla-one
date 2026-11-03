@@ -5,7 +5,18 @@ import "web_recovery.ab"
 // rehydrate authorization and render new handlers before old controls can replay.
 fun oneCheckpointInt(value: Json): bool = value.isNumber() && value.asNumber().integer && value.intAvailable()
 fun oneCheckpointCounter(value: Json): bool = oneCheckpointInt(value) && value.asInt() >= 0 && value.asInt() <= 9007199254740991
-fun oneCheckpointRoute(path: string): bool = path.size > 0 && path.size <= 2048 && path[0] == 47 && !path.startsWith("//") && !path.contains("\r") && !path.contains("\n")
+fun oneCheckpointRoute(path: string): bool {
+    if (path.size == 0 || path.size > 2048 || path[0] != 47 || path.startsWith("//")) return false
+    for (b in path) if (b < 32 || b == 127 || b == 92) return false
+    true
+}
+
+fun oneCheckpointPickers(session: OneLiveSession): Json {
+    val items: array<Json> = []
+    val state = oneRecoverySessions.get(session.id)
+    if (state != null) for (id in state.pickers.keys()) items.append(jsonObject(["id", "kind"], [jsonInteger(id), jsonString(state.pickers.get(id) ?? "")]))
+    jsonArray(items)
+}
 
 fun oneCheckpointMap(map: OneEventMap): Json {
     val events: array<Json> = []
@@ -30,8 +41,8 @@ fun oneCheckpoint(session: OneLiveSession, draft: Json): string {
     val maps: array<Json> = []
     for (map in session.maps) maps.append(oneCheckpointMap(map))
     jsonStringify(jsonObject(
-        ["v", "app", "route", "entry", "epoch", "revision", "nextId", "storage", "maps", "fenceFrom", "frontier", "typed", "operations", "shown", "width", "height", "canvas"],
-        [jsonInteger(1), draft, jsonString(session.queue.routes.current()), jsonInteger(session.queue.routes.entry()), jsonInteger(session.queue.routes.epoch), jsonInteger(session.revision), jsonInteger(session.queue.nextId), oneCheckpointStringMap(session.queue.storage), jsonArray(maps), jsonInteger(session.fence.from), jsonInteger(session.eventFrontier), jsonInteger(session.changeFrontier), oneLiveOperationCheckpoint(session.queue), jsonInteger(session.shown), jsonInteger(session.width), jsonInteger(session.height), jsonBoolean(session.canvas)]))
+        ["v", "app", "route", "entry", "epoch", "revision", "nextId", "storage", "maps", "fenceFrom", "frontier", "typed", "asked", "operations", "pickers", "shown", "width", "height", "canvas"],
+        [jsonInteger(1), draft, jsonString(session.queue.routes.current()), jsonInteger(session.queue.routes.entry()), jsonInteger(session.queue.routes.epoch), jsonInteger(session.revision), jsonInteger(session.queue.nextId), oneCheckpointStringMap(session.queue.storage), jsonArray(maps), jsonInteger(session.fence.from), jsonInteger(session.eventFrontier), jsonInteger(session.changeFrontier), jsonInteger(session.routeFrontier), oneLiveOperationCheckpoint(session.queue), oneCheckpointPickers(session), jsonInteger(session.shown), jsonInteger(session.width), jsonInteger(session.height), jsonBoolean(session.canvas)]))
 }
 
 fun oneCheckpointStringObject(value: Json): bool {
@@ -43,10 +54,19 @@ fun oneCheckpointStringObject(value: Json): bool {
 fun oneCheckpointValid(value: Json): bool {
     if (!value.isObject() || !oneCheckpointInt(value.get("v")) || value.get("v").asInt() != 1 || !value.get("app").isObject()) return false
     if (!value.get("route").isString() || !oneCheckpointRoute(value.get("route").asString()) || !oneCheckpointStringObject(value.get("storage"))) return false
-    for (key in ["entry", "epoch", "revision", "nextId", "fenceFrom", "frontier", "typed", "width", "height"]) if (!oneCheckpointCounter(value.get(key))) return false
+    for (key in ["entry", "epoch", "revision", "nextId", "fenceFrom", "frontier", "typed", "asked", "width", "height"]) if (!oneCheckpointCounter(value.get(key))) return false
     val protocol = oneLiveQueue()
     protocol.nextId = value.get("nextId").asInt()
     if (!oneLiveOperationRestore(protocol, value.get("operations"))) return false
+    val pickers = value.get("pickers")
+    if (!pickers.isArray() || pickers.values.size > oneRecoveryPickerLimit) return false
+    val pending: Map<int, bool> = Map()
+    for (picker in pickers.values) {
+        if (!picker.isObject() || !oneCheckpointCounter(picker.get("id")) || picker.get("id").asInt() == 0 || picker.get("id").asInt() > protocol.nextId || !picker.get("kind").isString()) return false
+        val kind = picker.get("kind").asString()
+        if ((kind != "files" && kind != "profile" && kind != "emoji") || pending.has(picker.get("id").asInt())) return false
+        pending.set(picker.get("id").asInt(), true)
+    }
     if (!oneCheckpointInt(value.get("shown")) || !value.get("canvas").isBoolean()) return false
     if (value.get("width").asInt() > 65536 || value.get("height").asInt() > 65536 || value.get("fenceFrom").asInt() > value.get("revision").asInt()) return false
     val maps = value.get("maps")
@@ -111,6 +131,8 @@ fun oneCheckpointRestore(var session: OneLiveSession, value: Json): void {
     session.eventFrontier = value.get("frontier").asInt()
     session.changeFrontier = value.get("typed").asInt()
     session.changeAnswer = session.changeFrontier
+    session.routeFrontier = value.get("asked").asInt()
+    session.routeAnswer = session.routeFrontier
     oneLiveOperationRestore(session.queue, value.get("operations"))
     session.durableFrontier = session.eventFrontier
     session.eventAckSent = -1
@@ -122,5 +144,10 @@ fun oneCheckpointRestore(var session: OneLiveSession, value: Json): void {
     session.cssSent = 0
     session.htmlSent = ""
     session.changed = true
+    val state = oneRecoverySessions.get(session.id)
+    if (state != null) {
+        for (id in state.pickers.keys()) state.pickers.remove(id)
+        for (picker in value.get("pickers").values) state.pickers.set(picker.get("id").asInt(), picker.get("kind").asString())
+    }
     return
 }

@@ -27,6 +27,10 @@ fun main: int {
     var a = oneSession("node-a", aApp, aQueue)
     a.eventFrontier = 7
     a.changeFrontier = 12
+    a.routeFrontier = 3
+    val aState = OneRecoveryState("node-a", "test-proof", "test-owner", oneLiveNoRecovery())
+    aState.pickers.set(40, "files")
+    oneRecoverySessions.set("node-a", aState)
     aQueue.eventContext = "opaque-operation"
     aQueue.eventOrdinal = 1
     aQueue.requestContexts.set(40, "opaque-operation/r1")
@@ -45,9 +49,13 @@ fun main: int {
     bQueue.storage.set("test-session", "fresh-credential")
     val bApp = CheckpointApp("Delete customer", saved.get("app").get("text").asString())
     var b = oneSession("node-b", bApp, bQueue)
+    val bState = OneRecoveryState("node-b", "test-proof", "other-owner", oneLiveNoRecovery())
+    oneRecoverySessions.set("node-b", bState)
     oneCheckpointRestore(b, saved)
     expect(b.eventFrontier == 7 && b.durableFrontier == 7 && b.deferEventAck, "recovery starts from the durable event frontier")
     expect(b.changeFrontier == 12 && b.changeAnswer == 12, "lost durable typing patch is acknowledged on the new node")
+    expect(b.routeFrontier == 3 && b.routeAnswer == 3, "lost durable navigation patch is acknowledged on the new node")
+    expect(bState.pickers.get(40) == "files", "pending picker metadata survives owner loss")
     expect(bQueue.eventContext == "opaque-operation" && bQueue.requestContexts.get(40) == "opaque-operation/r1", "opaque pending-operation ancestry survives without raw HTTP requests")
     expect(bQueue.storage.get("test-session") == "fresh-credential", "authorization hydration wins over old checkpoint credentials")
     expect(b.changed && b.htmlSent == "" && b.cssSent == 0, "restored session sends a full fresh authorized render")
@@ -60,6 +68,7 @@ fun main: int {
     expect(oneCheckpointRead(jsonStringify(replace(saved, "frontier", jsonString("7")))) == null, "frontier strings are not coerced")
     expect(oneCheckpointRead(jsonStringify(replace(saved, "revision", jsonNumberText("1.5")))) == null, "fractional revisions are refused")
     expect(oneCheckpointRead(jsonStringify(replace(saved, "route", jsonString("//foreign.test/path")))) == null, "external route targets are refused")
+    expect(oneCheckpointRead(jsonStringify(replace(saved, "route", jsonString("/\\foreign.test/path")))) == null, "browser-normalized backslash authority targets are refused")
     expect(oneCheckpointRead(jsonStringify(replace(saved, "app", jsonArray([])))) == null, "application checkpoint must be an object")
     expect(oneCheckpointRead(jsonStringify(replace(saved, "storage", jsonObject(["token"], [jsonInteger(1)])))) == null, "stored values retain exact string types")
     expect(oneCheckpointRead(jsonStringify(replace(saved, "width", jsonInteger(1000000)))) == null, "corrupt viewport sizes are bounded")
@@ -69,5 +78,10 @@ fun main: int {
     var huge = "x"
     while (huge.size <= oneRecoveryCheckpointLimit) huge = "$huge$huge"
     expect(oneCheckpointRead(huge) == null, "oversized data is rejected before parsing")
+    expect(oneRecoveryPickerBegin("node-b", 41, "files") && oneRecoveryPickerBegin("node-b", 42, "profile") && oneRecoveryPickerBegin("node-b", 43, "emoji"), "four pending pickers can coexist")
+    expect(!oneRecoveryPickerBegin("node-b", 44, "files"), "a fifth picker is refused before exposing another browser dialog")
+    expect(oneRecoveryPickerBegin("node-b", 40, "files") && bState.pickers.keys().size == 4, "registering an existing picker does not consume capacity twice")
+    oneRecoverySessions.remove("node-a")
+    oneRecoverySessions.remove("node-b")
     testsPassed()
 }
