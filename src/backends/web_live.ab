@@ -11,6 +11,7 @@ import "abla/sys/linux/process"
 import "../one.ab"
 import "web_document.ab"
 import "web_session.ab"
+import "web_recovery_live.ab"
 import "../layout/paint.ab"
 
 // Live web (SPEC §10, web-document M2): apps run on the server, one session
@@ -45,7 +46,9 @@ class OneLiveSlot(
     // Tells this connection from an earlier one in the same slot, for tickets.
     var generation: int,
     // A socket of the application's (OneLiveSockets), not a page's.
-    var appSocket: bool
+    var appSocket: bool,
+    var recoveryRequest: HttpRequest? = null,
+    var awaitingRecovery: bool = false
 )
 
 class OneLiveOptions(
@@ -115,7 +118,9 @@ resource class OneLiveServer(
     val poller: SocketPoller,
     val slots: array<OneLiveSlot>,
     val sessions: array<OneLiveSession>,
-    var stopped: bool
+    var stopped: bool,
+    val recovery: OneLiveRecoveryStore,
+    val recoveryOwner: string
 ) {
     fun drop(): void {
         for (slot in slots) if (slot.descriptor >= 0) linuxTcpCloseDescriptor(slot.descriptor)
@@ -145,13 +150,14 @@ fun oneLiveServer(
     options: OneLiveOptions,
     storage: OneLiveStorage = oneLiveNoStorage(),
     sockets: OneLiveSockets = oneLiveNoSockets(),
-    defers: (HttpRequest, int) -> bool = oneLiveNoDefers()
+    defers: (HttpRequest, int) -> bool = oneLiveNoDefers(),
+    recovery: OneLiveRecoveryStore = oneLiveNoRecovery()
 ): OneLiveServer {
     val listener = tcpListenAddress(address, 1024)
     listener.setNonblocking()
     val poller = socketPoller()
     if (listener.descriptor >= 0 && poller.descriptor >= 0) poller.watchDescriptor(listener.descriptor)
-    OneLiveServer(handler, isPage, factory, theme, options, storage, sockets, defers, move(listener), move(poller), [], [], false)
+    OneLiveServer(handler, isPage, factory, theme, options, storage, sockets, defers, move(listener), move(poller), [], [], false, recovery, oneLiveSessionId())
 }
 
 // Claims the paths an app declares, as `isPage`: "/people", "/form/:n", "/docs/*".
@@ -271,6 +277,8 @@ fun OneLiveServer.closeSlot(slot: int): void {
     slots[slot].upgraded = false
     slots[slot].session = ""
     slots[slot].closing = false
+    slots[slot].recoveryRequest = null
+    slots[slot].awaitingRecovery = false
     return
 }
 
@@ -391,6 +399,16 @@ fun OneLiveServer.httpWithPeer(slot: int): void {
     slots[slot].input = input.slice(end + length, input.size)
     if (request.path == "/one/live" && webSocketIsUpgradeRequest(request)) {
         val id = request.queryParameter("s")
+        if (recovery.enabled) {
+            if (!oneRecoveryIdentifier(id)) { queue(slot, httpText("Invalid session", 400).render()); slots[slot].closing = true; return }
+            slots[slot].recoveryRequest = request
+            slots[slot].awaitingRecovery = true
+            slots[slot].upgraded = true
+            slots[slot].session = id
+            queue(slot, webSocketUpgradeResponse(request).render())
+            frames(slot)
+            return
+        }
         // A session's first socket comes from the page load that just opened it or passed the check.
         val session = if (findSession(id) >= 0 && !sessions[findSession(id)].connected) findSession(id) else resumable(request, id)
         if (session < 0) {
@@ -423,6 +441,13 @@ fun OneLiveServer.httpWithPeer(slot: int): void {
     }
     val defers = this.defers
     if (!oneLiveReserved(request.path) && defers(request, this.ticket(slot))) return
+    if (recovery.enabled && request.path == "/one/upload" && request.method == "POST") {
+        val start = recovery.upload
+        if (start(request, this.ticket(slot))) return
+        queue(slot, httpText("Storage unavailable", 503).render())
+        slots[slot].closing = true
+        return
+    }
     val response = if (request.path == "/one/upload" && request.method == "POST") upload(request)
         else if (request.path == "/one/cookies") cookies(request)
         else if (request.path == "/one/host.js")
@@ -480,6 +505,7 @@ fun OneLiveServer.upload(request: HttpRequest): HttpResponse {
 // The cookies for a session's stored values, fetched by the page after the
 // session reports a change (`{"t":"cookies"}`).
 fun OneLiveServer.cookies(request: HttpRequest): HttpResponse {
+    if (recovery.enabled) return recoveryCookies(request)
     val index = findSession(request.queryParameter("s"))
     val headers: array<HttpHeader> = [HttpHeader("Cache-Control", "no-store")]
     if (index >= 0) for (line in sessionCookies(request, index)) headers.append(HttpHeader("Set-Cookie", line))
@@ -555,7 +581,11 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val settled = oneRouteWithoutHash(sessions[index].queue.routes.current())
     sessions[index].cssSent = sessions[index].css.rules.size
     sessions[index].htmlSent = markup
-    val boot = "{\"s\":\"${sessions[index].id}\",\"r\":${sessions[index].revision},\"icons\":\"${options.iconBase}\"${if (settled != route) ",\"route\":${oneLiveScriptString(settled)}" else ""}}"
+    val recoveryStatus = recoveryStart(request, index)
+    if (recoveryStatus != 200) return httpText("Session storage unavailable", recoveryStatus)
+    val recoverable = oneRecoverySessions.get(sessions[index].id)
+    val proof = if (recoverable != null) ",\"proof\":${oneLiveScriptString(recoverable.proof)}" else ""
+    val boot = "{\"s\":\"${sessions[index].id}\",\"r\":${sessions[index].revision},\"icons\":\"${options.iconBase}\"$proof${if (settled != route) ",\"route\":${oneLiveScriptString(settled)}" else ""}}"
     val session = sessions[index]
     val fill = if (session.document) "min-height:100%" else "height:100%"
     val body = "<!doctype html><html lang=\"${oneHtmlEscape(if (session.lang != "") session.lang else options.lang)}\"><head><meta charset=\"utf-8\"><base href=\"${oneRouteBase(route)}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(if (session.title != "") session.title else options.title)}</title>${session.meta}${options.head}" +
@@ -622,6 +652,7 @@ fun OneLiveServer.frames(slot: int): void {
 // Messages from the page host: {"t":"event","r":revision,"id":n,"v":value}
 // and {"t":"hello"} after (re)connecting.
 fun OneLiveServer.message(slot: int, payload: string): void {
+    if (slots[slot].awaitingRecovery) { recoveryHello(slot, payload); return }
     val index = findSession(slots[slot].session)
     if (index < 0) return
     val parsed = jsonParse(payload)
@@ -629,15 +660,22 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     val m = parsed.value
     sessions[index].lastSeen = oneLiveNow()
     oneSessionMessage(sessions[index], theme, m)
+    val persisted = oneRecoverySessions.get(sessions[index].id)
+    if (persisted != null) persisted.batch.changed(m.getString("t") != "event" || m.get("id").asInt() <= oneChangeBase)
     return
 }
 
 // Runs one round of a session's platform work. Returns whether anything ran.
 fun OneLiveServer.pump(index: int): bool {
+    if (!recoveryFence(index, false)) return false
     val moved = sessions[index].deliverRoutes()
     var requests = sessions[index].queue.takeRequests()
     while (requests.size > 0) {
-        for (item in requests) sessions[index].queue.complete(oneLiveExecute(handler, item))
+        for (item in requests) {
+            if (!recoveryFence(index, true)) { sessions[index].queue.request(item); continue }
+            sessions[index].queue.complete(oneLiveExecute(handler, item))
+        }
+        if (!recoveryFence(index, false)) return false
         requests = sessions[index].queue.takeRequests()
     }
     val completions = sessions[index].queue.takeCompletions()
@@ -766,6 +804,11 @@ fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimer
         if (timersReady(sessions[index])) sessions[index].queue.fireTimers(now)
         var rounds = 0
         while (rounds < 8 && pump(index)) rounds = rounds + 1
+        if (recovery.enabled) {
+            recoverySettle(index)
+            index = index + 1
+            continue
+        }
         if (sessions[index].slot >= 0) for (message in sessions[index].queue.takeOutbox()) queue(sessions[index].slot, webSocketEncodeFrame(message, 1))
         if (sessions[index].queue.cookiesChanged && sessions[index].slot >= 0) {
             sessions[index].queue.cookiesChanged = false

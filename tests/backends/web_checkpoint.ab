@@ -26,6 +26,10 @@ fun main: int {
     val aApp = CheckpointApp("Submit invoice", "ação 📝")
     var a = oneSession("node-a", aApp, aQueue)
     a.eventFrontier = 7
+    a.changeFrontier = 12
+    aQueue.eventContext = "opaque-operation"
+    aQueue.eventOrdinal = 1
+    aQueue.requestContexts.set(40, "opaque-operation/r1")
     a.render(oneDefaultTheme(), "/icons")
     val encoded = oneCheckpoint(a, jsonObject(["text"], [jsonString(aApp.draft)]))
     val saved = oneCheckpointRead(encoded)
@@ -43,6 +47,8 @@ fun main: int {
     var b = oneSession("node-b", bApp, bQueue)
     oneCheckpointRestore(b, saved)
     expect(b.eventFrontier == 7 && b.durableFrontier == 7 && b.deferEventAck, "recovery starts from the durable event frontier")
+    expect(b.changeFrontier == 12 && b.changeAnswer == 12, "lost durable typing patch is acknowledged on the new node")
+    expect(bQueue.eventContext == "opaque-operation" && bQueue.requestContexts.get(40) == "opaque-operation/r1", "opaque pending-operation ancestry survives without raw HTTP requests")
     expect(bQueue.storage.get("test-session") == "fresh-credential", "authorization hydration wins over old checkpoint credentials")
     expect(b.changed && b.htmlSent == "" && b.cssSent == 0, "restored session sends a full fresh authorized render")
     b.render(oneDefaultTheme(), "/icons")

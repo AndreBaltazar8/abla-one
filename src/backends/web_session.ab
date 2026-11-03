@@ -3,6 +3,7 @@ import "abla/crypto"
 import "abla/process/time"
 import "../one.ab"
 import "web_document.ab"
+import "web_recovery_store.ab"
 import "../layout/paint.ab"
 
 // A web session, wherever it runs: on the server (web_live.ab, over a
@@ -302,6 +303,13 @@ class OneLiveServices(val session: string) : OneServices {
         id
     }
     fun readFile(file: OneFile, offset: int, length: int): int {
+        if (oneRecoverySessions.has(session)) {
+            val id = nextId()
+            val count = if (length > 262144) 262144 else if (length < 0) 0 else length
+            val status = oneRecoveryFileRead(session, id, file.handle, if (offset < 0) 0 else offset, count)
+            if (status != 200) complete(id, status, "", "File unavailable")
+            return id
+        }
         val bytes = oneLiveQueueList[oneLiveQueueIndex(session)].fileBytes.get(file.handle)
         if (bytes == null) return complete(nextId(), 404, "", "unknown file handle")
         val start = if (offset < 0) 0 else if (offset > bytes.size) bytes.size else offset
@@ -311,8 +319,15 @@ class OneLiveServices(val session: string) : OneServices {
         oneLiveQueueList[oneLiveQueueIndex(session)].complete(jsonStringify(jsonObject(["requestId", "status", "body", "error", "bodyBase64"], [jsonInteger(id), jsonInteger(200), jsonString(""), jsonString(""), jsonString(base64Encode(bytes.slice(start, end)))])))
         id
     }
-    fun deleteFile(file: OneFile): int =
-        complete(nextId(), if (oneLiveQueueList[oneLiveQueueIndex(session)].removeFile(file.handle)) 204 else 404, "", "")
+    fun deleteFile(file: OneFile): int {
+        val id = nextId()
+        if (oneRecoverySessions.has(session)) {
+            val status = oneRecoveryFileDelete(session, id, file.handle)
+            if (status != 200) complete(id, status, "", "File unavailable")
+            return id
+        }
+        complete(id, if (oneLiveQueueList[oneLiveQueueIndex(session)].removeFile(file.handle)) 204 else 404, "", "")
+    }
     // Normalized in the browser like the Android host: "profile" is a 256px
     // square JPEG, "emoji" a small transparent PNG, both at most 10 KB.
     fun pickImage(kind: string): int {
@@ -322,6 +337,8 @@ class OneLiveServices(val session: string) : OneServices {
     }
     fun clearImageCache(): void { return }
     fun effect(kind: string, payload: string): bool {
+        if (kind == "live-checkpoint") return oneRecoveryCapture(session, payload)
+        if (kind == "live-restored") return oneRecoveryReady(session)
         if (kind == "subscribe") {
             oneLiveQueueList[oneLiveQueueIndex(session)].subscribe(payload)
             return true
@@ -390,7 +407,10 @@ class OneLiveSession(
     var eventFrontier: int = 0,
     var durableFrontier: int = 0,
     var eventAckSent: int = 0,
-    var deferEventAck: bool = false
+    var deferEventAck: bool = false,
+    // Retained separately: changeAnswer is consumed while preparing a patch,
+    // but a new node must acknowledge typing whose durable patch was lost.
+    var changeFrontier: int = 0
 ) {
     // The tree of the current state, with its event map: a new revision.
     fun tree(theme: Theme): Node {
@@ -509,6 +529,7 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
         session.queue.eventOrdinal = previousOrdinal
         if (m.get("c").intAvailable()) {
             session.changeAnswer = m.get("c").asInt()
+            session.changeFrontier = session.changeAnswer
             session.changed = true
         }
     }

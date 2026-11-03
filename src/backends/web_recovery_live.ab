@@ -1,0 +1,226 @@
+import "web_live.ab"
+import "web_checkpoint.ab"
+import "web_recovery_store.ab"
+
+fun oneRecoveryIdentifier(value: string): bool {
+    if (value.size != 32 && value.size != 64) return false
+    for (b in value) if (!((b >= 48 && b <= 57) || (b >= 97 && b <= 102))) return false
+    true
+}
+
+fun OneLiveServer.recoveryCapture(index: int): string? {
+    val state = oneRecoverySessions.get(sessions[index].id)
+    if (state == null) return null
+    state.captured = false
+    sessions[index].app.receive("checkpoint", "")
+    if (!state.captured) return null
+    val body = oneCheckpoint(sessions[index], state.draft)
+    if (body.size > oneRecoveryCheckpointLimit || oneCheckpointRead(body) == null) return null
+    body
+}
+
+fun OneLiveServer.recoveryStart(request: HttpRequest, index: int): int {
+    if (!recovery.enabled) return 200
+    val id = sessions[index].id
+    if (!oneRecoverySessions.has(id)) {
+        val created = OneRecoveryState(id, "${oneLiveSessionId()}${oneLiveSessionId()}", recoveryOwner, recovery)
+        created.ready = true
+        oneRecoverySessions.set(id, created)
+    }
+    val state = oneRecoverySessions.get(id)
+    if (state == null) return 503
+    sessions[index].deferEventAck = true
+    val body = recoveryCapture(index)
+    if (body == null) return 503
+    val stored = if (state.epoch == 0) recovery.create(request, id, state.proof, recoveryOwner, body)
+        else recovery.save(id, recoveryOwner, state.epoch, state.version, body, [])
+    if (stored.status != 200) return stored.status
+    state.epoch = stored.epoch
+    state.version = stored.version
+    state.checkedAt = oneLiveNow()
+    state.batch.saved(state.batch.changes, oneLiveNow())
+    200
+}
+
+fun oneRecoveryRequest(request: HttpRequest, route: string): HttpRequest {
+    val path = oneRouteWithoutHash(route)
+    val query = path.indexOf("?")
+    HttpRequest("GET", if (query < 0) path else path.slice(0, query), if (query < 0) "" else path.slice(query + 1, path.size), request.headers, "", [], [])
+}
+
+// Forget only this process's app/handlers. Claiming another epoch is not signout
+// and must never delete the durable state another process is about to resume.
+fun OneLiveServer.recoveryForgetLocal(id: string, currentSlot: int): void {
+    val kept: array<OneLiveSession> = []
+    for (session in sessions) {
+        if (session.id != id) kept.append(session)
+        else if (session.slot >= 0 && session.slot != currentSlot) {
+            queue(session.slot, webSocketEncodeFrame(webSocketClosePayload(1012, "session moved"), 8))
+            slots[session.slot].session = ""
+            slots[session.slot].closing = true
+        }
+    }
+    sessions.clear()
+    for (session in kept) sessions.append(session)
+    oneLiveForget(id)
+    oneMemoForget(id)
+    oneRecoverySessions.remove(id)
+    return
+}
+
+fun OneLiveServer.recoveryRefuse(slot: int, status: int): void {
+    val ending = status == 403 || status == 404 || status == 410
+    queue(slot, webSocketEncodeFrame(webSocketClosePayload(if (ending) 1008 else 1013, if (ending) "session ended" else "session storage unavailable"), 8))
+    slots[slot].closing = true
+    return
+}
+
+fun OneLiveServer.recoveryHello(slot: int, text: string): void {
+    if (text.size > 16384) { recoveryRefuse(slot, 403); return }
+    val parsed = jsonParse(text)
+    val request = slots[slot].recoveryRequest
+    if (!parsed.succeeded || request == null || parsed.value.getString("t") != "hello" || !parsed.value.get("proof").isString()) { recoveryRefuse(slot, 403); return }
+    val id = slots[slot].session
+    val proof = parsed.value.get("proof").asString()
+    if (!oneRecoveryIdentifier(proof)) { recoveryRefuse(slot, 403); return }
+    val loaded = recovery.attach(request, id, proof, recoveryOwner)
+    if (loaded.status != 200) { recoveryRefuse(slot, loaded.status); return }
+    val saved = oneCheckpointRead(loaded.payload)
+    if (saved == null) { recoveryRefuse(slot, 503); return }
+    val held: Map<string, string> = Map()
+    for (key in saved.get("storage").keys) held.set(key, saved.get("storage").get(key).asString())
+    if (!storage.resumes(request, held)) { recoveryRefuse(slot, 403); return }
+    recoveryForgetLocal(id, slot)
+    val state = OneRecoveryState(id, proof, recoveryOwner, recovery, loaded.epoch, loaded.version)
+    state.restored = true
+    state.checkedAt = oneLiveNow()
+    oneRecoverySessions.set(id, state)
+    val queueIndex = oneLiveQueueIndex(id)
+    oneCheckpointSeed(oneLiveQueueList[queueIndex], saved)
+    val app = factory(oneRecoveryRequest(request, saved.get("route").asString()), id)
+    sessions.append(oneSession(id, app, oneLiveQueueList[queueIndex]))
+    val index = sessions.size - 1
+    var rounds = 0
+    while (rounds < 16 && pump(index)) rounds = rounds + 1
+    oneCheckpointRestore(sessions[index], saved)
+    sessions[index].app.receive("restore", jsonStringify(saved.get("app")))
+    rounds = 0
+    while (rounds < 16 && pump(index)) rounds = rounds + 1
+    sessions[index].slot = slot
+    sessions[index].connected = true
+    sessions[index].lastSeen = oneLiveNow()
+    slots[slot].awaitingRecovery = false
+    slots[slot].recoveryRequest = null
+    oneSessionMessage(sessions[index], theme, parsed.value)
+    state.batch.changed(true)
+    return
+}
+
+fun OneLiveServer.recoveryCookies(request: HttpRequest): HttpResponse {
+    if (request.method != "POST") return httpText("Method not allowed", 405)
+    val id = request.queryParameter("s")
+    val proof = request.header("x-one-proof")
+    if (!oneRecoveryIdentifier(id) || !oneRecoveryIdentifier(proof)) return httpText("Session unavailable", 403)
+    val loaded = recovery.inspect(request, id, proof)
+    if (loaded.status != 200) return httpText("Session unavailable", loaded.status)
+    val saved = oneCheckpointRead(loaded.payload)
+    if (saved == null) return httpText("Session unavailable", 503)
+    val stored: Map<string, string> = Map()
+    for (key in saved.get("storage").keys) stored.set(key, saved.get("storage").get(key).asString())
+    if (!storage.resumes(request, stored)) return httpText("Session unavailable", 403)
+    val headers: array<HttpHeader> = [HttpHeader("Cache-Control", "no-store")]
+    for (key in stored.keys()) for (cookie in storage.cookies(request, key, stored.get(key) ?? "")) headers.append(HttpHeader("Set-Cookie", cookie))
+    HttpResponse(204, headers, "")
+}
+
+fun OneLiveServer.recoveryFence(index: int, immediate: bool): bool {
+    if (!recovery.enabled) return true
+    val state = oneRecoverySessions.get(sessions[index].id)
+    // A new SSR app hydrates before it is registered durably.
+    if (state == null || state.epoch == 0) return true
+    if (state.status == 409 || state.status == 403 || state.status == 404) return false
+    val now = oneLiveNow()
+    if (!immediate && now - state.checkedAt < oneRecoveryBatchMilliseconds) return state.status == 200
+    state.checkedAt = now
+    state.status = recovery.fence(state.id, recoveryOwner, state.epoch)
+    if (state.status == 409 || state.status == 403 || state.status == 404) {
+        val slot = sessions[index].slot
+        if (slot >= 0) {
+            queue(slot, webSocketEncodeFrame(webSocketClosePayload(1012, "session moved"), 8))
+            slots[slot].closing = true
+        }
+    }
+    state.status == 200
+}
+
+fun OneLiveServer.recoverySettle(index: int): void {
+    val state = oneRecoverySessions.get(sessions[index].id)
+    if (state == null || sessions[index].slot < 0 || !state.ready || !recoveryFence(index, false)) return
+    val inbox = recovery.inbox(state.id, recoveryOwner, state.epoch)
+    if (inbox.status != 200) { state.status = inbox.status; return }
+    for (item in inbox.items) if (!oneRecoveryConsumed(state, item.id)) {
+        state.consumed.append(item.id)
+        sessions[index].queue.complete(item.payload)
+    }
+    if (inbox.items.size > 0) {
+        var rounds = 0
+        while (rounds < 8 && pump(index)) rounds = rounds + 1
+    }
+    val force = sessions[index].queue.cookiesChanged || sessions[index].queue.outbox.size > 0 || sessions[index].queue.moves.size > 0
+    if (force) state.batch.changed(true)
+    else if (sessions[index].changed && !state.batch.pending) state.batch.changed()
+    val now = oneLiveNow()
+    if (!state.batch.due(now)) return
+    val previous = sessions[index].durableFrontier
+    val routeAnswer = sessions[index].routeAnswer
+    val changeAnswer = sessions[index].changeAnswer
+    val viewportAnswer = sessions[index].viewportAnswer
+    val moves: array<Json> = []
+    for (move in sessions[index].queue.moves) moves.append(move)
+    sessions[index].durableFrontier = sessions[index].eventFrontier
+    // Prepare the exact render/maps represented by this checkpoint. Nothing is
+    // sent before the CAS. A failed attempt resets the CSS/HTML send baseline.
+    val message = oneSessionUpdate(sessions[index], theme, options.iconBase)
+    val body = recoveryCapture(index)
+    if (body == null) {
+        sessions[index].durableFrontier = previous
+        sessions[index].cssSent = 0; sessions[index].htmlSent = ""; sessions[index].changed = true
+        recoveryRetryRender(index, routeAnswer, changeAnswer, viewportAnswer, moves)
+        state.batch.failed(now)
+        return
+    }
+    val saved = recovery.save(state.id, recoveryOwner, state.epoch, state.version, body, state.consumed)
+    if (saved.status != 200) {
+        sessions[index].durableFrontier = previous
+        sessions[index].cssSent = 0; sessions[index].htmlSent = ""; sessions[index].changed = true
+        recoveryRetryRender(index, routeAnswer, changeAnswer, viewportAnswer, moves)
+        state.batch.failed(now)
+        if (saved.status != 503) state.status = saved.status
+        return
+    }
+    state.version = saved.version
+    state.consumed.clear()
+    state.batch.saved(state.batch.changes, now)
+    val slot = sessions[index].slot
+    for (outgoing in sessions[index].queue.takeOutbox()) queue(slot, webSocketEncodeFrame(outgoing, 1))
+    if (sessions[index].queue.cookiesChanged) {
+        sessions[index].queue.cookiesChanged = false
+        queue(slot, webSocketEncodeFrame("{\"t\":\"cookies\"}", 1))
+    }
+    if (message != "") queue(slot, webSocketEncodeFrame(message, 1))
+    return
+}
+
+fun oneRecoveryConsumed(state: OneRecoveryState, id: string): bool {
+    for (seen in state.consumed) if (seen == id) return true
+    false
+}
+
+fun OneLiveServer.recoveryRetryRender(index: int, route: int, typed: int, viewport: int, moves: array<Json>): void {
+    sessions[index].eventAckSent = -1
+    sessions[index].routeAnswer = route
+    sessions[index].changeAnswer = typed
+    sessions[index].viewportAnswer = viewport
+    for (move in moves) sessions[index].queue.moves.append(move)
+    return
+}
