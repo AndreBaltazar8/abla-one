@@ -676,7 +676,8 @@ fun oneLiveExecuteWithoutPeer(handler: (HttpRequest) -> HttpResponse, item: OneL
         i = i + 1
     }
     val headers: array<HttpHeader> = []
-    for (h in r.headers) headers.append(HttpHeader(oneLowerAscii(h.name), h.value))
+    for (h in r.headers) if (oneLowerAscii(h.name) != "x-one-live-operation") headers.append(HttpHeader(oneLowerAscii(h.name), h.value))
+    if (item.operation != "") headers.append(HttpHeader("x-one-live-operation", item.operation))
     var body = r.body
     if (r.bodyBase64 != "") body = base64Decode(r.bodyBase64)
     if (r.bodyFile != "") {

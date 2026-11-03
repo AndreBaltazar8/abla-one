@@ -31,7 +31,7 @@ fun oneLiveResetClock(): void {
     return
 }
 
-class OneLiveRequest(val id: int, val request: OneRequest)
+class OneLiveRequest(val id: int, val request: OneRequest, val operation: string = "")
 class OneLiveTimer(val id: int, val due: int)
 
 // A session's platform state, shared between the session and its services.
@@ -52,7 +52,10 @@ class OneLiveQueue(
     val routes: OneRoutes,
     // A page holds the history (web sessions): moves for it, sent with the next patch.
     var browser: bool,
-    val moves: array<Json>
+    val moves: array<Json>,
+    var eventContext: string = "",
+    var eventOrdinal: int = 0,
+    val requestContexts: Map<int, string> = Map()
 ) {
     fun takeRequests(): array<OneLiveRequest> {
         val out: array<OneLiveRequest> = []
@@ -183,6 +186,32 @@ class OneLiveQueue(
 
 fun oneLiveQueue(): OneLiveQueue = OneLiveQueue(0, [], [], [], Map(), [], [], false, [], Map(), Map(), oneRoutes(), false, [])
 
+// Only opaque operation IDs and local request numbers go in the checkpoint;
+// request payloads and credentials remain outside it.
+fun oneLiveOperationCheckpoint(queue: OneLiveQueue): Json {
+    val entries: array<Json> = []
+    for (id in queue.requestContexts.keys()) entries.append(jsonObject(["id", "operation"], [jsonInteger(id), jsonString(queue.requestContexts.get(id) ?? "")]))
+    jsonObject(["context", "ordinal", "requests"], [jsonString(queue.eventContext), jsonInteger(queue.eventOrdinal), jsonArray(entries)])
+}
+fun oneLiveOperationRestore(var queue: OneLiveQueue, data: Json): bool {
+    val ordinal = data.get("ordinal")
+    val entries = data.get("requests")
+    val context = data.get("context")
+    if (!data.isObject() || !context.isString() || context.asString().size > 512 || !ordinal.isNumber() || !ordinal.asNumber().integer || !ordinal.intAvailable() || ordinal.asInt() < 0 || !entries.isArray() || entries.size() > 4096) return false
+    val restored: Map<int, string> = Map()
+    for (entry in entries.values) {
+        val number = entry.get("id")
+        val operation = entry.get("operation")
+        if (!entry.isObject() || !number.isNumber() || !number.asNumber().integer || !number.intAvailable() || number.asInt() < 1 || number.asInt() > queue.nextId || !operation.isString() || operation.asString().size < 1 || operation.asString().size > 512 || restored.has(number.asInt())) return false
+        restored.set(number.asInt(), operation.asString())
+    }
+    queue.eventContext = context.asString()
+    queue.eventOrdinal = ordinal.asInt()
+    for (id in queue.requestContexts.keys()) queue.requestContexts.remove(id)
+    for (id in restored.keys()) queue.requestContexts.set(id, restored.get(id) ?? "")
+    true
+}
+
 // Session queues, shared by each session's services and the server. They are
 // reached through this global (by session id), which is how both sides may
 // change the same queue.
@@ -226,14 +255,24 @@ fun oneLiveServices(session: string): OneServices {
 }
 
 class OneLiveServices(val session: string) : OneServices {
-    fun nextId(): int = oneLiveQueueList[oneLiveQueueIndex(session)].allocate()
+    fun nextId(): int {
+        val q = oneLiveQueueList[oneLiveQueueIndex(session)]
+        val id = q.allocate()
+        if (q.eventContext != "") {
+            q.eventOrdinal = q.eventOrdinal + 1
+            q.requestContexts.set(id, "${q.eventContext}.${q.eventOrdinal}")
+        }
+        id
+    }
     fun complete(id: int, status: int, body: string, error: string): int {
         oneLiveQueueList[oneLiveQueueIndex(session)].complete(oneResponsePayload(id, status, body, error))
         id
     }
     fun send(request: OneRequest): int {
         val id = nextId()
-        oneLiveQueueList[oneLiveQueueIndex(session)].request(OneLiveRequest(id, request))
+        val q = oneLiveQueueList[oneLiveQueueIndex(session)]
+        val operation = q.requestContexts.get(id) ?? ""
+        q.request(OneLiveRequest(id, request, operation))
         id
     }
     fun secureRead(key: string): int {
@@ -416,7 +455,17 @@ class OneLiveSession(
     }
     fun receive(kind: string, payload: string): void {
         oneMemoScope = id
+        val previous = queue.eventContext
+        val previousOrdinal = queue.eventOrdinal
+        if (kind == "result") {
+            val completed = oneResponse(payload).requestId
+            queue.eventContext = queue.requestContexts.get(completed) ?? ""
+            queue.requestContexts.remove(completed)
+            queue.eventOrdinal = 0
+        }
         app.receive(kind, payload)
+        queue.eventContext = previous
+        queue.eventOrdinal = previousOrdinal
         changed = true
         return
     }
@@ -451,7 +500,13 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
     val kind = m.getString("t")
     if (kind == "event") {
         if (!oneLiveEventBegin(session, m)) return
+        val previous = session.queue.eventContext
+        val previousOrdinal = session.queue.eventOrdinal
+        session.queue.eventContext = if (m.get("u").isString()) m.getString("u") else ""
+        session.queue.eventOrdinal = 0
         session.event(theme, m.get("r").asInt(), m.get("id").asInt(), m.getString("v"))
+        session.queue.eventContext = previous
+        session.queue.eventOrdinal = previousOrdinal
         if (m.get("c").intAvailable()) {
             session.changeAnswer = m.get("c").asInt()
             session.changed = true

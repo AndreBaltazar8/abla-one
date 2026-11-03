@@ -29,6 +29,18 @@ class Pages(val services: OneServices, var page: string, var at: string, var aHi
     }
 }
 
+class Chain(val services: OneServices) : OneApp {
+    fun render(var ui: Ui): Node = pressable(ui.press {
+        services.send(oneRequest("POST", "/one/example"))
+        services.send(oneRequest("POST", "/one/example"))
+        return
+    }, style(), [])
+    fun receive(kind: string, payload: string): void {
+        if (kind == "result") services.send(oneRequest("POST", "/one/next"))
+        return
+    }
+}
+
 fun pagesApp(name: string): OneApp = Pages(oneLiveServices(name), "", "", 0, 0, "")
 
 val latest: array<Pages> = []
@@ -166,6 +178,27 @@ fun main: int {
     sequenced.durableFrontier = 2
     sequenced.changed = true
     expectEqual(update(sequenced, t).get("a").asInt(), 2, "the checkpoint can release its acknowledgement")
+
+    val chainApp = Chain(oneLiveServices("chain"))
+    // OneLiveServices resolves its queue by session ID.
+    var chain = oneSession("chain", chainApp, oneLiveQueueList[oneLiveQueueIndex("chain")])
+    update(chain, t)
+    oneSessionMessage(chain, t, jsonParse("{\"t\":\"event\",\"r\":1,\"id\":1,\"n\":1,\"u\":\"root-id\"}").value)
+    val requests = chain.queue.takeRequests()
+    expectEqual(requests.size, 2, "an event can start two requests")
+    expectEqual(requests[0].operation, "root-id.1", "the first request has a stable event operation")
+    expectEqual(requests[1].operation, "root-id.2", "the second has a distinct operation")
+    val savedOperations = oneLiveOperationCheckpoint(chain.queue)
+    var restoredQueue = oneLiveQueue()
+    restoredQueue.nextId = chain.queue.nextId
+    expect(oneLiveOperationRestore(restoredQueue, savedOperations), "operation contexts restore from the checkpoint")
+    expectEqual(restoredQueue.requestContexts.get(requests[0].id) ?? "", "root-id.1", "request ancestry survives recovery")
+    expect(!oneLiveOperationRestore(restoredQueue, jsonParse("{\"context\":\"\",\"ordinal\":0,\"requests\":[{\"id\":1.5,\"operation\":\"bad\"}]}").value), "malformed request ancestry is refused")
+    expectEqual(restoredQueue.requestContexts.get(requests[0].id) ?? "", "root-id.1", "a refused checkpoint leaves existing state unchanged")
+    chain.receive("result", oneResponsePayload(requests[0].id, 200, "{}", ""))
+    expectEqual(chain.queue.takeRequests()[0].operation, "root-id.1.1", "a result's follow-up keeps its parent operation")
+    val seen = oneLiveExecute({ request -> httpText(request.header("x-one-live-operation")) }, requests[1])
+    expectEqual(oneResponse(seen).body, "root-id.2", "the in-process request carries its operation ID")
 
     oneSessionMessage(m, t, jsonParse("{\"t\":\"pick-error\",\"id\":71,\"error\":\"upload failed\"}").value)
     val failure = oneResponse(m.queue.takeCompletions()[0])
