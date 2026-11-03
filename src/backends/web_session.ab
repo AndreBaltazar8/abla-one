@@ -346,7 +346,12 @@ class OneLiveSession(
     // What the screen on the page says (OneEventMap.screen).
     var shown: int,
     // Width acknowledged only by a patch rendered after hello/viewport.
-    var viewportAnswer: int = 0
+    var viewportAnswer: int = 0,
+    // P2 can defer acknowledgement until its checkpoint CAS is durable.
+    var eventFrontier: int = 0,
+    var durableFrontier: int = 0,
+    var eventAckSent: int = 0,
+    var deferEventAck: bool = false
 ) {
     // The tree of the current state, with its event map: a new revision.
     fun tree(theme: Theme): Node {
@@ -426,9 +431,25 @@ class OneLiveSession(
 
 
 // A message from the page: hello, event, route (the browser moved), viewport, scroll.
+// Legacy hosts omit both fields. A sequenced host must send a bounded opaque
+// ID and the next number; repeats are acknowledged without redispatch.
+fun oneLiveEventBegin(var session: OneLiveSession, m: Json): bool {
+    if (!m.has("n") && !m.has("u")) return true
+    val id = m.getString("u")
+    if (!m.get("n").intAvailable() || id.size < 1 || id.size > 128) return false
+    val n = m.get("n").asInt()
+    if (n < 1 || n > 9007199254740991) return false
+    if (n <= session.eventFrontier) { session.changed = true; return false }
+    if (n != session.eventFrontier + 1) return false
+    session.eventFrontier = n
+    if (!session.deferEventAck) session.durableFrontier = n
+    session.changed = true
+    true
+}
 fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void {
     val kind = m.getString("t")
     if (kind == "event") {
+        if (!oneLiveEventBegin(session, m)) return
         session.event(theme, m.get("r").asInt(), m.get("id").asInt(), m.getString("v"))
         if (m.get("c").intAvailable()) {
             session.changeAnswer = m.get("c").asInt()
@@ -441,6 +462,7 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
     else if (kind == "hello") {
         session.htmlSent = ""
         session.cssSent = 0
+        session.eventAckSent = 0
         session.changed = true
         if (m.get("w").intAvailable()) {
             session.width = m.get("w").asInt()
@@ -479,7 +501,8 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
     session.changeAnswer = 0
     val viewport = session.viewportAnswer
     session.viewportAnswer = 0
-    if (same && moves.size == 0 && answer == 0 && typed == 0 && viewport == 0) return ""
+    val frontier = session.durableFrontier
+    if (same && moves.size == 0 && answer == 0 && typed == 0 && viewport == 0 && frontier == session.eventAckSent) return ""
     val screen = session.maps[session.maps.size - 1].screen
     val kept = moves.size > 0 && screen == session.shown
     session.shown = screen
@@ -488,6 +511,11 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
     session.htmlSent = markup
     val keys = ["t", "r", "css", "title"]
     val values = [jsonString(if (session.canvas) "frame" else "patch"), jsonInteger(session.revision), jsonString(css), jsonString(session.title)]
+    if (frontier > 0) {
+        keys.append("a")
+        values.append(jsonInteger(frontier))
+        session.eventAckSent = frontier
+    }
     if (viewport > 0) {
         keys.append("viewport")
         values.append(jsonInteger(viewport))

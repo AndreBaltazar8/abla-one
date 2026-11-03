@@ -145,6 +145,24 @@ fun main: int {
     expect(!resized.has("html"), "the acknowledgement also works for identical markup")
     expectEqual(oneSessionUpdate(m,t,"/i"), "", "the viewport acknowledgement is consumed once")
 
+    var sequenced = session("sequenced", "/a")
+    update(sequenced, t)
+    val firstEvent = jsonParse("{\"t\":\"event\",\"r\":1,\"id\":1,\"v\":\"\",\"n\":1,\"u\":\"event-1\"}").value
+    oneSessionMessage(sequenced, t, firstEvent)
+    expectEqual(latest[0].aHits, 1, "a sequenced event dispatches once")
+    expectEqual(update(sequenced, t).get("a").asInt(), 1, "the processed event is acknowledged")
+    oneSessionMessage(sequenced, t, firstEvent)
+    expectEqual(latest[0].aHits, 1, "replayed event does not dispatch again")
+    oneSessionMessage(sequenced, t, jsonParse("{\"t\":\"event\",\"r\":1,\"id\":1,\"n\":3,\"u\":\"gap\"}").value)
+    expectEqual(sequenced.eventFrontier, 1, "a gap cannot advance the frontier")
+    sequenced.deferEventAck = true
+    oneSessionMessage(sequenced, t, jsonParse("{\"t\":\"event\",\"r\":1,\"id\":1,\"n\":2,\"u\":\"event-2\"}").value)
+    expectEqual(sequenced.eventFrontier, 2, "processing advances the frontier")
+    expectEqual(sequenced.durableFrontier, 1, "deferred acknowledgement waits for checkpoint")
+    sequenced.durableFrontier = 2
+    sequenced.changed = true
+    expectEqual(update(sequenced, t).get("a").asInt(), 2, "the checkpoint can release its acknowledgement")
+
     oneSessionMessage(m, t, jsonParse("{\"t\":\"pick-error\",\"id\":71,\"error\":\"upload failed\"}").value)
     val failure = oneResponse(m.queue.takeCompletions()[0])
     expect(failure.requestId == 71 && !failure.ok() && failure.error == "upload failed", "failed picker upload completes with its error")
