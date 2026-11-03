@@ -16,7 +16,6 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Web session recovery
 
-- [ ] The private recovery browser fixture uses an unscoped shared end-session marker; adding a third disabled node lets that node consume the signal before its actual owner. Owner-specific marker staged; rerun test-recovery before considering the end/tombstone proof green. Seen2026-11-03, log `/tmp/abla-one-recovery-public-proof.log`.
 
 - [ ] Support raw `OneRequest.file`/multipart file handles in recovery mode with bounded shared-store chunk materialization and a durable acknowledgement barrier, without serializing raw HTTP requests. Until then recovery sessions return501 for these paths; applications must call `readFile` and send the resulting bytes. NovaKind has no raw bodyFile/multipart callers (lead-approved deferral, 2026-11-03).
 
