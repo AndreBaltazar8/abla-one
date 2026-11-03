@@ -1,0 +1,49 @@
+// Durable live-session recovery policy. A typing burst may change memory many
+// times; only a successful checkpoint allows its patch/acknowledgement to leave.
+// Presses, navigation and credential/picker changes request an immediate flush.
+val oneRecoveryCheckpointLimit = 262144
+val oneRecoveryFileLimit = 16777216
+val oneRecoveryFilesLimit = 67108864
+val oneRecoveryPickerLimit = 4
+val oneRecoveryIdleMilliseconds = 1800000
+val oneRecoveryBatchMilliseconds = 1000
+
+class OneRecoveryBatch(
+    var pending: bool = false,
+    var forced: bool = false,
+    var committedAt: int = -1000,
+    var retryAt: int = 0,
+    var changes: int = 0,
+    var durable: int = 0
+) {
+    fun changed(immediate: bool = false): void {
+        changes = changes + 1
+        pending = true
+        if (immediate) forced = true
+        return
+    }
+    fun due(now: int): bool = pending && now >= retryAt &&
+        (forced || now - committedAt >= oneRecoveryBatchMilliseconds)
+    // Capture this generation with the checkpoint. Later edits remain pending
+    // if an adapter completes an earlier checkpoint asynchronously.
+    fun saved(generation: int, now: int): bool {
+        if (generation < durable || generation > changes) return false
+        durable = generation
+        committedAt = now
+        retryAt = 0
+        pending = generation < changes
+        if (!pending) forced = false
+        true
+    }
+    fun failed(now: int): void {
+        retryAt = now + oneRecoveryBatchMilliseconds
+        return
+    }
+    fun wait(now: int): int {
+        if (!pending) return oneRecoveryBatchMilliseconds
+        val batch = if (forced) now else committedAt + oneRecoveryBatchMilliseconds
+        val next = if (retryAt > batch) retryAt else batch
+        if (next <= now) 0 else next - now
+    }
+    fun acknowledged(): bool = !pending && durable == changes
+}

@@ -1,0 +1,40 @@
+import "abla/test"
+import "../../src/backends/web_recovery.ab"
+
+fun main: int {
+    val batch = OneRecoveryBatch()
+    var writes = 0
+    var acknowledgements = 0
+    var now = 0
+    // Fifty keystrokes per second for five seconds. A successful adapter
+    // completion is the only point at which the durable generation advances.
+    while (now < 5000) {
+        batch.changed()
+        if (batch.due(now)) {
+            val generation = batch.changes
+            writes = writes + 1
+            expect(batch.saved(generation, now), "checkpoint completion accepts its captured generation")
+            if (batch.acknowledged()) acknowledgements = acknowledgements + 1
+        }
+        now = now + 20
+    }
+    expectEqual(writes, 5, "250 typed edits cause five checkpoint writes")
+    expectEqual(acknowledgements, writes, "only durable checkpoints may acknowledge typing")
+    expect(batch.pending && !batch.acknowledged(), "typing after the last commit remains unacknowledged")
+    expect(!batch.due(4999) && batch.due(5000), "typing batches have a one-second boundary")
+    val earlier = batch.changes
+    batch.changed()
+    expect(batch.saved(earlier, 5000) && !batch.acknowledged(), "an asynchronous older completion cannot acknowledge a newer edit")
+    expect(!batch.saved(batch.changes + 1, 5000), "a future completion cannot acknowledge unseen work")
+    expect(!batch.saved(1, 5000), "a delayed obsolete completion cannot roll the durable frontier back")
+    batch.changed(true)
+    expect(batch.due(5010), "navigation or submit flushes pending typing immediately")
+    batch.failed(5010)
+    expect(!batch.due(6009) && batch.wait(6009) == 1, "store outage retries are bounded even for a forced flush")
+    expect(!batch.acknowledged(), "failed storage never acknowledges pending state")
+    expect(batch.due(6010), "a failed write retries after its backoff")
+    expect(batch.saved(batch.changes, 6010) && batch.acknowledged(), "recovery acknowledges only after the write succeeds")
+    expect(!batch.pending && !batch.forced && !batch.due(9000), "idle sessions cause no checkpoint writes")
+    expect(oneRecoveryFileLimit * 4 == oneRecoveryFilesLimit && oneRecoveryPickerLimit == 4, "session upload policy retains approved aggregate and picker bounds")
+    testsPassed()
+}
