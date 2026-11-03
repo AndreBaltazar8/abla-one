@@ -90,7 +90,7 @@ One stages source imports through `build/native-tree` so they agree with these
 selected roots. Direct Gradle calls must provide the selected roots too; no
 Gradle/CMake fallback searches neighboring checkouts.
 
-`python3 tools/check-native-build-roots.py --self-test` rejects unselected sibling
+`build/check-native-build-roots "$PWD" --self-test` rejects unselected sibling
 paths in active native build files. With CMake installed, `--configure-test`
 checks every mobile consumer against a synthetic SDK in a path containing spaces.
 PaperMono is parked and explicitly excluded from this active-target check.
@@ -106,3 +106,7 @@ Deferred timers are excluded from `nextTimeout` so an overdue timer cannot
 spin the poll loop. `settle` and `nextTimeout` accept the same gate; defaults
 allow every timer and preserve existing callers. Gates should inspect cached
 state and never wait on network I/O.
+
+The native guard, its filesystem fixtures and the source mirror are written in
+Abla. Native entry points build the guard with the selected compiler; `make test`
+also builds it before running the tests. No interpreter is needed for these checks.
