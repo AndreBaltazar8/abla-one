@@ -65,6 +65,21 @@ try {
   }
   {
     const page = await open();
+    const first = await page.evaluate(() => {
+      const at = window.__frames.length;
+      window.__socket.close();
+      [...document.querySelectorAll('button')].find(b => b.textContent === 'Contar').click();
+      history.replaceState(history.state, '', '/moment?offline=1');
+      dispatchEvent(new PopStateEvent('popstate', {state: history.state}));
+      return at;
+    });
+    await page.waitForFunction(at => window.__frames.slice(at).map(JSON.parse).some(m => m.t === 'route'), first, {timeout: 10000});
+    const sent = await page.evaluate(at => window.__frames.slice(at).map(JSON.parse).map(m => m.t), first);
+    check(sent.indexOf('event') >= 0 && sent.indexOf('event') < sent.indexOf('route'), 'offline events and navigation replay in their original order');
+    await page.close();
+  }
+  {
+    const page = await open();
     // Keys faster than the round trip: the session's echoes of older text change nothing.
     await page.evaluate(() => { window.__lag = 40; });
     const field = page.locator('input[placeholder="Rascunho"]');
