@@ -73,7 +73,7 @@ for other transforms. Split the contract or data shape if that bound is reached.
 ## Request decoding
 
 Generated server dispatch validates every supplied argument before calling the
-application: strings, booleans, representable integers, numbers, nullable values,
+application: strings, booleans, representable integers, finite floating numbers, nullable values,
 arrays, string-keyed maps and nested/generic/recursive classes. Wrong types and
 explicit null for non-nullable fields return HTTP 400. Missing fields retain the
 existing decoder defaults; nullable null and unknown class fields remain valid.

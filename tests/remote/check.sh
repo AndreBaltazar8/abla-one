@@ -69,6 +69,11 @@ check "invalid input never executes application code" "$(cat "$work/out")" 0
 check "retired route" "$(post oldOrders '{}')" 410
 check "retired says why" "$(cat "$work/out")" '"use orders"'
 check "unknown route" "$(post nope '{}')" 404
+# Each request has curl's five-second deadline; a broken exponent parser cannot
+# hang this regression indefinitely, and this private server is stopped next.
+check "huge positive exponent refused promptly" "$(post decimalValue '{"value":1e1000000000}')" 400
+check "exponent counter cannot overflow" "$(post decimalValue '{"value":1e999999999999999999999999999}')" 400
+check "huge negative exponent underflows promptly" "$(post decimalValue '{"value":1e-1000000000}')" 200
 kill $pid; wait $pid 2>/dev/null; pid=0
 
 # Client binary: no server bodies.
