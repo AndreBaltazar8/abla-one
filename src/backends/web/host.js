@@ -96,7 +96,13 @@
       bufferNotice.appendChild(discard);
     }
   };
-  const clearNotice = () => { if (bufferNotice) bufferNotice.remove(); bufferNotice = null; oversizedEdit = false; missingDraftField = false; };
+  const clearNotice = () => {
+    const wasBlocked = !!bufferNotice;
+    if (bufferNotice) bufferNotice.remove();
+    bufferNotice = null; oversizedEdit = false; missingDraftField = false;
+    // Retry visible-feed reports that could not be admitted while full.
+    if (wasBlocked) { observer.disconnect(); watchFeeds(); }
+  };
   // Relative URLs mean the app's root on every route: the page's <base> is fixed
   // when it loads, whatever pushState does later.
   const base = document.baseURI;
@@ -301,8 +307,7 @@
       const item = Number(entry.target.getAttribute('data-one-item'));
       const id = feed.getAttribute('data-one-visible');
       if (id && id !== '0' && item > (visible.get(feed.getAttribute('data-one')) || 0)) {
-        visible.set(feed.getAttribute('data-one'), item);
-        event(id, item);
+        if (event(id, item) !== false) visible.set(feed.getAttribute('data-one'), item);
       }
     }
   }, {threshold: [0.99]});

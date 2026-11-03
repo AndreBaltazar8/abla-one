@@ -115,6 +115,56 @@ try {
   const finalRoute = resumed.findIndex(message => message.t === 'route' && message.p.includes('queued=39'));
   check(finalDraft >= 0 && finalRoute > finalDraft, 'latest navigation follows the pending draft');
   {
+    const feedPage = await browser.newPage({viewport: {width: 390, height: 844}});
+    let paused = false, feedSocket;
+    const heldFrames = [], sentFrames = [];
+    await feedPage.routeWebSocket('**/one/live*', client => {
+      feedSocket = client;
+      const server = client.connectToServer();
+      client.onMessage(message => { sentFrames.push(JSON.parse(message.toString())); server.send(message); });
+      server.onMessage(message => {
+        const parsed = JSON.parse(message.toString());
+        if (paused && parsed.t === 'patch' && parsed.a > 0) heldFrames.push(message);
+        else client.send(message);
+      });
+    });
+    await feedPage.goto(base + '/moment');
+    await feedPage.getByText('Emitidas: 0').waitFor();
+    await feedPage.evaluate(() => {
+      const id = [...document.querySelectorAll('button')].find(button => button.textContent === 'Contar').getAttribute('data-one-press');
+      const feed = document.createElement('div');
+      feed.setAttribute('data-one', 'test-feed');
+      feed.setAttribute('data-one-feed', '');
+      feed.setAttribute('data-one-visible', id);
+      feed.style.cssText = 'position:fixed;top:-200px;left:0;width:50px;height:50px';
+      const item = document.createElement('div');
+      item.setAttribute('data-one-item', '1');
+      item.style.cssText = 'width:40px;height:40px';
+      feed.appendChild(item);
+      document.getElementById('one-root').appendChild(feed);
+    });
+    await feedPage.getByRole('button', {name: 'Contar'}).click();
+    await feedPage.getByText('Contadas: 1').waitFor();
+    paused = true;
+    const start = sentFrames.length;
+    await feedPage.evaluate(() => {
+      const field = document.querySelector('input[placeholder="Rascunho"]');
+      for (let i = 0; i < 300; i++) {
+        field.value = 'feed-pressure-' + i;
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+      }
+      document.querySelector('[data-one="test-feed"]').style.top = '0px';
+    });
+    await feedPage.waitForTimeout(500);
+    check(!sentFrames.slice(start).some(message => message.t === 'event' && message.v === '1'), 'visible-feed event waits when the buffer is full');
+    paused = false;
+    for (const message of heldFrames.splice(0)) feedSocket.send(message);
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline && !sentFrames.slice(start).some(message => message.t === 'event' && message.v === '1')) await feedPage.waitForTimeout(100);
+    check(sentFrames.slice(start).some(message => message.t === 'event' && message.v === '1'), 'visible-feed event retries after capacity returns');
+    await feedPage.close();
+  }
+  {
     const historyPage = await browser.newPage({viewport: {width: 390, height: 844}});
     let paused = false, historySocket;
     const historyHeld = [], historySent = [];
