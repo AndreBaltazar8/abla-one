@@ -181,6 +181,11 @@ fun testFieldShowsItsEnd(): void {
     expect(rowTexts[0].y >= rowHit.y, "multiline: the rows are inside the field")
     expect(rowHit.caretY > rowHit.y + rowHit.h / 2, "multiline: the caret is on the last row")
     expect(endsWith(fieldText(fieldFrame("", false))[0].text, "Type"), "empty field: shows its placeholder")
+    val tall = onePaintFrame(oneLayout(column(style().fill(), [
+        input("ab", "Type", 1, style().padding(16).height(160)).set("multiline", "true")
+    ]), oneDefaultTheme(), "desktop", 300, 200, Map()), 300, 200)
+    expectEqual(fieldText(tall)[0].y, fieldHit(tall).y + 16, "tall multiline: its rows start at the top")
+    expectEqual(fieldText(fieldFrame("ab", false))[0].y > fieldHit(fieldFrame("ab", false)).y, true, "one line: still centred")
     return
 }
 

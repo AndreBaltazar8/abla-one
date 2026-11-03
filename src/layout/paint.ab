@@ -160,7 +160,10 @@ fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneF
     val most = if (multiline) r.int("maxLines", 5) else 1
     val lines = if (slides) [oneInputTail(value, size, weight, inner - oneCaretWidth)] else oneWrap(if (value == "") placeholder else value, size, weight, inner, if (value == "") most else 0)
     val first = if (lines.size > most) lines.size - most else 0
-    val top = y + (box.h - lh * (lines.size - first)) / 2
+    // Centred, but a field taller than its rows starts them at the top, as far down as it
+    // is in from the side.
+    val centred = (box.h - lh * (lines.size - first)) / 2
+    val top = y + (if (multiline && centred > pl) pl else centred)
     val width = if (slides) oneTextWidth(lines[0], size, weight) else inner
     val over = if (slides) width + oneCaretWidth - inner else 0
     val left = x + pl - (if (over > 0) over else 0)
