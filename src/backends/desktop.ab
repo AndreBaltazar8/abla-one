@@ -165,7 +165,7 @@ fun oneDesktopInput(frame: OneFrame, key: string): int {
 // The platform work of the session: requests, timers and completions.
 fun oneDesktopPump(var app: OneApp, session: string): bool {
     val index = oneLiveQueueIndex(session)
-    oneLiveQueueList[index].fireTimers(monotonicMilliseconds())
+    oneLiveQueueList[index].fireTimers(oneLiveNow())
     var worked = oneRoutesDrain(app, oneLiveQueueList[index].routes)
     for (item in oneLiveQueueList[index].takeRequests()) {
         oneLiveQueueList[index].complete(oneDesktopExecute(item))
@@ -233,7 +233,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
             if (pixels.width != state.width || pixels.height != state.height) pixels = pixelBuffer(state.width, state.height)
             if (oneDesktopBlit(pixels, surface)) window.presentPixels(pixels)
         }
-        val wait = oneLiveQueueList[oneLiveQueueIndex(session)].nextTimer(monotonicMilliseconds())
+        val wait = oneLiveQueueList[oneLiveQueueIndex(session)].nextTimer(oneLiveNow())
         val most = if (settling > 0) 16 else 50
         var event = window.pollEvent(if (wait < most) wait else most)
         while (event.happened()) {

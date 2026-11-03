@@ -1,0 +1,48 @@
+import "abla/test"
+import "abla/http"
+import "abla/net"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+
+var liveTime = 1000
+fun liveClock(): int = liveTime
+
+class ClockApp(var completed: int = 0) : OneApp {
+    fun render(var ui: Ui): Node = text("clock", style())
+    fun receive(kind: string, value: string): void {
+        if (kind == "result" && oneResponse(value).body == "timer") completed = completed + 1
+        return
+    }
+}
+
+fun clockApp(request: HttpRequest, session: string): OneApp = ClockApp()
+
+fun main: int {
+    oneLiveSetClock(liveClock)
+    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", 0), { request -> httpText("", 200) }, oneLivePaths([]), clockApp,
+        oneDefaultTheme(), OneLiveOptions("clock", "en", "#fff", "/icons", "src/backends/web/host.js", ""))
+    expect(server.listening(), "the test has an ephemeral listener")
+    val services = oneLiveServices("clock-session")
+    val app = ClockApp()
+    server.sessions.append(oneSession("clock-session", app, oneLiveQueueList[oneLiveQueueIndex("clock-session")]))
+    services.timer(300)
+    expectEqual(server.sessions[0].lastSeen, 1000, "session creation uses the injected clock")
+    expectEqual(server.nextTimeout(), 300, "poll budget uses the same clock as scheduling")
+    liveTime = 1299
+    server.settle()
+    expectEqual(app.completed, 0, "settling before the deadline cannot complete it")
+    expectEqual(server.nextTimeout(), 1, "the poll budget reaches the exact boundary")
+    liveTime = 1300
+    server.settle()
+    expectEqual(app.completed, 1, "settling at the deadline delivers one completion")
+    liveTime = 1800999
+    server.settle()
+    expectEqual(server.sessions.size, 1, "a disconnected session survives just before thirty minutes")
+    liveTime = 1801000
+    server.settle()
+    expectEqual(app.completed, 1, "a later settle never repeats a completed timer")
+    expectEqual(server.sessions.size, 0, "a disconnected session expires exactly at thirty minutes")
+    server.listener.close()
+    oneLiveResetClock()
+    testsPassed()
+}

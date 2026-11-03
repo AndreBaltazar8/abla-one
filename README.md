@@ -42,6 +42,11 @@ make ui-web        # renders the gallery and checks it in headless Chromium
 make ui-android    # builds the gallery APK and drives it on a running emulator
 ```
 
+Backend tests can inject a logical monotonic clock with `oneLiveSetClock(clock)`
+before creating sessions, advance that clock explicitly, then call
+`oneLiveResetClock()` after the test. Timers, poll budgets and session expiry share
+that source. Normal applications use the platform monotonic clock.
+
 ## Android toolchain
 
 Abla One needs the current compiler (generics, the runtime written in Abla), so its Android builds use the installed `ablac` (v0.2.22) with that release's runtime sources, exported once into `build/abla-runtime-v0.2.22`. abla-mobile's native CMake detects which runtime model it is given; projects still on the older pinned toolchain keep building unchanged.

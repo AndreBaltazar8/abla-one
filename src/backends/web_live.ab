@@ -514,7 +514,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
         // The person asked for the page again: what the app read earlier may have changed since, so it hears of it.
         sessions[index].receive("pageLoad", "")
     }
-    sessions[index].lastSeen = monotonicMilliseconds()
+    sessions[index].lastSeen = oneLiveNow()
     // The page's last known width (the host keeps it in a cookie), so the first
     // paint already has the right layout.
     val remembered = oneParseInt(oneLiveCookie(request, "one_width"), 0)
@@ -606,7 +606,7 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     val parsed = jsonParse(payload)
     if (!parsed.succeeded) return
     val m = parsed.value
-    sessions[index].lastSeen = monotonicMilliseconds()
+    sessions[index].lastSeen = oneLiveNow()
     oneSessionMessage(sessions[index], theme, m)
     return
 }
@@ -726,7 +726,7 @@ fun OneLiveServer.settle(): void {
         }
         oneLiveBroadcasts.clear()
     }
-    val now = monotonicMilliseconds()
+    val now = oneLiveNow()
     var index = 0
     while (index < sessions.size) {
         sessions[index].queue.fireTimers(now)
@@ -761,7 +761,7 @@ fun OneLiveServer.settle(): void {
 
 fun OneLiveServer.nextTimeout(): int {
     var timeout = 1000
-    val now = monotonicMilliseconds()
+    val now = oneLiveNow()
     for (session in sessions) {
         val wait = session.queue.nextTimer(now)
         if (wait < timeout) timeout = wait

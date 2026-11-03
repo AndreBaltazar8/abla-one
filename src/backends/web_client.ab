@@ -88,7 +88,7 @@ fun oneClientMessage(input: string, create: (string) -> OneApp, theme: Theme, ic
     }
     val patch = oneSessionUpdate(oneClientSessions[0], theme, iconBase)
     if (patch != "") out.append(patch)
-    val wait = oneLiveQueueList[oneLiveQueueIndex("client")].nextTimer(monotonicMilliseconds())
+    val wait = oneLiveQueueList[oneLiveQueueIndex("client")].nextTimer(oneLiveNow())
     if (oneLiveQueueList[oneLiveQueueIndex("client")].timers.size > 0) out.append("{\"t\":\"wait\",\"ms\":$wait}")
     var text = "["
     var first = true
@@ -104,7 +104,7 @@ fun oneClientMessage(input: string, create: (string) -> OneApp, theme: Theme, ic
 fun oneClientPump(var out: array<string>): bool {
     val index = oneLiveQueueIndex("client")
     val moved = oneClientSessions[0].deliverRoutes()
-    oneLiveQueueList[index].fireTimers(monotonicMilliseconds())
+    oneLiveQueueList[index].fireTimers(oneLiveNow())
     for (item in oneLiveQueueList[index].takeRequests()) out.append(jsonStringify(jsonObject(["t", "id", "request"], [jsonString("fetch"), jsonInteger(item.id), oneClientRequestJson(item.request)])))
     val completions = oneLiveQueueList[index].takeCompletions()
     for (payload in completions) oneClientSessions[0].receive("result", payload)
@@ -125,7 +125,7 @@ fun oneClientRequestJson(r: OneRequest): Json {
         body = ""
     }
     if (r.parts.size > 0) {
-        val boundary = "abla-one-${oneLiveQueueList[index].allocate()}-${monotonicMilliseconds()}"
+        val boundary = "abla-one-${oneLiveQueueList[index].allocate()}-${oneLiveNow()}"
         var out = ""
         for (part in r.parts) {
             var content = part.value

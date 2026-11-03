@@ -1,0 +1,48 @@
+import "abla/test"
+import "../../src/backends/web_session.ab"
+
+var timerTime = 1000
+fun timerClock(): int = timerTime
+
+fun main: int {
+    oneLiveSetClock(timerClock)
+    val services = oneLiveServices("clock-test")
+    val queue = oneLiveQueueList[oneLiveQueueIndex("clock-test")]
+    val first = services.timer(300)
+    val immediate = services.timer(0)
+    val second = services.timer(600)
+    expectEqual(oneLiveNow(), 1000, "the injected clock starts at its exact value")
+    expectEqual(queue.nextTimer(oneLiveNow()), 0, "a zero-delay timer is immediately due")
+    expectEqual(queue.fireTimers(oneLiveNow()), 300, "the next deadline is relative to the injected clock")
+    var ready = queue.takeCompletions()
+    expectEqual(ready.size, 1, "only the immediate timer completed")
+    expectEqual(oneResponse(ready[0]).requestId, immediate, "the immediate completion has the right id")
+    timerTime = 1299
+    expectEqual(queue.nextTimer(oneLiveNow()), 1, "one millisecond before the first deadline")
+    queue.fireTimers(oneLiveNow())
+    expectEqual(queue.takeCompletions().size, 0, "nothing fires before its deadline")
+    timerTime = 1300
+    queue.fireTimers(oneLiveNow())
+    ready = queue.takeCompletions()
+    expectEqual(ready.size, 1, "the first timer fires at equality")
+    expectEqual(oneResponse(ready[0]).requestId, first, "first deadline completion")
+    timerTime = 1600
+    queue.fireTimers(oneLiveNow())
+    ready = queue.takeCompletions()
+    expectEqual(ready.size, 1, "the second timer fires at equality")
+    expectEqual(oneResponse(ready[0]).requestId, second, "second deadline completion")
+    timerTime = 900000
+    queue.fireTimers(oneLiveNow())
+    expectEqual(queue.takeCompletions().size, 0, "completed timers never fire twice")
+    val third = services.timer(10)
+    val fourth = services.timer(10)
+    timerTime = timerTime + 10
+    queue.fireTimers(oneLiveNow())
+    ready = queue.takeCompletions()
+    expectEqual(ready.size, 2, "equal deadlines complete together")
+    expectEqual(oneResponse(ready[0]).requestId, third, "equal deadlines retain insertion order")
+    expectEqual(oneResponse(ready[1]).requestId, fourth, "both equal-deadline ids are delivered")
+    oneLiveResetClock()
+    oneLiveForget("clock-test")
+    testsPassed()
+}

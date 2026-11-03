@@ -10,6 +10,27 @@ import "../layout/paint.ab"
 // speaks the same messages to both. The session holds the app, the CSS the
 // page has, the event maps of recent revisions, and its platform queue.
 
+// One time source for scheduling, delivery and session lifetimes. Native tests can inject a logical monotonic clock;
+// normal applications keep the platform clock. Set it before creating sessions, and reset it after a test. An array avoids nullable function values on the supported compiler.
+val oneLiveClockOverrides: array<() -> int> = []
+
+fun oneLiveNow(): int {
+    if (oneLiveClockOverrides.size == 0) return monotonicMilliseconds()
+    val clock = oneLiveClockOverrides[0]
+    clock()
+}
+
+fun oneLiveSetClock(clock: () -> int): void {
+    oneLiveClockOverrides.clear()
+    oneLiveClockOverrides.append(clock)
+    return
+}
+
+fun oneLiveResetClock(): void {
+    oneLiveClockOverrides.clear()
+    return
+}
+
 class OneLiveRequest(val id: int, val request: OneRequest)
 class OneLiveTimer(val id: int, val due: int)
 
@@ -229,7 +250,7 @@ class OneLiveServices(val session: string) : OneServices {
     }
     fun timer(milliseconds: int): int {
         val id = nextId()
-        oneLiveQueueList[oneLiveQueueIndex(session)].schedule(OneLiveTimer(id, monotonicMilliseconds() + milliseconds))
+        oneLiveQueueList[oneLiveQueueIndex(session)].schedule(OneLiveTimer(id, oneLiveNow() + milliseconds))
         id
     }
     // The page opens the browser's file picker and uploads what was chosen
@@ -484,5 +505,5 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
 }
 
 fun oneSession(id: string, app: OneApp, queue: OneLiveQueue): OneLiveSession {
-    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, monotonicMilliseconds(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), onePresses(), 0, oneRouteScrolls(), false, 0, false, 0)
+    OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, oneLiveNow(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), onePresses(), 0, oneRouteScrolls(), false, 0, false, 0)
 }

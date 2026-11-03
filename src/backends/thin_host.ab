@@ -45,7 +45,7 @@ fun OneThinHost.refresh(): void {
     oneRoutesDrain(app, oneLiveQueueList[index].routes)
     var rounds = 0
     while (rounds < 8) {
-        oneLiveQueueList[index].fireTimers(monotonicMilliseconds())
+        oneLiveQueueList[index].fireTimers(oneLiveNow())
         for (item in oneLiveQueueList[index].takeRequests()) oneLiveQueueList[index].complete(oneLiveExecute(handler, item))
         val completions = oneLiveQueueList[index].takeCompletions()
         for (payload in completions) app.receive("result", payload)
