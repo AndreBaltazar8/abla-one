@@ -781,10 +781,18 @@
   // --- connection -------------------------------------------------------------
   const updateCookies = () => {
     const request = async (receipt = false) => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
-      try { return await fetch(`one/cookies?s=${encodeURIComponent(boot.s)}${receipt ? '&receipt=1' : ''}`, {method: 'POST', credentials: 'same-origin', headers: boot.proof ? {'X-One-Proof': boot.proof} : {}, redirect: 'error', signal: controller.signal}); }
-      finally { clearTimeout(timeout); }
+      const deadline = Date.now() + 45000;
+      for (let attempt=0; ; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), Math.min(10000, Math.max(1,deadline-Date.now())));
+        try {
+          const response = await fetch(`one/cookies?s=${encodeURIComponent(boot.s)}${receipt ? '&receipt=1' : ''}`, {method: 'POST', credentials: 'same-origin', headers: boot.proof ? {'X-One-Proof': boot.proof} : {}, redirect: 'error', signal: controller.signal});
+          if(!boot.proof || ![502,503,504].includes(response.status) || attempt>=7 || Date.now()>=deadline)return response;
+          await response.body?.cancel();
+        } catch(error) { if(!boot.proof || attempt>=7 || Date.now()>=deadline)throw error; }
+        finally { clearTimeout(timeout); }
+        await new Promise(resolve=>setTimeout(resolve,Math.min(4000,250*2**attempt,Math.max(0,deadline-Date.now()))));
+      }
     };
     const deliver = async () => {
       const response = await request();

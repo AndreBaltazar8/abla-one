@@ -103,7 +103,7 @@ fun main: int {
     testPublishPort(server.listener.localPort())
     while (!server.stopped) {
         server.step()
-        val ending = proofDirectory().child("end-session")
+        val ending = proofDirectory().child("end-session-${server.recoveryOwner}")
         if (ending.exists()) {
             val index = server.findSession(ending.readText())
             ending.remove()

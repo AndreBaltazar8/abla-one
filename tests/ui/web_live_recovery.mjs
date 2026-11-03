@@ -299,7 +299,9 @@ try {
   await wait(() => rawPage.evaluate(() => rawFrames.some(frame => frame.t === 'patch')), 'authorized restored app emits first patch');
   const hydrated = JSON.parse(JSON.parse(fs.readFileSync(rawPath, 'utf8')).payload);
   check(hydrated.app.draft === '' && hydrated.route === '/recovery' && hydrated.frontier === 0 && hydrated.asked === 0, 'server rejects pre-hydration controls without changing draft, route or durable frontier');
-  fs.writeFileSync(path.join(directory, 'end-session'), rawBoot.s);
+  const endingOwner=JSON.parse(fs.readFileSync(rawPath,'utf8')).owner;
+  assert.match(endingOwner,/^[a-f0-9]{32}$/);
+  fs.writeFileSync(path.join(directory, `end-session-${endingOwner}`), rawBoot.s);
   await wait(() => JSON.parse(fs.readFileSync(rawPath, 'utf8')).revoked, 'asynchronous end commits a durable tombstone');
   const ended = await fetch(`${base}/one/cookies?s=${rawBoot.s}`, {method: 'POST', headers: {'X-Test-User': 'alice', 'X-One-Proof': rawBoot.proof}});
   check(ended.status === 403, 'an ended session cannot recover cookies using its old tab proof');
