@@ -546,6 +546,8 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
         session.cssSent = 0
         session.eventAckSent = -1
         session.changed = true
+        session.changeAnswer = session.changeFrontier
+        session.routeAnswer = session.routeFrontier
         if (m.get("w").intAvailable()) {
             session.width = m.get("w").asInt()
             session.viewportAnswer = session.width
@@ -553,7 +555,7 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
         if (m.get("h").intAvailable()) session.height = m.get("h").asInt()
         if (m.get("e").intAvailable()) session.queue.routes.adopt(m.get("e").asInt())
     } else if (kind == "route") {
-        if (m.get("n").intAvailable() && m.get("n").asInt() > 0 && m.get("n").asInt() <= session.routeFrontier) {
+        if (session.deferEventAck && m.get("n").intAvailable() && m.get("n").asInt() > 0 && m.get("n").asInt() <= session.routeFrontier) {
             session.routeAnswer = session.routeFrontier
             session.changed = true
             return

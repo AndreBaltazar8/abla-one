@@ -1,0 +1,93 @@
+import "../port.ab"
+import "recovery_store.ab"
+import "../../src/one_kit.ab"
+
+class RecoveryProof(val services: OneServices, var draft: string = "", var view: string = "/recovery", var picker: int = 0, var reading: int = 0, var file: OneFile = OneFile("", "", 0, ""), var content: string = "", var mutation: int = 0, var count: int = 0) : OneApp {
+    fun render(var ui: Ui): Node = column(style().padding(20).gap(12), [
+        text(if (view == "/recovery/other") "Other view" else "Draft view", style()),
+        input(draft, "Draft text", ui.change { value -> draft = value }, style()).keyed("draft-text").set("label", "Draft text"),
+        button(ui, "Other view", "", ui.press { services.navigate("/recovery/other") }, style()),
+        button(ui, "Edit view", "", ui.press { services.navigate("/recovery") }, style()),
+        button(ui, "Store cookie", "", ui.press { services.secureWrite("test-cookie", jsonString("cookie-value")); return }, style()),
+        button(ui, "Pick file", "", ui.press { picker = services.pickFiles(["text/plain"], false) }, style()),
+        text("Picked file: ${file.name}", style()).keyed("picked-file"),
+        text("Read bytes: $content", style()).keyed("read-file"),
+        button(ui, "Commit once", "", ui.press { mutation = services.send(oneRequest("POST", "/mutation").json(jsonObject([], []))) }, style()),
+        text("Committed mutations: $count", style()).keyed("committed-count")
+    ])
+    fun receive(kind: string, value: string): void {
+        if (kind == "route") view = oneRoutePagePath(value)
+        else if (kind == "checkpoint") services.effect("live-checkpoint", jsonStringify(jsonObject(
+            ["draft", "view", "picker", "reading", "file", "content", "mutation", "count"],
+            [jsonString(draft), jsonString(view), jsonInteger(picker), jsonInteger(reading), jsonObject(["handle", "name", "size", "mime"], [jsonString(file.handle), jsonString(file.name), jsonInteger(file.size), jsonString(file.mime)]), jsonString(content), jsonInteger(mutation), jsonInteger(count)])))
+        else if (kind == "restore") {
+            val saved = jsonParse(value).value
+            draft = saved.getString("draft"); view = saved.getString("view")
+            picker = saved.getInt("picker"); reading = saved.getInt("reading")
+            val picked = saved.get("file")
+            file = OneFile(picked.getString("handle"), picked.getString("name"), picked.getInt("size"), picked.getString("mime"))
+            content = saved.getString("content"); mutation = saved.getInt("mutation"); count = saved.getInt("count")
+            services.effect("live-restored", "")
+        } else if (kind == "result") {
+            val response = oneResponse(value)
+            if (picker != 0 && response.requestId == picker) {
+                picker = 0
+                val files = response.files()
+                if (files.size > 0) { file = files[0]; reading = services.readFile(file, 0, 262144) }
+            } else if (reading != 0 && response.requestId == reading) {
+                reading = 0
+                if (response.status == 200) content = base64Decode(response.bodyBase64)
+            } else if (mutation != 0 && response.requestId == mutation) {
+                mutation = 0
+                if (response.status == 200) count = jsonParse(response.body).value.getInt("count")
+            }
+        }
+        return
+    }
+}
+
+var proofKillAfterMutation = false
+fun proofHandler(request: HttpRequest): HttpResponse {
+    if (request.path == "/health") return httpText("ok")
+    if (request.path == "/arm-kill" && proofUser(request) == "alice") { proofKillAfterMutation = true; return httpText("armed") }
+    if (request.path != "/mutation" || request.method != "POST") return httpText("not found", 404)
+    val operation = request.header("x-one-live-operation")
+    if (operation == "" || operation.size > 512) return httpText("operation required", 400)
+    val lock = proofDirectory().child("business.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return httpText("unavailable", 503) }
+    val path = proofDirectory().child("business.json")
+    val parsed = jsonParse(path.readText())
+    val old = if (parsed.succeeded) parsed.value else jsonObject(["count", "seen"], [jsonInteger(0), jsonObject([], [])])
+    val seen = old.get("seen")
+    val repeated = seen.has(operation)
+    val count = if (repeated) old.getInt("count") else old.getInt("count") + 1
+    val next = jsonObject(["count", "seen"], [jsonInteger(count), proofWith(seen, operation, jsonBoolean(true))])
+    val temporary = proofDirectory().child("business.${linuxProcessId()}.next")
+    val written = temporary.writeText(jsonStringify(next)) && temporary.moveTo(path)
+    proofRelease(lock)
+    if (!written) return httpText("unavailable", 503)
+    // Test-only crash after an independently durable business effect and
+    // before any UI checkpoint/ack; the other node must replay the same key.
+    if (proofKillAfterMutation && !repeated) exit(17)
+    HttpResponse(200, [HttpHeader("Content-Type", "application/json")], jsonStringify(jsonObject(["count"], [jsonInteger(count)])))
+}
+fun proofSeed(request: HttpRequest): Map<string, string> {
+    val values: Map<string, string> = Map()
+    values.set("test-user", proofUser(request))
+    values
+}
+fun proofResumes(request: HttpRequest, stored: Map<string, string>): bool = stored.get("test-user") == proofUser(request) && proofUser(request) != ""
+fun proofCookies(request: HttpRequest, key: string, value: string): array<string> = if (key == "test-cookie") ["test-cookie=${base64Encode(value)}; Path=/; HttpOnly; SameSite=Strict"] else []
+fun proofFactory(request: HttpRequest, id: string): OneApp = RecoveryProof(oneLiveServices(id))
+
+fun main: int {
+    if (processEnvironmentOr("ONE_RECOVERY_TEST_DIR", "") == "" || !proofDirectory().exists()) return 1
+    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", testPort()), proofHandler, oneLivePaths(["/recovery", "/recovery/*"]), proofFactory, oneDefaultTheme(), OneLiveOptions("Recovery proof", "en", "#fff", "/icons", "src/backends/web/host.js", ""), OneLiveStorage(proofSeed, proofCookies, proofResumes), recovery = proofStore())
+    if (!server.listening()) return 1
+    testPublishPort(server.listener.localPort())
+    while (!server.stopped) {
+        server.step()
+        proofUploadPump(server)
+    }
+    0
+}

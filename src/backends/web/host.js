@@ -21,6 +21,7 @@
   let eventSequence = 0;
   let sendOrder = 0;
   let eventReady = false;
+  let handshaking = true;
   let viewportAfterHello = false;
   // Relative URLs mean the app's root on every route: the page's <base> is fixed
   // when it loads, whatever pushState does later.
@@ -28,11 +29,22 @@
   const basePath = new URL(base).pathname;
 
   let local = null;
-  const liveEvent = (message) => {
+  const wire = (text, duringHello = false) => {
+    if (!socket || socket.readyState !== 1 || (handshaking && !duringHello)) return false;
+    try { socket.send(text); return true; }
+    catch (_) {
+      handshaking = true;
+      document.documentElement.setAttribute('data-one-offline', '');
+      try { socket.close(); } catch (_) {}
+      return false;
+    }
+  };
+
+  const liveEvent = (message, order = ++sendOrder) => {
     message.n = ++eventSequence;
     message.u = crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
-    unacked.push({message, order: ++sendOrder});
-    if (socket && socket.readyState === 1) socket.send(JSON.stringify(message));
+    unacked.push({message, order});
+    wire(JSON.stringify(message));
   };
   const send = (message) => {
     if (boot.wasm) {
@@ -42,19 +54,19 @@
     }
     if (message.t === 'event') {
       if (eventReady) liveEvent(message);
-      else beforeHello.push(message);
+      else beforeHello.push({message, order: ++sendOrder});
       return;
     }
     if (message.t === 'route') {
       const item = {message, order: ++sendOrder};
       unackedRoutes.push(item);
-      if (socket && socket.readyState === 1) socket.send(JSON.stringify(message));
+      wire(JSON.stringify(message));
       return;
     }
     const text = JSON.stringify(message);
     const order = ++sendOrder;
-    if (socket && socket.readyState === 1) socket.send(text);
-    else queue.push({text, order});
+    const viewportOnly = message.t === 'viewport' && !unacked.length && !unackedRoutes.length && !beforeHello.length && !queue.length;
+    if (!wire(text, viewportOnly)) queue.push({text, order});
   };
   const event = (id, value) => send({t: 'event', r: revision, id: Number(id), v: value == null ? '' : String(value)});
   // Typing the session hasn't answered yet, and a press waiting for it: a control may only come
@@ -62,9 +74,15 @@
   let typed = 0;
   let typedSeen = 0;
   let held = null;
-  const change = (id, value) => {
+  const change = (id, value, target) => {
     held = null;
-    send({t: 'event', r: revision, id: Number(id), v: String(value), c: ++typed});
+    const message = {t: 'event', r: revision, id: Number(id), v: String(value), c: ++typed};
+    // Local-only metadata keeps unfocused drafts across a stale recovery render.
+    // It is not part of the event's wire payload or the server's authority.
+    const field = target.getAttribute('data-one-field');
+    Object.defineProperty(message, '_field', {value: field ? `f:${field}` : `k:${target.getAttribute('data-one') || ''}`});
+    Object.defineProperty(message, '_entry', {value: entry.e});
+    send(message);
   };
   const live = (target) => {
     const id = target.getAttribute('data-one-press');
@@ -109,7 +127,7 @@
   });
   root.addEventListener('input', (e) => {
     const id = e.target.getAttribute && e.target.getAttribute('data-one-change');
-    if (id) change(id, e.target.value);
+    if (id) change(id, e.target.value, e.target);
     if (e.target.tagName === 'TEXTAREA') grow(e.target);
   });
   root.addEventListener('keydown', (e) => {
@@ -275,6 +293,21 @@
     const carried = moved && document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-one-field');
     const typing = carried ? document.activeElement.value : '';
     apply(message);
+    // A recovered checkpoint may be older than a blurred local input too.
+    // Preserve every not-yet-durable draft in this history entry until replay.
+    const pendingDrafts = new Map();
+    for (const item of [...unacked, ...beforeHello]) {
+      const edit = item.message;
+      if (edit.c > typedSeen && edit._entry === entry.e && edit._field) pendingDrafts.set(edit._field, edit.v);
+    }
+    for (const [key, value] of pendingDrafts) {
+      const attribute = key.startsWith('f:') ? 'data-one-field' : 'data-one';
+      const field = root.querySelector(`[${attribute}="${CSS.escape(key.slice(2))}"]`);
+      if (field && (field.tagName === 'INPUT' || field.tagName === 'TEXTAREA')) {
+        field.value = value;
+        if (field.tagName === 'TEXTAREA') grow(field);
+      }
+    }
     // The same field on this route: it keeps the focus, and what's still on its way to the session.
     if (carried) {
       const field = root.querySelector(`[data-one-field="${CSS.escape(carried)}"]`);
@@ -382,7 +415,7 @@
   // The session asks for a file; the picker opens while the tap that caused it
   // still counts as a user action. Images are normalized like the Android host.
   const upload = async (query, body, headers = {}) => {
-    if (!boot.wasm) return fetch(`one/upload?s=${encodeURIComponent(boot.s)}&${query}`, {method: 'POST', body, headers, credentials: 'same-origin'});
+    if (!boot.wasm) return fetch(`one/upload?s=${encodeURIComponent(boot.s)}&${query}`, {method: 'POST', body, headers: {...headers, ...(boot.proof ? {'X-One-Proof': boot.proof} : {})}, credentials: 'same-origin', redirect: 'error'});
     // In the page, the module takes the bytes directly.
     const q = new URLSearchParams(query);
     const base64 = typeof body === 'string' ? body : await new Promise((done) => {
@@ -463,11 +496,20 @@
 
   // --- connection -------------------------------------------------------------
   const receive = (message) => {
+    const first = !boot.wasm && !eventReady && message.t === 'patch' && Number.isSafeInteger(message.a) && message.a >= 0;
+    if (first) {
+      const savedTyped = Number.isSafeInteger(message.c) && message.c >= 0 ? message.c : 0;
+      for (const item of beforeHello) if (item.message.c) item.message.c += savedTyped;
+      typed += savedTyped;
+      const savedAsked = Number.isSafeInteger(message.ack) && message.ack >= 0 ? message.ack : 0;
+      for (const item of unackedRoutes) item.message.n += savedAsked;
+      asked += savedAsked;
+    }
     if (message.t === 'patch') patched(message);
     else if (message.t === 'back') goBack(message.to);
     else if (message.t === 'forward') history.forward();
     else if (message.t === 'pick') pick(message);
-    else if (message.t === 'cookies') fetch(`one/cookies?s=${encodeURIComponent(boot.s)}`, {method: 'POST', credentials: 'same-origin'});
+    else if (message.t === 'cookies') fetch(`one/cookies?s=${encodeURIComponent(boot.s)}`, {method: 'POST', credentials: 'same-origin', headers: boot.proof ? {'X-One-Proof': boot.proof} : {}, redirect: 'error'});
     else if (message.t === 'reload') location.reload();
     else if (message.t === 'fetch') request(message);
     else if (message.t === 'store') store(message.storage);
@@ -479,13 +521,30 @@
       if (!eventReady) {
         eventSequence = message.a;
         eventReady = true;
-        while (beforeHello.length) liveEvent(beforeHello.shift());
-        if (viewportAfterHello) {
-          viewportAfterHello = false;
-          send({t: 'viewport', w: innerWidth});
+        while (beforeHello.length) {
+          const item = beforeHello.shift();
+          liveEvent(item.message, item.order);
         }
       } else if (message.a <= eventSequence) {
         while (unacked.length && unacked[0].message.n <= message.a) unacked.shift();
+      }
+      if (handshaking) {
+        const pending = [...queue, ...unacked, ...unackedRoutes].sort((a, b) => a.order - b.order);
+        queue.length = 0;
+        handshaking = false;
+        retry = 0;
+        document.documentElement.removeAttribute('data-one-offline');
+        for (let at = 0; at < pending.length; at++) {
+          const item = pending[at];
+          if (!wire(item.text || JSON.stringify(item.message))) {
+            // Events and routes are still retained in their acknowledgement
+            // queues. Keep every unsent ordinary control too.
+            for (const rest of pending.slice(at)) if (rest.text) queue.push(rest);
+            break;
+          }
+        }
+        if (viewportAfterHello) { viewportAfterHello = false; send({t: 'viewport', w: innerWidth}); }
+        release();
       }
     }
   };
@@ -574,21 +633,18 @@
     const url = new URL(`one/live?s=${encodeURIComponent(boot.s)}`, base);
     socket = new WebSocket(`${scheme}//${url.host}${url.pathname}${url.search}`);
     socket.onopen = () => {
-      retry = 0;
-      document.documentElement.removeAttribute('data-one-offline');
-      // Early scripted intents were made on the SSR revision: replay them there, then acknowledge the real viewport.
+      handshaking = true;
+      // Only hello crosses the recovery boundary. No old control can run on
+      // another node until its authorized app and durable frontier are ready.
       const waiting = queue.length > 0 || unacked.length > 0 || unackedRoutes.length > 0 || beforeHello.length > 0;
-      socket.send(JSON.stringify(waiting ? {t: 'hello', r: revision, e: entry.e} : {t: 'hello', r: revision, w: innerWidth, e: entry.e}));
-      // Keep queued route/viewport messages in their original order relative
-      // to events made while disconnected.
-      const pending = [...queue, ...unacked, ...unackedRoutes].sort((a, b) => a.order - b.order);
-      queue.length = 0;
-      for (const item of pending) socket.send(item.text || JSON.stringify(item.message));
-      if (waiting && !eventReady && beforeHello.length) viewportAfterHello = true;
-      else if (waiting) socket.send(JSON.stringify({t: 'viewport', w: innerWidth}));
+      const hello = waiting ? {t: 'hello', r: revision, e: entry.e} : {t: 'hello', r: revision, w: innerWidth, e: entry.e};
+      if (boot.proof) hello.proof = boot.proof;
+      wire(JSON.stringify(hello), true);
+      viewportAfterHello = waiting;
     };
     socket.onmessage = (e) => receive(JSON.parse(e.data));
     socket.onclose = (e) => {
+      handshaking = true;
       document.documentElement.setAttribute('data-one-offline', '');
       // An unknown or ended session needs a fresh page, unless one is already on its way.
       if (e.code === 1008) return setTimeout(() => location.reload(), leaving ? 3000 : 0);
@@ -605,13 +661,19 @@
   addEventListener('resize', () => { clearTimeout(resizing); resizing = setTimeout(viewport, 150); });
   document.cookie = `one_width=${innerWidth}; path=${basePath}; max-age=31536000; samesite=lax`;
   document.cookie = `one_resume=; path=${basePath}; max-age=0; samesite=lax`;
+  document.cookie = `one_resume_proof=; path=${basePath}; max-age=0; samesite=lax`;
   // A reload resumes this tab's session: the next page request carries it.
   // beforeunload runs before the browser requests the next page; pagehide
   // covers navigations that skip it. A link followed from the page goes to another
   // page, which starts its own session, so the session isn't offered. The mark is short: the browser
   // asks for the page right after the click, and a link that turns out to be a download stays here.
   let followed = 0;
-  const resume = () => { if (!followed) document.cookie = `one_resume=${boot.s}; path=${basePath}; max-age=15; samesite=lax`; };
+  const resume = () => {
+    if (!followed) {
+      document.cookie = `one_resume=${boot.s}; path=${basePath}; max-age=15; samesite=lax`;
+      if (boot.proof) document.cookie = `one_resume_proof=${boot.proof}; path=${basePath}; max-age=15; samesite=lax`;
+    }
+  };
   document.addEventListener('click', (e) => {
     const link = !e.defaultPrevented && e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && e.target.closest && e.target.closest('a[href]');
     if (!link || link.hasAttribute('download') || (link.target && link.target !== '_self')) return;

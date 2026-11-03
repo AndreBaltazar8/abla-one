@@ -423,6 +423,10 @@ fun OneLiveServer.httpWithPeer(slot: int): void {
         sessions[session].connected = true
         sessions[session].changed = true
         sessions[session].htmlSent = ""
+        // The first legacy patch may leave before hello arrives. It must carry
+        // the same saved counters as hello so a fresh host does not start at0.
+        sessions[session].changeAnswer = sessions[session].changeFrontier
+        sessions[session].routeAnswer = sessions[session].routeFrontier
         slots[slot].upgraded = true
         slots[slot].session = id
         queue(slot, webSocketUpgradeResponse(request).render())
@@ -540,7 +544,16 @@ fun oneLiveFontName(name: string): bool = name == "Inter-400.ttf" || name == "In
 // asks `storage.resumes` first. A resumed session's app hears `receive("pageLoad", "")`, before the page renders.
 fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val route = oneLiveRoute(request)
-    var index = resumable(request, oneLiveCookie(request, "one_resume"))
+    var index = if (recovery.enabled) -1 else resumable(request, oneLiveCookie(request, "one_resume"))
+    if (recovery.enabled) {
+        val id = oneLiveCookie(request, "one_resume")
+        val proof = oneLiveCookie(request, "one_resume_proof")
+        if (oneRecoveryIdentifier(id) && oneRecoveryIdentifier(proof)) {
+            val opened = recoveryOpen(request, id, proof)
+            if (opened.status == 503) return httpText("Session storage unavailable", 503)
+            if (opened.status == 200) index = opened.index
+        }
+    }
     if (index < 0) {
         val id = oneLiveSessionId()
         val queueIndex = oneLiveQueueIndex(id)
@@ -557,7 +570,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     } else {
         if (oneRouteWithoutHash(sessions[index].queue.routes.current()) != route) sessions[index].queue.routes.arrive(route, sessions[index].queue.routes.fresh())
         // The person asked for the page again: what the app read earlier may have changed since, so it hears of it.
-        sessions[index].receive("pageLoad", "")
+        if (!recovery.enabled) sessions[index].receive("pageLoad", "")
     }
     sessions[index].lastSeen = oneLiveNow()
     // The remembered width improves the SSR/no-JS guess. It does not acknowledge
@@ -594,7 +607,8 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val headers = [
         HttpHeader("Content-Type", "text/html; charset=utf-8"),
         HttpHeader("Cache-Control", "no-store"),
-        HttpHeader("Set-Cookie", "one_resume=; SameSite=Lax; Max-Age=0")
+        HttpHeader("Set-Cookie", "one_resume=; SameSite=Lax; Max-Age=0"),
+        HttpHeader("Set-Cookie", "one_resume_proof=; SameSite=Lax; Max-Age=0")
     ]
     if (sessions[index].queue.cookiesChanged) for (line in sessionCookies(request, index)) headers.append(HttpHeader("Set-Cookie", line))
     HttpResponse(200, headers, body)
@@ -668,7 +682,7 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     sessions[index].lastSeen = oneLiveNow()
     oneSessionMessage(sessions[index], theme, m)
     if (persisted != null && (m.getString("t") != "event" || sessions[index].eventFrontier > before)) {
-        persisted.batch.changed(m.getString("t") != "event" || m.get("id").asInt() <= oneChangeBase)
+        persisted.batch.changed(m.getString("t") == "hello" || m.getString("t") == "route" || m.getString("t") == "pick-error" || (m.getString("t") == "event" && m.get("id").asInt() <= oneChangeBase))
         persisted.active = true
     }
     return

@@ -3,7 +3,7 @@ ABLAC ?= $(abspath ../ablac/build/ablac)
 NIX := nix-shell ../ablac/shell.nix --run
 TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab tests/remote/client.ab tests/remote/routes.ab)
 
-.PHONY: test-remote papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-thin ui-thin ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
+.PHONY: test-recovery test-remote papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-thin ui-thin ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
 
 # Unit, backend and integration tests (host only).
 test:
@@ -18,6 +18,13 @@ test:
 # @server over real HTTP: the routes, server.lock, client binaries.
 test-remote:
 	$(NIX) 'ABLAC=$(ABLAC) tests/remote/check.sh'
+
+# Two independent live processes, shared synthetic persistence, node loss and
+# a real browser. No production database, external storage or credentials.
+test-recovery:
+	mkdir -p build
+	$(NIX) '$(ABLAC) build tests/ui/recovery_live.ab -o build/recovery-live --fast'
+	timeout --signal=TERM --kill-after=10s 180s node tests/ui/web_live_recovery.mjs
 
 # Server-rendered gallery pages and their icons.
 gallery-web:

@@ -11,6 +11,7 @@ const open = async () => {
   await page.addInitScript(() => {
     const Native = window.WebSocket;
     window.__frames = [];
+    window.__deliveredAcks = [];
     window.WebSocket = class extends Native {
       constructor(...args) { super(...args); window.__socket = this; }
       send(text) { window.__frames.push(text); if (window.__lag) setTimeout(() => super.send(text), window.__lag); else super.send(text); }
@@ -19,6 +20,7 @@ const open = async () => {
           const message = JSON.parse(event.data);
           if (window.__dropAck && message.a > 0) { window.__dropAck = false; this.close(); return; }
           if (window.__dropRouteAck && message.ack > 0) { window.__dropRouteAck = false; this.close(); return; }
+          if(message.t === 'patch') window.__deliveredAcks.push({a: message.a, route: message.ack});
           handler(event);
         };
       }
@@ -60,9 +62,15 @@ try {
       history.replaceState(history.state, '', '/moment?route-retry=1');
       dispatchEvent(new PopStateEvent('popstate', {state: history.state}));
     });
-    await page.waitForFunction(() => window.__frames.map(JSON.parse).filter(m => m.t === 'route').length >= 2, null, {timeout: 10000});
-    const routes = await page.evaluate(() => window.__frames.map(JSON.parse).filter(m => m.t === 'route'));
-    check(routes[0].n === routes[1].n && routes[0].p === routes[1].p, 'a lost route acknowledgement replays the same navigation');
+    await page.waitForFunction(() => {
+      const routes = window.__frames.map(JSON.parse).filter(m => m.t === 'route');
+      return routes.length >= 2 || (routes.length && window.__deliveredAcks.some(ack => ack.route >= routes[0].n));
+    }, null, {timeout: 10000});
+    const routeProof = await page.evaluate(() => ({routes: window.__frames.map(JSON.parse).filter(m => m.t === 'route'), acks: window.__deliveredAcks}));
+    const routes = routeProof.routes;
+    check(routes.length > 0 && routes.every(route => route.n === routes[0].n && route.p === routes[0].p) &&
+      routeProof.acks.some(ack => ack.route >= routes[0].n) && new URL(page.url()).search === '?route-retry=1',
+      'a lost route acknowledgement is confirmed durably or replays the same navigation');
     await page.close();
   }
   {
@@ -71,9 +79,11 @@ try {
     await page.getByRole('button', {name: 'Contar'}).click();
     await page.getByText('Contadas: 1').waitFor({timeout: 10000});
     await settled(page);
-    const events = await page.evaluate(() => window.__frames.map(JSON.parse).filter(m => m.t === 'event'));
-    check(events.length >= 2 && events[0].u === events[1].u && events[0].n === events[1].n && await page.getByText('Contadas: 1').count() === 1,
-      'a lost acknowledgement reconnects and replays the same ID once');
+    const eventProof = await page.evaluate(() => ({events: window.__frames.map(JSON.parse).filter(m => m.t === 'event'), acks: window.__deliveredAcks}));
+    const events = eventProof.events;
+    check(events.length > 0 && events.every(event => event.u === events[0].u && event.n === events[0].n) &&
+      eventProof.acks.some(ack => ack.a >= events[0].n) && await page.getByText('Contadas: 1').count() === 1,
+      'a lost acknowledgement confirms the durable operation or replays its same ID once');
     await page.close();
   }
   {

@@ -2,6 +2,8 @@
 // screen it was on, since the screen is in its URL, and carries on in a new session.
 import {chromium} from '/home/andre/Desktop/projects/dualkind/node_modules/playwright/index.mjs';
 import {spawn} from 'node:child_process';
+import fs from 'node:fs';
+const serverExecutable = fs.realpathSync('./build/gallery-live');
 const base = process.env.ONE_TEST_BASE;
 const browser = await chromium.launch({executablePath: '/nix/store/62wviylhmg1g9b3ypjxf4l6qzjspvvyw-playwright-chromium-headless-shell/chrome-linux/headless_shell'});
 let failures = 0;
@@ -13,7 +15,11 @@ const start = async () => {
   }
   return server;
 };
-const stop = (server) => new Promise((done) => { server.once('exit', done); server.kill(); });
+const stop = (server) => {
+  if (server.exitCode !== null || server.signalCode !== null) return Promise.resolve();
+  if (fs.realpathSync(`/proc/${server.pid}/exe`) !== serverExecutable) throw new Error('Refusing to stop a foreign live fixture');
+  return new Promise(done => { server.once('exit', done); server.kill('SIGTERM'); });
+};
 let server = await start();
 try {
   const page = await browser.newPage({viewport: {width: 390, height: 844}});

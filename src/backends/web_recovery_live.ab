@@ -83,14 +83,32 @@ fun OneLiveServer.recoveryHello(slot: int, text: string): void {
     val id = slots[slot].session
     val proof = parsed.value.get("proof").asString()
     if (!oneRecoveryIdentifier(proof)) { recoveryRefuse(slot, 403); return }
+    val opened = recoveryOpen(request, id, proof, slot)
+    if (opened.status != 200) { recoveryRefuse(slot, opened.status); return }
+    val index = opened.index
+    val state = oneRecoverySessions.get(id)
+    if (state == null) { recoveryRefuse(slot, 503); return }
+    sessions[index].slot = slot
+    sessions[index].connected = true
+    sessions[index].lastSeen = oneLiveNow()
+    slots[slot].awaitingRecovery = false
+    slots[slot].recoveryRequest = null
+    oneSessionMessage(sessions[index], theme, parsed.value)
+    state.batch.changed(true)
+    return
+}
+
+class OneRecoveryOpened(val status: int, val index: int = -1)
+
+fun OneLiveServer.recoveryOpen(request: HttpRequest, id: string, proof: string, currentSlot: int = -1): OneRecoveryOpened {
     val loaded = recovery.attach(request, id, proof, recoveryOwner)
-    if (loaded.status != 200) { recoveryRefuse(slot, loaded.status); return }
+    if (loaded.status != 200) return OneRecoveryOpened(loaded.status)
     val saved = oneCheckpointRead(loaded.payload)
-    if (saved == null) { recoveryRefuse(slot, 503); return }
+    if (saved == null) return OneRecoveryOpened(503)
     val held: Map<string, string> = Map()
     for (key in saved.get("storage").keys) held.set(key, saved.get("storage").get(key).asString())
-    if (!storage.resumes(request, held)) { recoveryRefuse(slot, 403); return }
-    recoveryForgetLocal(id, slot)
+    if (!storage.resumes(request, held)) return OneRecoveryOpened(403)
+    recoveryForgetLocal(id, currentSlot)
     val state = OneRecoveryState(id, proof, recoveryOwner, recovery, loaded.epoch, loaded.version)
     state.restored = true
     state.checkedAt = oneLiveNow()
@@ -106,14 +124,7 @@ fun OneLiveServer.recoveryHello(slot: int, text: string): void {
     sessions[index].app.receive("restore", jsonStringify(saved.get("app")))
     rounds = 0
     while (rounds < 16 && pump(index)) rounds = rounds + 1
-    sessions[index].slot = slot
-    sessions[index].connected = true
-    sessions[index].lastSeen = oneLiveNow()
-    slots[slot].awaitingRecovery = false
-    slots[slot].recoveryRequest = null
-    oneSessionMessage(sessions[index], theme, parsed.value)
-    state.batch.changed(true)
-    return
+    OneRecoveryOpened(200, index)
 }
 
 fun OneLiveServer.recoveryCookies(request: HttpRequest): HttpResponse {

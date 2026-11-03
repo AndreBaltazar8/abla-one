@@ -1,0 +1,205 @@
+import "abla/fs"
+import "abla/process"
+import "abla/sys/linux"
+import "../../src/backends/web_recovery_live.ab"
+
+// A deliberately local test stand-in, shared by separate fixture processes.
+// Synthetic data only. Production adapters must encrypt and use their shared
+// database/object store; this fixture's lock+rename models atomic CAS commits.
+fun proofDirectory(): Path = Path(processEnvironmentOr("ONE_RECOVERY_TEST_DIR", ""))
+fun proofRow(id: string): Path = proofDirectory().child("$id.json")
+fun proofNow(): int = realtimeMilliseconds()
+fun proofUser(request: HttpRequest): string {
+    val cookie = oneLiveCookie(request, "test-user")
+    if (cookie != "") cookie else request.header("x-test-user")
+}
+fun proofWith(value: Json, key: string, next: Json): Json {
+    val keys: array<string> = []
+    val values: array<Json> = []
+    var found = false
+    for (name in value.keys) { keys.append(name); values.append(if (name == key) next else value.get(name)); if (name == key) found = true }
+    if (!found) { keys.append(key); values.append(next) }
+    jsonObject(keys, values)
+}
+fun proofWrite(id: string, row: Json): bool {
+    val temporary = proofDirectory().child("$id.${linuxProcessId()}.next")
+    temporary.writeText(jsonStringify(row)) && temporary.setPermissions(384) && temporary.moveTo(proofRow(id))
+}
+fun proofRelease(lock: FileLock): void { lock.release(); linuxSyscall1(3, lock.descriptor); return }
+fun proofLoad(id: string): Json = jsonParse(proofRow(id).readText()).value
+fun proofAllowed(request: HttpRequest, row: Json, proof: string): bool = row.isObject() &&
+    row.getString("user") == proofUser(request) && proofUser(request) != "" &&
+    row.getString("proof") == proof && !row.get("revoked").asBoolean() && row.getInt("expires") > proofNow()
+fun proofOwned(row: Json, owner: string, epoch: int): bool = row.isObject() &&
+    row.getString("owner") == owner && row.getInt("epoch") == epoch && !row.get("revoked").asBoolean() && row.getInt("expires") > proofNow()
+fun proofResult(row: Json): OneRecoveryResult = OneRecoveryResult(200, row.getInt("epoch"), row.getInt("version"), row.getString("payload"))
+
+fun proofCreate(request: HttpRequest, id: string, proof: string, owner: string, payload: string): OneRecoveryResult {
+    if (!oneRecoveryIdentifier(id) || proofUser(request) == "") return OneRecoveryResult(403)
+    val lock = proofDirectory().child("store.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return OneRecoveryResult(503) }
+    if (proofRow(id).exists()) { proofRelease(lock); return OneRecoveryResult(409) }
+    val row = jsonObject(["proof", "user", "owner", "epoch", "version", "payload", "expires", "writes", "revoked", "inbox", "files"],
+        [jsonString(proof), jsonString(proofUser(request)), jsonString(owner), jsonInteger(1), jsonInteger(1), jsonString(payload), jsonInteger(proofNow() + oneRecoveryIdleMilliseconds), jsonInteger(1), jsonBoolean(false), jsonArray([]), jsonArray([])])
+    val ok = proofWrite(id, row)
+    proofRelease(lock)
+    if (ok) proofResult(row) else OneRecoveryResult(503)
+}
+fun proofInspect(request: HttpRequest, id: string, proof: string): OneRecoveryResult {
+    if (!oneRecoveryIdentifier(id)) return OneRecoveryResult(403)
+    val lock = proofDirectory().child("store.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return OneRecoveryResult(503) }
+    val row = proofLoad(id)
+    val result = if (proofAllowed(request, row, proof)) proofResult(row) else OneRecoveryResult(403)
+    proofRelease(lock)
+    result
+}
+fun proofAttach(request: HttpRequest, id: string, proof: string, owner: string): OneRecoveryResult {
+    if (!oneRecoveryIdentifier(id)) return OneRecoveryResult(403)
+    val lock = proofDirectory().child("store.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return OneRecoveryResult(503) }
+    val row = proofLoad(id)
+    if (!proofAllowed(request, row, proof)) { proofRelease(lock); return OneRecoveryResult(403) }
+    val next = proofWith(proofWith(proofWith(proofWith(proofWith(row, "owner", jsonString(owner)), "epoch", jsonInteger(row.getInt("epoch") + 1)), "version", jsonInteger(row.getInt("version") + 1)), "writes", jsonInteger(row.getInt("writes") + 1)), "expires", jsonInteger(proofNow() + oneRecoveryIdleMilliseconds))
+    val ok = proofWrite(id, next)
+    proofRelease(lock)
+    if (ok) proofResult(next) else OneRecoveryResult(503)
+}
+fun proofSave(id: string, owner: string, epoch: int, version: int, payload: string, active: bool, consumed: array<string>): OneRecoveryResult {
+    if (!oneRecoveryIdentifier(id) || payload.size > oneRecoveryCheckpointLimit) return OneRecoveryResult(403)
+    if (proofDirectory().child("unavailable").exists()) return OneRecoveryResult(503)
+    val lock = proofDirectory().child("store.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return OneRecoveryResult(503) }
+    val row = proofLoad(id)
+    if (!proofOwned(row, owner, epoch) || row.getInt("version") != version) { proofRelease(lock); return OneRecoveryResult(409) }
+    val remaining: array<Json> = []
+    for (item in row.get("inbox").values) {
+        var used = false
+        for (key in consumed) if (key == item.getString("id")) used = true
+        if (!used) remaining.append(item)
+    }
+    var next = proofWith(proofWith(proofWith(proofWith(row, "payload", jsonString(payload)), "version", jsonInteger(version + 1)), "writes", jsonInteger(row.getInt("writes") + 1)), "inbox", jsonArray(remaining))
+    if (active) next = proofWith(next, "expires", jsonInteger(proofNow() + oneRecoveryIdleMilliseconds))
+    val ok = proofWrite(id, next)
+    proofRelease(lock)
+    if (ok) proofResult(next) else OneRecoveryResult(503)
+}
+fun proofFence(id: string, owner: string, epoch: int): int {
+    if (proofDirectory().child("unavailable").exists()) return 503
+    val lock = proofDirectory().child("store.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return 503 }
+    val row = proofLoad(id)
+    val result = if (proofOwned(row, owner, epoch)) 200 else 409
+    proofRelease(lock)
+    result
+}
+fun proofEnd(id: string, owner: string, epoch: int): int {
+    val lock = proofDirectory().child("store.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return 503 }
+    val row = proofLoad(id)
+    val ok = proofOwned(row, owner, epoch) && proofWrite(id, proofWith(row, "revoked", jsonBoolean(true)))
+    proofRelease(lock)
+    if (ok) 200 else 409
+}
+fun proofInbox(id: string, owner: string, epoch: int): OneRecoveryInbox {
+    val lock = proofDirectory().child("store.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return OneRecoveryInbox(503) }
+    val row = proofLoad(id)
+    if (!proofOwned(row, owner, epoch)) { proofRelease(lock); return OneRecoveryInbox(409) }
+    val items: array<OneRecoveryCompletion> = []
+    for (item in row.get("inbox").values) if (items.size < 64) items.append(OneRecoveryCompletion(item.getString("id"), item.getString("payload")))
+    proofRelease(lock)
+    OneRecoveryInbox(200, items)
+}
+fun proofCompletion(row: Json, payload: string): Json {
+    val items: array<Json> = []
+    for (item in row.get("inbox").values) items.append(item)
+    items.append(jsonObject(["id", "payload"], [jsonString(oneLiveSessionId()), jsonString(payload)]))
+    proofWith(row, "inbox", jsonArray(items))
+}
+
+// File jobs in this stand-in are tiny local fixtures. Production callbacks
+// enqueue off-path S3 jobs and deliver their completion through the same inbox.
+fun proofRead(id: string, owner: string, epoch: int, request: int, handle: string, offset: int, count: int): int {
+    if (!oneRecoveryIdentifier(id) || !oneRecoveryIdentifier(handle)) return 403
+    val lock = proofDirectory().child("store.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return 503 }
+    val row = proofLoad(id)
+    if (!proofOwned(row, owner, epoch)) { proofRelease(lock); return 409 }
+    val path = proofDirectory().child("$id-$handle.blob")
+    if (!path.exists()) { proofRelease(lock); return 404 }
+    val data = path.readText()
+    val start = if (offset > data.size) data.size else offset
+    val end = if (start + count > data.size) data.size else start + count
+    val payload = jsonStringify(jsonObject(["requestId", "status", "body", "bodyBase64", "error"], [jsonInteger(request), jsonInteger(200), jsonString(""), jsonString(base64Encode(data.slice(start, end))), jsonString("")]))
+    val ok = proofWrite(id, proofCompletion(row, payload))
+    proofRelease(lock)
+    if (ok) 200 else 503
+}
+fun proofDelete(id: string, owner: string, epoch: int, request: int, handle: string): int {
+    if (!oneRecoveryIdentifier(id) || !oneRecoveryIdentifier(handle)) return 403
+    val lock = proofDirectory().child("store.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return 503 }
+    val row = proofLoad(id)
+    if (!proofOwned(row, owner, epoch)) { proofRelease(lock); return 409 }
+    val files: array<Json> = []
+    for (file in row.get("files").values) if (file.getString("handle") != handle) files.append(file)
+    proofDirectory().child("$id-$handle.blob").remove()
+    val ok = proofWrite(id, proofCompletion(proofWith(row, "files", jsonArray(files)), oneResponsePayload(request, 204, "", "")))
+    proofRelease(lock)
+    if (ok) 200 else 503
+}
+
+class ProofUpload(val request: HttpRequest, val ticket: int)
+val proofUploads: array<ProofUpload> = []
+fun proofUpload(request: HttpRequest, ticket: int): bool { proofUploads.append(ProofUpload(request, ticket)); true }
+fun proofUploadResponse(request: HttpRequest): HttpResponse {
+    val id = request.queryParameter("s")
+    if (!oneRecoveryIdentifier(id)) return httpText("Denied", 403)
+    val lock = proofDirectory().child("store.lock").fileLock()
+    if (!lock.tryHold()) { proofRelease(lock); return httpText("Unavailable", 503) }
+    val result = proofUploadLocked(request, id)
+    proofRelease(lock)
+    result
+}
+fun proofUploadLocked(request: HttpRequest, id: string): HttpResponse {
+    val row = proofLoad(id)
+    if (!proofAllowed(request, row, request.header("x-one-proof"))) return httpText("Denied", 403)
+    val saved = oneCheckpointRead(row.getString("payload"))
+    if (saved == null) return httpText("Unavailable", 503)
+    val requestId = oneParseInt(request.queryParameter("id"), -1)
+    val kind = request.queryParameter("kind")
+    var allowed = false
+    for (picker in saved.get("pickers").values) if (picker.getInt("id") == requestId && (picker.getString("kind") == kind || kind == "cancel")) allowed = true
+    if (!allowed) return httpText("Denied", 403)
+    if (kind == "cancel") {
+        val payload = oneResponsePayload(requestId, 204, if (request.queryParameter("files") == "1") "[]" else "", "")
+        if (!proofWrite(id, proofCompletion(row, payload))) return httpText("Unavailable", 503)
+        return httpText("", 204)
+    }
+    if (request.body.size > oneRecoveryFileLimit) return httpText("Too large", 413)
+    val files: array<Json> = []
+    var total = request.body.size
+    for (file in row.get("files").values) { files.append(file); total = total + file.getInt("size") }
+    if (total > oneRecoveryFilesLimit || files.size >= 128) return httpText("Too large", 413)
+    val handle = oneLiveSessionId()
+    val path = proofDirectory().child("$id-$handle.blob")
+    if (!path.writeText(request.body) || !path.setPermissions(384)) return httpText("Unavailable", 503)
+    val info = jsonObject(["handle", "name", "size", "mime"], [jsonString(handle), jsonString(oneUrlDecode(request.header("x-one-name"))), jsonInteger(request.body.size), jsonString(request.header("content-type"))])
+    files.append(info)
+    var next = proofWith(row, "files", jsonArray(files))
+    if (request.header("x-one-last") == "1") {
+        val picked = request.queryParameter("picked")
+        val selection: array<Json> = []
+        for (file in files) if (file.getString("handle") == handle || picked.contains(file.getString("handle"))) selection.append(file)
+        next = proofCompletion(next, oneResponsePayload(requestId, 200, jsonStringify(jsonArray(selection)), ""))
+    }
+    if (!proofWrite(id, next)) return httpText("Unavailable", 503)
+    httpText(handle, 200)
+}
+fun proofUploadPump(var server: OneLiveServer): void {
+    for (upload in proofUploads) server.answer(upload.ticket, proofUploadResponse(upload.request))
+    proofUploads.clear()
+    return
+}
+fun proofStore(): OneLiveRecoveryStore = OneLiveRecoveryStore(true, proofCreate, proofAttach, proofInspect, proofSave, proofFence, proofEnd, proofInbox, proofUpload, proofRead, proofDelete)
