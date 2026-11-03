@@ -76,6 +76,8 @@ gallery-live: gallery-web
 
 # Live web (server-run sessions over WebSocket) as document and as canvas.
 ui-web-live: gallery-live
+	$(NIX) '$(ABLAC) build tests/ui/viewport_live.ab -o build/viewport-live --fast'
+	tests/ui/viewport-live.sh
 	tests/ui/live.sh
 	$(NIX) '$(ABLAC) build tests/ui/readfile_live.ab -o build/readfile-live --fast'
 	tests/ui/readfile-live.sh

@@ -344,7 +344,9 @@ class OneLiveSession(
     // A press has run since the last render.
     var pressed: bool,
     // What the screen on the page says (OneEventMap.screen).
-    var shown: int
+    var shown: int,
+    // Width acknowledged only by a patch rendered after hello/viewport.
+    var viewportAnswer: int = 0
 ) {
     // The tree of the current state, with its event map: a new revision.
     fun tree(theme: Theme): Node {
@@ -440,7 +442,10 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
         session.htmlSent = ""
         session.cssSent = 0
         session.changed = true
-        if (m.get("w").intAvailable()) session.width = m.get("w").asInt()
+        if (m.get("w").intAvailable()) {
+            session.width = m.get("w").asInt()
+            session.viewportAnswer = session.width
+        }
         if (m.get("h").intAvailable()) session.height = m.get("h").asInt()
         if (m.get("e").intAvailable()) session.queue.routes.adopt(m.get("e").asInt())
     } else if (kind == "route") {
@@ -449,6 +454,7 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
         session.changed = true
     } else if (kind == "viewport" && m.get("w").intAvailable()) {
         session.width = m.get("w").asInt()
+        session.viewportAnswer = session.width
         if (m.get("h").intAvailable()) session.height = m.get("h").asInt()
         session.changed = true
     } else if (kind == "scroll" && m.get("y").intAvailable()) {
@@ -471,7 +477,9 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
     // A move goes out even when the screen looks the same: the URL still changes.
     val typed = session.changeAnswer
     session.changeAnswer = 0
-    if (same && moves.size == 0 && answer == 0 && typed == 0) return ""
+    val viewport = session.viewportAnswer
+    session.viewportAnswer = 0
+    if (same && moves.size == 0 && answer == 0 && typed == 0 && viewport == 0) return ""
     val screen = session.maps[session.maps.size - 1].screen
     val kept = moves.size > 0 && screen == session.shown
     session.shown = screen
@@ -480,6 +488,10 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
     session.htmlSent = markup
     val keys = ["t", "r", "css", "title"]
     val values = [jsonString(if (session.canvas) "frame" else "patch"), jsonInteger(session.revision), jsonString(css), jsonString(session.title)]
+    if (viewport > 0) {
+        keys.append("viewport")
+        values.append(jsonInteger(viewport))
+    }
     if (!same && !session.canvas) {
         keys.append("html")
         values.append(jsonString(markup))

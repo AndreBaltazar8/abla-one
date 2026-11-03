@@ -34,6 +34,20 @@ class Counter(var count: int by State(0)) : OneApp {
 
 `tools/vector2svg` builds on first use and needs sibling `ablac` and `abla-xml` checkouts; `tools/icons-ab` embeds SVGs into an Abla module and needs sibling `ablac`.
 
+## Live web first paint
+
+A `one_width` cookie improves the server-rendered layout guess; it does not make
+that guess interactive. With JavaScript, the live document waits until the host
+applies a patch acknowledging the current viewport width. Delayed handshakes,
+unrelated socket messages and replies for an earlier width keep the app held.
+Even an unchanged tree sends a viewport acknowledgement. There is no timeout
+that reveals guessed controls.
+
+A connection status and a reload link stay available while waiting. Applications
+can set `OneLiveOptions.connectionText` and `reloadText` (defaults: `Connecting…`
+and `Reload`). Without JavaScript the hold attribute is never set, so the
+server-rendered content remains readable and the connection state stays hidden.
+
 ## Tests
 
 ```sh

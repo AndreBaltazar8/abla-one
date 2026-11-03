@@ -263,6 +263,12 @@
     else if (message.ack && message.ack === asked) placeScroll(savedScroll(entry.e));
     watchFeeds();
     release();
+    // Cookie state and unrelated socket messages do not acknowledge a layout.
+    // A resize while the first answer is in flight must wait for its own width.
+    if (message.viewport === innerWidth) {
+      document.documentElement.removeAttribute('data-one-held');
+      document.documentElement.setAttribute('data-one-ready', '');
+    }
   };
   const ask = (path, id) => {
     leaveScreen();
@@ -527,13 +533,13 @@
     socket.onopen = () => {
       retry = 0;
       document.documentElement.removeAttribute('data-one-offline');
-      // What's waiting was made on the layout shown, which a first paint guessed: it lands there, and then the width counts.
+      // Early scripted intents were made on the SSR revision: replay them there, then acknowledge the real viewport.
       const waiting = queue.length > 0;
       socket.send(JSON.stringify(waiting ? {t: 'hello', r: revision, e: entry.e} : {t: 'hello', r: revision, w: innerWidth, e: entry.e}));
       while (queue.length) socket.send(queue.shift());
       if (waiting) socket.send(JSON.stringify({t: 'viewport', w: innerWidth}));
     };
-    socket.onmessage = (e) => { receive(JSON.parse(e.data)); document.documentElement.removeAttribute('data-one-held'); };
+    socket.onmessage = (e) => receive(JSON.parse(e.data));
     socket.onclose = (e) => {
       document.documentElement.setAttribute('data-one-offline', '');
       // An unknown or ended session needs a fresh page, unless one is already on its way.
@@ -541,8 +547,8 @@
       setTimeout(connect, Math.min(1000 * 2 ** retry++, 10000));
     };
   };
-  // Layout follows the viewport width; the cookie gives the next first paint
-  // the right layout. Cookies are for the whole app, whatever route set them.
+  // Layout follows the viewport width; the cookie is only a hint for the next
+  // SSR page. Cookies are for the whole app, whatever route set them.
   let resizing = 0;
   const viewport = () => {
     document.cookie = `one_width=${innerWidth}; path=${basePath}; max-age=31536000; samesite=lax`;

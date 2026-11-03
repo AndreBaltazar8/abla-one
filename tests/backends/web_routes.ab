@@ -136,6 +136,15 @@ fun main: int {
     expect(!same.has("html"), "no markup")
     expectEqual(same.get("ack").asInt(), 5, "still answered")
 
+    // Width acknowledgement survives an unchanged tree; cookie hints are not readiness.
+    oneSessionMessage(m, t, jsonParse("{\"t\":\"hello\",\"w\":1280}").value)
+    expectEqual(update(m, t).get("viewport").asInt(), 1280, "hello acknowledges its rendered viewport")
+    oneSessionMessage(m, t, jsonParse("{\"t\":\"viewport\",\"w\":1440}").value)
+    val resized = update(m, t)
+    expectEqual(resized.get("viewport").asInt(), 1440, "a new width is explicitly acknowledged")
+    expect(!resized.has("html"), "the acknowledgement also works for identical markup")
+    expectEqual(oneSessionUpdate(m,t,"/i"), "", "the viewport acknowledgement is consumed once")
+
     oneSessionMessage(m, t, jsonParse("{\"t\":\"pick-error\",\"id\":71,\"error\":\"upload failed\"}").value)
     val failure = oneResponse(m.queue.takeCompletions()[0])
     expect(failure.requestId == 71 && !failure.ok() && failure.error == "upload failed", "failed picker upload completes with its error")

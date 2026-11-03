@@ -1,0 +1,27 @@
+import "../port.ab"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+
+class ViewportProof(var desktop: int = 0, var phone: int = 0) : OneApp {
+    fun render(var ui: Ui): Node {
+        if (ui.width >= 900) return column(style().padding(20).gap(12), [
+            text("Desktop layout", style()),
+            text("Width ${ui.width}", style()),
+            pressable(ui.press { desktop += 1 }, style().padding(12), [text("Desktop action", style())]).set("label", "Desktop action"),
+            text("Desktop hits $desktop; phone hits $phone", style())
+        ])
+        column(style().padding(20).gap(12), [
+            pressable(ui.press { phone += 1 }, style().padding(12), [text("Phone action", style())]).set("label", "Phone action"),
+            text("Phone layout", style()),
+            text("Desktop hits $desktop; phone hits $phone", style())
+        ])
+    }
+    fun receive(kind: string, value: string): void { return }
+}
+fun viewportApp(request: HttpRequest, session: string): OneApp = ViewportProof()
+fun main: int {
+    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", testPort()), { request -> httpText("not found",404) }, oneLivePaths(["/viewport"]), viewportApp, oneDefaultTheme(), OneLiveOptions("Viewport proof","en","#fff","/icons","src/backends/web/host.js",""), oneLiveNoStorage())
+    if (!server.listening()) return 1
+    testPublishPort(server.listener.localPort())
+    server.run()
+}

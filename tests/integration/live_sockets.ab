@@ -77,14 +77,14 @@ fun main: int {
     expect(exchange(server, plain, "").indexOf("handler") >= 0, "other requests reach the handler")
     plain.close()
 
-    // A page with no width from an earlier one is held back until the socket answers with the real one.
+    // Every scripted page waits for its actual viewport, even with a remembered cookie.
     var first = connect(port)
     first.writeResult("GET /page HTTP/1.1\r\nHost: x\r\n\r\n")
     expect(exchange(server, first, "").indexOf("data-one-held") >= 0, "a first page is held back")
     first.close()
     var known = connect(port)
     known.writeResult("GET /page HTTP/1.1\r\nHost: x\r\nCookie: one_width=1200\r\n\r\n")
-    expect(exchange(server, known, "").indexOf("data-one-held") < 0, "a page whose width is known isn't")
+    expect(exchange(server, known, "").indexOf("data-one-held") >= 0, "a remembered width is still held until its layout acknowledgement")
     known.close()
 
     // A deferred request waits, then gets its answer.

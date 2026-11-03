@@ -50,7 +50,10 @@ class OneLiveOptions(
     // Path of web/host.js on disk, served at /one/host.js.
     val hostScript: string,
     // Extra markup for the document head (fonts, favicons, meta tags).
-    val head: string
+    val head: string,
+    // The first-layout connection state, outside the app while it is held.
+    val connectionText: string = "Connecting…",
+    val reloadText: string = "Reload"
 )
 
 // Seeds a new session's secure storage from the page request, and maps stored
@@ -515,8 +518,8 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
         sessions[index].receive("pageLoad", "")
     }
     sessions[index].lastSeen = oneLiveNow()
-    // The page's last known width (the host keeps it in a cookie), so the first
-    // paint already has the right layout.
+    // The remembered width improves the SSR/no-JS guess. It does not acknowledge
+    // the layout of this browser: scripted pages still wait for their viewport.
     val remembered = oneParseInt(oneLiveCookie(request, "one_width"), 0)
     if (remembered > 0) sessions[index].width = remembered
     val canvas = request.queryParameter("render") == "canvas"
@@ -541,7 +544,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val fill = if (session.document) "min-height:100%" else "height:100%"
     val body = "<!doctype html><html lang=\"${oneHtmlEscape(if (session.lang != "") session.lang else options.lang)}\"><head><meta charset=\"utf-8\"><base href=\"${oneRouteBase(route)}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(if (session.title != "") session.title else options.title)}</title>${session.meta}${options.head}" +
         "<style>html,body{margin:0;height:100%;background:${options.background}}#one-root{$fill}#one-root>.one{$fill}\n${oneWebBaseCss()}</style><style id=\"one-css\">${sessions[index].css.text()}</style>" +
-        "${if (remembered > 0 || canvas) "" else oneLiveHoldFirstPaint}${if (canvas) "" else oneWebEarlyEvents}<script>window.__one=$boot</script><script src=\"one/${if (canvas) "canvas" else "host"}.js\" defer></script></head><body><div id=\"one-root\">$markup</div></body></html>"
+        "${if (canvas) "" else oneLiveHoldFirstPaint}${if (canvas) "" else oneWebEarlyEvents}<script>window.__one=$boot</script><script src=\"one/${if (canvas) "canvas" else "host"}.js\" defer></script></head><body>${if (canvas) "" else oneLiveConnection(options, route)}<div id=\"one-root\">$markup</div></body></html>"
     val headers = [
         HttpHeader("Content-Type", "text/html; charset=utf-8"),
         HttpHeader("Cache-Control", "no-store"),
@@ -551,10 +554,12 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     HttpResponse(200, headers, body)
 }
 
-// Without a width from an earlier page this render guessed a phone's, and the socket's first answer (host.js) has the real one,
-// about a round trip later. Painting the guess would show one layout and then another, and a press in between would land on the first.
-// Only with a script, so what can't run it still shows the page, and only for a moment should the answer not come.
-val oneLiveHoldFirstPaint = "<style>[data-one-held] #one-root{visibility:hidden}</style><script>document.documentElement.setAttribute('data-one-held','');setTimeout(()=>document.documentElement.removeAttribute('data-one-held'),1500)</script>"
+// A remembered width is only an SSR hint. With JS, a page becomes interactive
+// after host.js applies the matching viewport acknowledgement. Without JS the
+// attribute is never set, so the server-rendered page remains readable.
+val oneLiveHoldFirstPaint = "<style>#one-connecting{display:none}[data-one-held] #one-root{visibility:hidden}[data-one-held] #one-connecting{display:flex;position:fixed;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:24px;background:Canvas;color:CanvasText;font:16px system-ui}#one-connecting a{color:inherit}</style><script>document.documentElement.setAttribute('data-one-held','')</script>"
+fun oneLiveConnection(options: OneLiveOptions, route: string): string =
+    "<div id=\"one-connecting\"><span role=\"status\" aria-live=\"polite\">${oneHtmlEscape(options.connectionText)}</span><a href=\"${oneHtmlEscape(route)}\">${oneHtmlEscape(options.reloadText)}</a></div>"
 
 fun oneLiveCookie(request: HttpRequest, name: string): string {
     val header = request.header("cookie")

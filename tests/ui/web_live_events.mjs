@@ -108,7 +108,7 @@ try {
     await page.close();
   }
   {
-    // Before the script: the page is painted, nothing listens yet. No width cookie to hold the paint for, so this is the earliest a person can act.
+    // An early script may enqueue intent on SSR before the host loads. The layout stays held for people until its viewport is acknowledged.
     const context = await browser.newContext({viewport: {width: 390, height: 844}});
     await context.addCookies([{name: 'one_width', value: '390', url: base}]);
     const page = await context.newPage();
@@ -118,12 +118,15 @@ try {
     const sent = [];
     page.on('websocket', ws => ws.on('framesent', f => sent.push(JSON.parse(f.payload))));
     await page.goto(base + '/moment', {waitUntil: 'commit'});
-    await page.getByText('Emitidas: 0').waitFor();
-    check(await page.evaluate(() => !window.__socket && Array.isArray(window.__oneEarly)), 'before the script, with the page already painted');
-    await page.getByRole('button', {name: 'Contar'}).click();
-    await page.getByRole('button', {name: 'Contar'}).click();
-    const field = page.locator('input[placeholder="Rascunho"]');
-    await field.fill('escrito cedo');
+    await page.getByText('Emitidas: 0').waitFor({state:'attached'});
+    check(await page.evaluate(() => !window.__socket && Array.isArray(window.__oneEarly)), 'before the host script, with its early intent queue installed');
+    check(await page.locator('#one-root').isHidden(), 'even a matching cookie waits for layout before interaction');
+    await page.evaluate(() => {
+      const count = [...document.querySelectorAll('button')].find(b=>b.textContent==='Contar');
+      count.click(); count.click();
+      const field = document.querySelector('input[placeholder="Rascunho"]');
+      field.value = 'escrito cedo'; field.dispatchEvent(new Event('input',{bubbles:true}));
+    });
     check(await page.getByText('Contadas: 0').count() === 1, 'nothing answers yet');
     letGo();
     await page.getByText('Contadas: 1').waitFor({timeout: 5000}).then(() => check(true, 'a press before the script lands when it runs, and the same press twice is one'), () => check(false, 'a press before the script'));
