@@ -260,5 +260,13 @@ fun main: int {
     expect(oneLiveReserved("/one/live") && oneLiveReserved("/one") && !oneLiveReserved("/oneness"), "/one/* is reserved")
     expectEqual(oneLiveRoute(HttpRequest("GET", "/a", "x=1", [], "", [], [])), "/a?x=1", "a request's route")
     expectEqual(oneLiveScriptString("/a</script>"), "\"/a\\u003c/script>\"", "a route can't end the script")
+    val hydrating = OneRecoveryState("hydration-transient","proof","owner",oneLiveNoRecovery())
+    hydrating.restored = true
+    hydrating.status = 503
+    oneRecoverySessions.set("hydration-transient",hydrating)
+    expect(oneRecoveryHydrationRead("hydration-transient",-1,"opaque-handle",0,3)==202 && hydrating.hydrationFiles.has(-1),"transient ownership inspection holds trusted hydration admission without dropping its buffer")
+    hydrating.status = 409
+    expect(oneRecoveryHydrationRead("hydration-transient",-2,"opaque-handle",0,3)==409 && !hydrating.files.has(-2),"a fenced owner cannot start trusted hydration")
+    oneRecoverySessions.remove("hydration-transient")
     testsPassed()
 }

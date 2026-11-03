@@ -229,7 +229,7 @@ fun OneLiveServer.recoverySettle(index: int): void {
         state.inboxPending = false
         if (inbox.status != 200) { state.status = inbox.status; return }
         if (inbox.items.size > 64) { state.status = 503; return }
-        for (item in inbox.items) if (!oneRecoveryConsumed(state, item.id)) {
+        for (item in inbox.items) if (!oneRecoveryConsumed(state, item.id) && state.consumed.size < 64) {
             if (item.id.size == 0 || item.id.size > 128 || item.payload.size > 524288) { state.status = 503; return }
             val response = oneResponse(item.payload)
             if (!response.valid) { state.status = 503; return }

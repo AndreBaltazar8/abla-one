@@ -675,7 +675,13 @@
           const response = await fetch(`one/upload?s=${encodeURIComponent(boot.s)}&${query}`, {method: 'POST', body,
             headers: {...headers, ...(boot.proof ? {'X-One-Proof': boot.proof, 'X-One-Upload': nonce} : {})},
             credentials: 'same-origin', redirect: 'error', signal: controller.signal});
-          if (!boot.proof || ![502, 503, 504].includes(response.status) || attempt >= 2) return response;
+          if (!boot.proof || ![502, 503, 504].includes(response.status) || attempt >= 2) {
+            // The opaque handle is part of delivery too: losing the response
+            // body after headers must retry the same committed upload nonce.
+            const text = await response.text();
+            if (text.length > 8192) throw new Error('Invalid upload response');
+            return {ok: response.ok, status: response.status, text: async () => text};
+          }
           await response.body?.cancel();
         } catch (error) {
           if (!boot.proof || attempt >= 2) throw error;
@@ -785,7 +791,7 @@
       if (boot.proof && response.ok) await request(true);
     };
     cookieWork = cookieWork.catch(() => {}).then(() => {
-      if (navigator.locks && navigator.locks.request) return navigator.locks.request(`one:cookies:${basePath}`, deliver);
+      if (navigator.locks && navigator.locks.request) return navigator.locks.request(`one:cookies:${basePath}`, deliver).catch(deliver);
       return deliver();
     }).catch(() => {});
   };
