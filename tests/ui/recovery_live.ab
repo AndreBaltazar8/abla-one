@@ -2,7 +2,7 @@ import "../port.ab"
 import "recovery_store.ab"
 import "../../src/one_kit.ab"
 
-class RecoveryProof(val services: OneServices, var draft: string = "", var view: string = "/recovery", var picker: int = 0, var reading: int = 0, var file: OneFile = OneFile("", "", 0, ""), var content: string = "", var mutation: int = 0, var count: int = 0, var awaitingReady: bool = false) : OneApp {
+class RecoveryProof(val services: OneServices, val session: string, var hydrating: int = 0, var draft: string = "", var view: string = "/recovery", var picker: int = 0, var reading: int = 0, var file: OneFile = OneFile("", "", 0, ""), var content: string = "", var mutation: int = 0, var count: int = 0, var awaitingReady: bool = false) : OneApp {
     fun render(var ui: Ui): Node = column(style().padding(20).gap(12), [
         text(if (view == "/recovery/other") "Other view" else "Draft view", style()).keyed("view-title"),
         input(draft, "Draft text", ui.change { value -> draft = value }, style()).keyed("draft-text").set("label", "Draft text"),
@@ -19,23 +19,33 @@ class RecoveryProof(val services: OneServices, var draft: string = "", var view:
     fun receive(kind: string, value: string): void {
         if (kind == "route") view = oneRoutePagePath(value)
         else if (kind == "checkpoint") services.effect("live-checkpoint", jsonStringify(jsonObject(
-            ["draft", "view", "picker", "reading", "file", "content", "mutation", "count"],
-            [jsonString(draft), jsonString(view), jsonInteger(picker), jsonInteger(reading), jsonObject(["handle", "name", "size", "mime"], [jsonString(file.handle), jsonString(file.name), jsonInteger(file.size), jsonString(file.mime)]), jsonString(content), jsonInteger(mutation), jsonInteger(count)])))
+            ["draft", "view", "picker", "reading", "file", "contentBytes", "mutation", "count"],
+            [jsonString(draft), jsonString(view), jsonInteger(picker), jsonInteger(reading), jsonObject(["handle", "name", "size", "mime"], [jsonString(file.handle), jsonString(file.name), jsonInteger(file.size), jsonString(file.mime)]), jsonInteger(content.size), jsonInteger(mutation), jsonInteger(count)])))
         else if (kind == "restore") {
             val saved = jsonParse(value).value
             draft = saved.getString("draft"); view = saved.getString("view")
             picker = saved.getInt("picker"); reading = saved.getInt("reading")
             val picked = saved.get("file")
             file = OneFile(picked.getString("handle"), picked.getString("name"), picked.getInt("size"), picked.getString("mime"))
-            content = saved.getString("content"); mutation = saved.getInt("mutation"); count = saved.getInt("count")
+            content = ""; mutation = saved.getInt("mutation"); count = saved.getInt("count")
+            if (saved.getInt("contentBytes") > 0 && reading == 0) {
+                val recovery = oneRecoverySessions.get(session)
+                if (recovery != null) {
+                    hydrating = -(recovery.version + 1)
+                    if (oneRecoveryHydrationRead(session, hydrating, file.handle, 0, 262144) != 202) hydrating = 0
+                }
+            }
             awaitingReady = true
             proofDirectory().child("restoring").writeText("1")
-        } else if (kind == "proof-ready" && awaitingReady) {
+        } else if (kind == "proof-ready" && awaitingReady && hydrating == 0) {
             awaitingReady = false
             services.effect("live-restored", "")
         } else if (kind == "result") {
             val response = oneResponse(value)
-            if (picker != 0 && response.requestId == picker) {
+            if (hydrating != 0 && response.requestId == hydrating) {
+                hydrating = 0
+                if (response.status == 200) content = base64Decode(response.bodyBase64)
+            } else if (picker != 0 && response.requestId == picker) {
                 picker = 0
                 val files = response.files()
                 if (files.size > 0) { file = files[0]; reading = services.readFile(file, 0, 262144) }
@@ -84,7 +94,7 @@ fun proofSeed(request: HttpRequest): Map<string, string> {
 }
 fun proofResumes(request: HttpRequest, stored: Map<string, string>): bool = stored.get("test-user") == proofUser(request) && proofUser(request) != ""
 fun proofCookies(request: HttpRequest, key: string, value: string): array<string> = if (key == "test-cookie") ["test-cookie=${base64Encode(value)}; Path=/; HttpOnly; SameSite=Strict"] else []
-fun proofFactory(request: HttpRequest, id: string): OneApp = RecoveryProof(oneLiveServices(id))
+fun proofFactory(request: HttpRequest, id: string): OneApp = RecoveryProof(oneLiveServices(id), id)
 
 fun main: int {
     if (processEnvironmentOr("ONE_RECOVERY_TEST_DIR", "") == "" || !proofDirectory().exists()) return 1

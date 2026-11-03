@@ -16,6 +16,8 @@ const requests = [];
 let socketNode = 'b';
 let pageNode = 'a';
 let proofs = 0;
+let refuseUpload = false;
+const uploadNonces = [];
 let browser;
 const trace=[];
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -48,6 +50,10 @@ const kill = async node => {
   await wait(() => node.child.exitCode !== null || node.child.signalCode !== null, 'owned fixture exits');
 };
 const proxy = http.createServer((request, response) => {
+  if (request.url.startsWith('/one/upload')) {
+    uploadNonces.push(request.headers['x-one-upload']);
+    if (refuseUpload) { refuseUpload = false; request.resume(); response.writeHead(503); response.end('unavailable'); return; }
+  }
   const alternate = socketNode === 'a' ? 'b' : 'a';
   const name = request.url.startsWith('/one/upload') || request.url.startsWith('/one/cookies') ? alternate : pageNode;
   const node = target(name);
@@ -167,6 +173,7 @@ try {
   check(checkpoint().effects.some(effect => JSON.parse(effect.message).t === 'pick'), 'a committed picker effect survives owner death before browser delivery');
   await start('a');
   const uploadNode = nodes.get('a').port;
+  refuseUpload = true;
   await recoveredChooser.setFiles({name: 'ação.txt', mimeType: 'text/plain', buffer: Buffer.from('shared opaque bytes ç')});
   await wait(() => checkpoint().files?.length === 1 && checkpoint().app.reading > 0, 'pending file read descriptor is durable before owner loss');
   socketNode = 'a';
@@ -175,6 +182,7 @@ try {
   await page.getByText('Read bytes: shared opaque bytes ç', {exact: true}).waitFor();
   check(checkpoint().app.reading === 0 && checkpoint().files.length === 0, 'pending file read is resubmitted on the next owner and consumed with its checkpoint');
   check(requests.some(request => request.url.startsWith('/one/upload') && request.port === uploadNode), 'upload completes on a different node and attached owner reads its opaque handle');
+  check(uploadNonces.length === 2 && /^[a-f0-9]{32}$/.test(uploadNonces[0]) && uploadNonces[0] === uploadNonces[1], 'a temporary upload failure retries with the same opaque idempotency nonce');
   check(navigations === 1, 'cookie and upload recovery keep the document alive');
   await start('b');
 
@@ -182,6 +190,8 @@ try {
   await page.reload();
   await page.waitForSelector('html[data-one-ready]');
   check(await page.getByRole('textbox').inputValue() === 'ação 📝 249' && (await page.evaluate(() => window.__one.s)) === boot.s, 'explicit page reload can restore the same draft on another node');
+  await page.getByText('Read bytes: shared opaque bytes ç', {exact: true}).waitFor();
+  check(!Object.hasOwn(checkpoint().app, 'content') && checkpoint().app.contentBytes > 0 && checkpoint().files.every(job => job.request > 0), 'trusted pre-ready hydration restores file buffers without storing bytes or temporary request IDs in the checkpoint');
   await page.getByRole('textbox').fill('after reload');
   await page.getByRole('button', {name: 'Edit view', exact: true}).click();
   await page.waitForURL(`${base}/recovery`);

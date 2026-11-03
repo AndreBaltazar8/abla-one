@@ -12,6 +12,7 @@
   let revision = boot.r;
   let socket = null;
   let retry = 0;
+  let cookieWork = Promise.resolve();
   const queue = [];
   // Do not discard an event when the socket sends it: it may reach the server
   // just before the connection breaks. Keep it until a durable acknowledgement.
@@ -662,7 +663,26 @@
   // The session asks for a file; the picker opens while the tap that caused it
   // still counts as a user action. Images are normalized like the Android host.
   const upload = async (query, body, headers = {}) => {
-    if (!boot.wasm) return fetch(`one/upload?s=${encodeURIComponent(boot.s)}&${query}`, {method: 'POST', body, headers: {...headers, ...(boot.proof ? {'X-One-Proof': boot.proof} : {})}, credentials: 'same-origin', redirect: 'error'});
+    if (!boot.wasm) {
+      // A retry names the same logical upload, even if its first response was
+      // lost after the private object and completion were committed.
+      const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+      await cookieWork;
+      for (let attempt = 0; ; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 120000);
+        try {
+          const response = await fetch(`one/upload?s=${encodeURIComponent(boot.s)}&${query}`, {method: 'POST', body,
+            headers: {...headers, ...(boot.proof ? {'X-One-Proof': boot.proof, 'X-One-Upload': nonce} : {})},
+            credentials: 'same-origin', redirect: 'error', signal: controller.signal});
+          if (!boot.proof || ![502, 503, 504].includes(response.status) || attempt >= 2) return response;
+          await response.body?.cancel();
+        } catch (error) {
+          if (!boot.proof || attempt >= 2) throw error;
+        } finally { clearTimeout(timeout); }
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
     // In the page, the module takes the bytes directly.
     const q = new URLSearchParams(query);
     const base64 = typeof body === 'string' ? body : await new Promise((done) => {
@@ -709,16 +729,25 @@
     document.body.appendChild(input);
     let done = false;
     const finish = () => { done = true; input.remove(); };
-    input.addEventListener('cancel', () => { if (!done) { finish(); upload(`id=${message.id}&kind=cancel${message.kind === 'files' ? '&files=1' : ''}`, ''); } });
+    const cancel = async () => {
+      try {
+        const response = await upload(`id=${message.id}&kind=cancel${message.kind === 'files' ? '&files=1' : ''}`, '');
+        if (response.ok === false) throw new Error('File upload failed');
+      } catch (_) { send({t: 'pick-error', id: message.id, error: 'File upload failed'}); }
+    };
+    input.addEventListener('cancel', () => { if (!done) { finish(); void cancel(); } });
     input.addEventListener('change', async () => {
       const files = Array.from(input.files || []);
       finish();
-      if (!files.length) return upload(`id=${message.id}&kind=cancel${message.kind === 'files' ? '&files=1' : ''}`, '');
+      if (!files.length) return cancel();
       if (message.kind !== 'files') {
         try {
-          return upload(`id=${message.id}&kind=${message.kind}`, await normalize(files[0], message.kind));
+          const response = await upload(`id=${message.id}&kind=${message.kind}`, await normalize(files[0], message.kind));
+          if (response.ok === false) throw new Error('File upload failed');
+          return;
         } catch (_) {
-          return upload(`id=${message.id}&kind=cancel`, '');
+          send({t: 'pick-error', id: message.id, error: 'File upload failed'});
+          return;
         }
       }
       try {
@@ -735,13 +764,26 @@
           picked = picked ? `${picked},${handle}` : handle;
         }
       } catch (error) {
-        send({t: 'pick-error', id: message.id, error: error.message || 'File upload failed'});
+        send({t: 'pick-error', id: message.id, error: 'File upload failed'});
       }
     });
     input.click();
   };
 
   // --- connection -------------------------------------------------------------
+  const updateCookies = () => {
+    const request = (receipt = false) => fetch(`one/cookies?s=${encodeURIComponent(boot.s)}${receipt ? '&receipt=1' : ''}`, {method: 'POST', credentials: 'same-origin', headers: boot.proof ? {'X-One-Proof': boot.proof} : {}, redirect: 'error'});
+    const deliver = async () => {
+      const response = await request();
+      // A fresh Cookie header, not a WebSocket assertion, confirms receipt of
+      // a first-login bootstrap before the server consumes its short grant.
+      if (boot.proof && response.ok) await request(true);
+    };
+    cookieWork = cookieWork.catch(() => {}).then(() => {
+      if (navigator.locks && navigator.locks.request) return navigator.locks.request(`one:cookies:${basePath}`, deliver);
+      return deliver();
+    }).catch(() => {});
+  };
   const seenEffects = new Set();
   const savedEffects = new Set();
   let effectsFor = '';
@@ -790,7 +832,7 @@
     else if (message.t === 'back') goBack(message.to);
     else if (message.t === 'forward') history.forward();
     else if (message.t === 'pick') pick(message);
-    else if (message.t === 'cookies') fetch(`one/cookies?s=${encodeURIComponent(boot.s)}`, {method: 'POST', credentials: 'same-origin', headers: boot.proof ? {'X-One-Proof': boot.proof} : {}, redirect: 'error'});
+    else if (message.t === 'cookies') updateCookies();
     else if (message.t === 'reload') location.reload();
     else if (message.t === 'fetch') request(message);
     else if (message.t === 'store') store(message.storage);
@@ -932,7 +974,8 @@
       // An unknown or ended session needs a fresh page, unless one is already on its way.
       if (e.code === 1008) {
         if (boot.proof) { try { sessionStorage.removeItem(claimKey); } catch (_) {} }
-        return setTimeout(() => location.reload(), leaving ? 3000 : 0);
+        Promise.race([cookieWork, new Promise(resolve => setTimeout(resolve, 2000))]).finally(() => setTimeout(() => location.reload(), leaving ? 3000 : 0));
+        return;
       }
       setTimeout(connect, Math.min(1000 * 2 ** retry++, 10000));
     };

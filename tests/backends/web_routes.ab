@@ -201,6 +201,17 @@ fun main: int {
     expectEqual(chain.queue.takeRequests()[0].operation, oneLiveOperationChild(firstOperation, 1), "a result's follow-up keeps its parent operation")
     val seen = oneLiveExecute({ request -> httpText(request.header("x-one-live-operation")) }, requests[1])
     expectEqual(oneResponse(seen).body, secondOperation, "the in-process request carries its operation ID")
+    val ownerQueue=oneLiveQueueList[oneLiveQueueIndex("file-owner")]
+    ownerQueue.addFile("opaque-foreign-handle","private bytes","{}")
+    val foreignFile=OneFile("opaque-foreign-handle","synthetic.txt",13,"text/plain")
+    val foreignBody=oneLiveExecute({ request -> httpText("handler called") },OneLiveRequest(1,oneRequest("POST","/files").file(foreignFile),session="chain"))
+    expect(oneResponse(foreignBody).status==0,"a live session cannot read another session's bodyFile cache")
+    val foreignPart=oneLiveExecute({ request -> httpText("handler called") },OneLiveRequest(1,oneRequest("POST","/files").multipart([oneFilePart("file",foreignFile)]),session="chain"))
+    expect(oneResponse(foreignPart).status==0,"multipart handles remain scoped to the sending live session")
+    val rawRecovery=oneLiveExecute({ request -> httpText("handler called") },OneLiveRequest(1,oneRequest("POST","/files").file(foreignFile),session="file-owner",epoch=1))
+    expect(oneResponse(rawRecovery).status==501,"unsupported raw file recovery refuses explicitly before invoking the app")
+    val multipartRecovery=oneLiveExecute({ request -> httpText("handler called") },OneLiveRequest(1,oneRequest("POST","/files").multipart([oneFilePart("file",foreignFile)]),session="file-owner",epoch=1))
+    expect(oneResponse(multipartRecovery).status==501,"unsupported multipart file recovery has no node-local fallback")
     var longOperation = firstOperation
     var depth = 0
     while (depth < 1000) { longOperation = oneLiveOperationChild(longOperation, 1); depth = depth + 1 }

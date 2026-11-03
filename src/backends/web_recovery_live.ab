@@ -201,41 +201,54 @@ fun OneLiveServer.recoveryFence(index: int, immediate: bool): bool {
 
 fun OneLiveServer.recoverySettle(index: int): void {
     val state = oneRecoverySessions.get(sessions[index].id)
-    if (state == null || sessions[index].slot < 0 || !state.ready || !recoveryFence(index, false)) return
+    if (state == null || sessions[index].slot < 0 || !recoveryFence(index, false)) return
     if (state.prepared != null) { recoveryFinishWrite(index); return }
     for (id in state.files.keys()) {
         val job = state.files.get(id)
-        if (job == null || job.admitted) continue
+        if (job == null || job.admitted || job.retryAt > oneLiveNow() || (!state.ready && !state.hydrationFiles.has(id))) continue
         val status = if (job.deleting) state.store.deleteFile(state.id, state.owner, state.epoch, id, job.handle)
             else state.store.readFile(state.id, state.owner, state.epoch, id, job.handle, job.offset, job.length)
         if (status == 200) job.admitted = true
-        else if (status != 202 && status != 503) {
+        else if (status == 503) job.retryAt = oneLiveNow() + 1000
+        else if (status != 202) {
             state.files.remove(id)
+            state.hydrationFiles.remove(id)
             sessions[index].queue.complete(oneResponsePayload(id, status, "", "File unavailable"))
             state.batch.changed(true)
         }
     }
-    if ((state.inboxPending || oneLiveNow() - state.inboxAt >= oneRecoveryBatchMilliseconds) && state.consumed.size < 64) {
+    val hydration = !state.ready
+    val requested: array<int> = []
+    if (hydration) for (id in state.hydrationFiles.keys()) requested.append(id)
+    if (hydration && requested.size == 0) return
+    val interval = if (state.files.keys().size > 0 || state.pickers.keys().size > 0) 100 else oneRecoveryBatchMilliseconds
+    if ((state.inboxPending || oneLiveNow() - state.inboxAt >= interval) && state.consumed.size < 64) {
         if (!state.inboxPending) state.inboxAt = oneLiveNow()
-        val inbox = recovery.inbox(state.id, recoveryOwner, state.epoch)
+        val inbox = recovery.inbox(state.id, recoveryOwner, state.epoch, requested)
         if (inbox.status == 202) { state.inboxPending = true; return }
         state.inboxPending = false
         if (inbox.status != 200) { state.status = inbox.status; return }
         if (inbox.items.size > 64) { state.status = 503; return }
         for (item in inbox.items) if (!oneRecoveryConsumed(state, item.id)) {
             if (item.id.size == 0 || item.id.size > 128 || item.payload.size > 524288) { state.status = 503; return }
-            state.consumed.append(item.id)
             val response = oneResponse(item.payload)
             if (!response.valid) { state.status = 503; return }
+            if (hydration && !state.hydrationFiles.has(response.requestId)) { state.status = 503; return }
+            state.consumed.append(item.id)
+            val deliver = response.requestId > 0 || state.hydrationFiles.has(response.requestId)
+            state.hydrationFiles.remove(response.requestId)
             oneRecoveryPickerEnd(state,response.requestId)
             state.files.remove(response.requestId)
-            sessions[index].queue.complete(item.payload)
+            if (deliver) sessions[index].queue.complete(item.payload)
         }
         if (inbox.items.size > 0) {
             var rounds = 0
             while (rounds < 8 && pump(index)) rounds = rounds + 1
         }
     }
+    // Hydration may complete inside pump above; until then no render, ack or
+    // checkpoint may authorize old controls or persist a partial app state.
+    if (!state.ready) return
     val force = sessions[index].queue.cookiesChanged || sessions[index].queue.outbox.size > 0 || sessions[index].queue.moves.size > 0
     if (force) state.batch.changed(true)
     else if (sessions[index].changed && !state.batch.pending) state.batch.changed()

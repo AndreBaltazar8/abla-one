@@ -7,7 +7,7 @@ import "web_recovery.ab"
 class OneRecoveryResult(val status: int, val epoch: int = 0, val version: int = 0, val payload: string = "", val cookies: array<string> = [], val cookiesReady: bool = false)
 class OneRecoveryCompletion(val id: string, val payload: string)
 class OneRecoveryInbox(val status: int, val items: array<OneRecoveryCompletion> = [])
-class OneRecoveryFileJob(val request: int, val handle: string, val offset: int, val length: int, val deleting: bool, var admitted: bool = false)
+class OneRecoveryFileJob(val request: int, val handle: string, val offset: int, val length: int, val deleting: bool, var admitted: bool = false, var retryAt: int = 0)
 
 // A frozen candidate survives a pending/uncertain adapter result. New edits
 // may continue in memory, but cannot be mistaken for this candidate's commit.
@@ -29,7 +29,7 @@ class OneLiveRecoveryStore(
     val save: (string, string, int, int, string, bool, array<string>) -> OneRecoveryResult,
     val fence: (string, string, int) -> int,
     val end: (string, string, int) -> int,
-    val inbox: (string, string, int) -> OneRecoveryInbox,
+    val inbox: (string, string, int, array<int>) -> OneRecoveryInbox,
     // Claims an upload's HTTP ticket; the application answers it from its
     // off-path worker. False rejects it with503, never a node-local fallback.
     val upload: (HttpRequest, int) -> bool,
@@ -45,7 +45,7 @@ fun oneLiveNoRecovery(): OneLiveRecoveryStore = OneLiveRecoveryStore(false,
     { request, id, proof -> OneRecoveryResult(503) },
     { id, owner, epoch, version, body, active, consumed -> OneRecoveryResult(503) },
     { id, owner, epoch -> 503 }, { id, owner, epoch -> 503 },
-    { id, owner, epoch -> OneRecoveryInbox(503) },
+    { id, owner, epoch, requests -> OneRecoveryInbox(503) },
     { request, ticket -> false },
     { id, owner, epoch, request, handle, offset, length -> 503 },
     { id, owner, epoch, request, handle -> 503 })
@@ -69,6 +69,7 @@ class OneRecoveryState(
     var active: bool = true,
     val pickers: Map<int, string> = Map(),
     val files: Map<int, OneRecoveryFileJob> = Map(),
+    val hydrationFiles: Map<int, bool> = Map(),
     val effects: Map<string, string> = Map(),
     val effectOrder: array<string> = [],
     var prepared: OneRecoveryWrite? = null,
@@ -111,6 +112,18 @@ fun oneRecoveryFileRead(id: string, request: int, handle: string, offset: int, l
     state.files.set(request, OneRecoveryFileJob(request, handle, offset, length, false))
     state.batch.changed(true)
     202
+}
+
+// Trusted app hydration is the only file work admitted before live-restored.
+// Negative IDs cannot collide with restored positive app request IDs. No
+// browser frame can invoke this server-side API or choose its handle.
+fun oneRecoveryHydrationRead(id: string, request: int, handle: string, offset: int, length: int): int {
+    val state = oneRecoverySessions.get(id)
+    if (state == null || !state.restored || state.ready || request >= 0 || request < -9007199254740991) return 409
+    if (state.hydrationFiles.has(request) || state.files.has(request) || offset < 0 || length <= 0 || length > 262144) return 400
+    val status = oneRecoveryFileRead(id, request, handle, offset, length)
+    if (status == 202) state.hydrationFiles.set(request, true)
+    status
 }
 
 fun oneRecoveryFileDelete(id: string, request: int, handle: string): int {

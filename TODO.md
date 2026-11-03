@@ -14,6 +14,10 @@
 
 PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not to be touched for now.
 
+## Web session recovery
+
+- [ ] Support raw `OneRequest.file`/multipart file handles in recovery mode with bounded shared-store chunk materialization and a durable acknowledgement barrier, without serializing raw HTTP requests. Until then recovery sessions return501 for these paths; applications must call `readFile` and send the resulting bytes. NovaKind has no raw bodyFile/multipart callers (lead-approved deferral, 2026-11-03).
+
 ## ablac bugs seen (worked around, not confirmed fixed)
 
 - A `when` over an f32 gives `when.match` for literal cases (documented).
