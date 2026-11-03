@@ -49,6 +49,10 @@ try {
     throw error;
   }
   check(true, 'the last local draft reaches the app after acknowledgements resume');
+  const admitted = sent.slice(beginning).filter(message => message.t === 'event');
+  check(admitted.every((message, i) => i === 0 || message.n === admitted[i - 1].n + 1) &&
+    new Set(admitted.map(message => message.u)).size === admitted.length,
+    'admitted event sequences have no gaps or repeated operation IDs');
   await page.getByRole('button', {name: 'Contar'}).click();
   await page.getByText('Contadas: 1').waitFor({timeout: 10000});
   check(true, 'actions resume once and in order');
@@ -56,6 +60,7 @@ try {
   const largeStart = sent.length;
   const lastLarge = 'x'.repeat(12000) + '-199';
   await page.evaluate(() => {
+    document.documentElement.lang = 'en';
     const field = document.querySelector('input[placeholder="Rascunho"]');
     field.focus();
     for (let i = 0; i < 200; i++) {
@@ -67,12 +72,14 @@ try {
   const largeEvents = sent.slice(largeStart).filter(message => message.t === 'event');
   const largeBytes = largeEvents.reduce((total, message) => total + Buffer.byteLength(JSON.stringify(message)), 0);
   check(largeBytes <= 1024 * 1024, `unacknowledged event bytes are bounded (${largeBytes})`);
+  check((await page.locator('[data-one-backpressure]').innerText()).includes('The connection is delayed'), 'the delayed-connection notice is available in English');
   hold = false;
   for (const message of held.splice(0)) socket.send(message);
   await page.locator('[data-one-backpressure]').waitFor({state: 'hidden', timeout: 15000});
   await page.getByRole('button', {name: 'Enviar'}).click();
   await page.getByText('Enviado: ' + lastLarge, {exact: true}).waitFor({timeout: 15000});
   check(true, 'the last large draft survives byte backpressure');
+  await page.evaluate(() => { document.documentElement.lang = 'pt'; });
   await page.evaluate(() => {
     const field = document.querySelector('input[placeholder="Rascunho"]');
     field.value = 'z'.repeat(600000);
