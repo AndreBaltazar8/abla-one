@@ -1,0 +1,50 @@
+import "abla/http"
+import "abla/net"
+import "abla/test"
+import "abla/process/time"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+
+val captured: array<string> = []
+class PeerProbe : OneApp {
+    fun render(var ui: Ui): Node = text("peer", style())
+    fun receive(kind: string, payload: string): void { return }
+}
+fun peerApp(request: HttpRequest, id: string): OneApp = PeerProbe()
+fun peerHandler(request: HttpRequest): HttpResponse {
+    val peer = oneLiveRequestPeer()
+    captured.append(peer)
+    val synthetic = OneLiveRequest(1, OneRequest("GET", "/internal", [], "", "", "", [], 1000, false, false))
+    oneLiveExecute({ inner ->
+        expectEqual(oneLiveRequestPeer(), "", "an internal request cannot inherit the browser socket identity")
+        httpText("internal")
+    }, synthetic)
+    expectEqual(oneLiveRequestPeer(), peer, "nested internal dispatch restores the external request scope")
+    httpText(peer)
+}
+fun main: int {
+    expectEqual(oneLiveRequestPeer(), "", "no transport metadata exists outside a request")
+    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", 0), peerHandler,
+        oneLivePaths([]), peerApp, oneDefaultTheme(),
+        OneLiveOptions("peer", "en", "#fff", "/i", "src/backends/web/host.js", ""))
+    expect(server.listening(), "listen on an assigned local port")
+    for (n in 0 until 2) {
+        var client = tcpConnectIpv4("127.0.0.1", server.listener.localPort(), 1000)
+        expect(client.descriptor >= 0, "real local client connects")
+        client.writeResult("GET /peer HTTP/1.1\r\nHost: x\r\nCF-Connecting-IP: 203.0.113.8\r\nX-Forwarded-For: 198.51.100.7\r\nConnection: close\r\n\r\n")
+        client.setNonblocking()
+        var reply = ""
+        val deadline = monotonicMilliseconds() + 3000
+        while (!reply.contains("127.0.0.1") && monotonicMilliseconds() < deadline) {
+            server.step()
+            expectEqual(oneLiveRequestPeer(), "", "socket metadata is cleared after each event-loop pass")
+            val chunk = client.readResult(65536)
+            if (chunk.hasData()) reply = "$reply${chunk.bytes}"
+        }
+        expect(reply.contains("200 OK") && reply.contains("127.0.0.1"), "transport identity ignores forged forwarding headers and survives slot reuse")
+        client.close()
+    }
+    expectEqual(captured.size, 2, "both real requests reached the handler")
+    expectEqual(captured[0], "127.0.0.1", "a deferred consumer can retain an explicit peer snapshot")
+    testsPassed()
+}

@@ -28,6 +28,12 @@ import "../layout/paint.ab"
 // reaches it as `receive("push", payload)`: the server pushes changes instead
 // of waiting for a poll.
 
+// Transport metadata exists only while dispatching an actual HTTP socket.
+// Synthetic same-origin requests explicitly clear it. Applications deferring
+// work must capture the value before returning from the request callback.
+var oneLiveCurrentRequestPeer = ""
+fun oneLiveRequestPeer(): string = oneLiveCurrentRequestPeer
+
 class OneLiveSlot(
     var descriptor: int,
     var input: string,
@@ -359,6 +365,16 @@ fun OneLiveServer.write(slot: int): void {
 // page, or the application's handler. Plain HTTP connections close after the
 // response.
 fun OneLiveServer.http(slot: int): void {
+    val previous = oneLiveCurrentRequestPeer
+    val connection = TcpConnection(slots[slot].descriptor)
+    oneLiveCurrentRequestPeer = connection.peerAddress().address
+    connection.descriptor = -1
+    httpWithPeer(slot)
+    oneLiveCurrentRequestPeer = previous
+    return
+}
+
+fun OneLiveServer.httpWithPeer(slot: int): void {
     val input = slots[slot].input
     val end = httpHeaderEnd(input)
     if (end < 0) {
@@ -633,6 +649,14 @@ fun OneLiveServer.pump(index: int): bool {
 
 // Same-origin requests run through the application's handler in process.
 fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest): string {
+    val previous = oneLiveCurrentRequestPeer
+    oneLiveCurrentRequestPeer = ""
+    val response = oneLiveExecuteWithoutPeer(handler, item)
+    oneLiveCurrentRequestPeer = previous
+    response
+}
+
+fun oneLiveExecuteWithoutPeer(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest): string {
     val r = item.request
     // "./api/x" is the browser-relative form of "/api/x" (pages may be served
     // under a path prefix); both run in process.
