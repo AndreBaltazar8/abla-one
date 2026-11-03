@@ -261,7 +261,9 @@ class OneLiveServices(val session: string) : OneServices {
         val id = q.allocate()
         if (q.eventContext != "") {
             q.eventOrdinal = q.eventOrdinal + 1
-            q.requestContexts.set(id, "${q.eventContext}.${q.eventOrdinal}")
+            // A long upload can chain thousands of completions. Hash the
+            // ancestry so an operation ID stays bounded at every depth.
+            q.requestContexts.set(id, oneLiveOperationChild(q.eventContext, q.eventOrdinal))
         }
         id
     }
@@ -366,6 +368,8 @@ class OneLiveServices(val session: string) : OneServices {
         return
     }
 }
+
+fun oneLiveOperationChild(parent: string, ordinal: int): string = hexEncode(sha256("$parent:$ordinal"))
 
 class OneLiveSession(
     val id: string,
