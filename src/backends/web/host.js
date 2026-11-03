@@ -772,7 +772,12 @@
 
   // --- connection -------------------------------------------------------------
   const updateCookies = () => {
-    const request = (receipt = false) => fetch(`one/cookies?s=${encodeURIComponent(boot.s)}${receipt ? '&receipt=1' : ''}`, {method: 'POST', credentials: 'same-origin', headers: boot.proof ? {'X-One-Proof': boot.proof} : {}, redirect: 'error'});
+    const request = async (receipt = false) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      try { return await fetch(`one/cookies?s=${encodeURIComponent(boot.s)}${receipt ? '&receipt=1' : ''}`, {method: 'POST', credentials: 'same-origin', headers: boot.proof ? {'X-One-Proof': boot.proof} : {}, redirect: 'error', signal: controller.signal}); }
+      finally { clearTimeout(timeout); }
+    };
     const deliver = async () => {
       const response = await request();
       // A fresh Cookie header, not a WebSocket assertion, confirms receipt of
