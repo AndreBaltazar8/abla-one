@@ -718,7 +718,11 @@ fun oneLiveFileBytes(handle: string): string? {
 
 // One loop iteration after IO: broadcasts, due timers, platform work, then a
 // patch for each connected session whose page changed.
-fun OneLiveServer.settle(): void {
+// A dependency may defer due timers without pausing HTTP, pushes, platform
+// completions, rendering or socket output. Deferred timers keep their deadline.
+fun oneLiveAllTimersReady(): (OneLiveSession) -> bool = { session: OneLiveSession -> true }
+
+fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimersReady()): void {
     if (oneLiveBroadcasts.size > 0) {
         var i = 0
         while (i + 1 < oneLiveBroadcasts.size) {
@@ -734,7 +738,7 @@ fun OneLiveServer.settle(): void {
     val now = oneLiveNow()
     var index = 0
     while (index < sessions.size) {
-        sessions[index].queue.fireTimers(now)
+        if (timersReady(sessions[index])) sessions[index].queue.fireTimers(now)
         var rounds = 0
         while (rounds < 8 && pump(index)) rounds = rounds + 1
         if (sessions[index].slot >= 0) for (message in sessions[index].queue.takeOutbox()) queue(sessions[index].slot, webSocketEncodeFrame(message, 1))
@@ -764,12 +768,14 @@ fun OneLiveServer.settle(): void {
     return
 }
 
-fun OneLiveServer.nextTimeout(): int {
+fun OneLiveServer.nextTimeout(timersReady: (OneLiveSession) -> bool = oneLiveAllTimersReady()): int {
     var timeout = 1000
     val now = oneLiveNow()
     for (session in sessions) {
-        val wait = session.queue.nextTimer(now)
-        if (wait < timeout) timeout = wait
+        if (timersReady(session)) {
+            val wait = session.queue.nextTimer(now)
+            if (wait < timeout) timeout = wait
+        }
     }
     timeout
 }
@@ -786,8 +792,8 @@ fun oneLiveNoBeforeSettle(): (array<OneLiveSession>) -> array<OneLivePush> {
 // credentials before a timer sends another request with its previous tokens.
 // The callback inspects sessions and returns topic pushes; step applies them
 // directly before platform completions, rather than enqueueing them behind timers.
-fun OneLiveServer.step(beforeSettle: (array<OneLiveSession>) -> array<OneLivePush> = oneLiveNoBeforeSettle()): void {
-    val events = poller.wait(1024, nextTimeout())
+fun OneLiveServer.step(beforeSettle: (array<OneLiveSession>) -> array<OneLivePush> = oneLiveNoBeforeSettle(), timersReady: (OneLiveSession) -> bool = oneLiveAllTimersReady()): void {
+    val events = poller.wait(1024, nextTimeout(timersReady))
     for (event in events.events) {
         if (event.descriptor == listener.descriptor && event.readable) accept()
         else {
@@ -808,7 +814,7 @@ fun OneLiveServer.step(beforeSettle: (array<OneLiveSession>) -> array<OneLivePus
             i = i + 1
         }
     }
-    settle()
+    settle(timersReady)
     return
 }
 

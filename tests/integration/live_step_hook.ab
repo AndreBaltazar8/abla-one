@@ -1,6 +1,7 @@
 import "abla/http"
 import "abla/net"
 import "abla/test"
+import "abla/process/time"
 import "../../src/one_kit.ab"
 import "../../src/backends/web_live.ab"
 
@@ -42,5 +43,29 @@ fun main: int {
     server.step()
     expectEqual(hooks.size, 1, "a later default step does not retain the hook")
     expectEqual(observed[2], "fresh", "the session retains its updated state")
+    server.sessions[0].queue.schedule(OneLiveTimer(4, 0))
+    expectEqual(server.nextTimeout({ session -> false }), 1000, "a deferred due timer does not cause a busy poll loop")
+    server.settle({ session -> false })
+    expectEqual(observed.size, 3, "deferring leaves a due timer pending")
+
+    var client = tcpConnectIpv4("127.0.0.1", server.listener.localPort(), 1000)
+    expect(client.descriptor >= 0, "an HTTP client connects while timers are deferred")
+    client.writeResult("GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+    client.setNonblocking()
+    var reply = ""
+    val deadline = monotonicMilliseconds() + 3000
+    while (!reply.contains("ok") && monotonicMilliseconds() < deadline) {
+        server.step(oneLiveNoBeforeSettle(), { session -> false })
+        val chunk = client.readResult(65536)
+        if (chunk.hasData()) reply = "$reply${chunk.bytes}"
+    }
+    expect(reply.contains("200 OK") && reply.contains("ok"), "HTTP continues while a session timer is gated")
+    client.close()
+    expectEqual(observed.size, 3, "HTTP processing never runs the deferred timer")
+    server.step({ sessions -> [OneLivePush("probe", "reconnected")] }, { session -> true })
+    expectEqual(observed.size, 4, "releasing the gate fires the preserved timer exactly once")
+    expectEqual(observed[3], "reconnected", "the released timer observes catch-up before firing")
+    server.settle()
+    expectEqual(observed.size, 4, "later settling cannot repeat the released timer")
     testsPassed()
 }
