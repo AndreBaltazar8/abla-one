@@ -7,6 +7,7 @@ import json, os, re, subprocess, sys, tempfile, time, xml.etree.ElementTree as E
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PACKAGE = 'dev.abla.one.services'
+os.makedirs(os.path.join(ROOT,"build/ui"),exist_ok=True)
 failures = 0
 emulator_lock = None
 
