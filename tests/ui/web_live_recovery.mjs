@@ -8,7 +8,7 @@ import {spawn} from 'node:child_process';
 import {chromium} from '/home/andre/Desktop/projects/dualkind/node_modules/playwright/index.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'one-recovery-proof-'));
-const executable = fs.realpathSync('build/recovery-live');
+const executable = fs.realpathSync(process.env.ONE_RECOVERY_TEST_EXECUTABLE||'build/recovery-live');
 const children = [];
 const nodes = new Map();
 const sockets = new Set();
@@ -31,14 +31,15 @@ const check = (condition, label) => { assert(condition, label); proofs++; consol
 const start = async (name,disabled=false) => {
   const portFile = path.join(directory, `${name}-${children.length}.port`);
   const log = fs.openSync(path.join(directory, `${name}-${children.length}.log`), 'w');
-  const child = spawn(executable, [], {cwd: process.cwd(), env: {...process.env, ONE_RECOVERY_TEST_DIR: directory, ONE_RECOVERY_TEST_ASYNC_MS: '150', ONE_RECOVERY_TEST_DISABLED: disabled?'1':'0', ONE_TEST_PORT_FILE: portFile, ONE_TEST_PORT: '0'}, stdio: ['ignore', log, log]});
+  const hostFile=path.join(directory,`${name}-${children.length}.host.js`);fs.copyFileSync('src/backends/web/host.js',hostFile);
+  const child = spawn(executable, [], {cwd: process.cwd(), env: {...process.env, ONE_RECOVERY_TEST_DIR: directory, ONE_RECOVERY_TEST_HOST:hostFile, ONE_RECOVERY_TEST_ASYNC_MS: '150', ONE_RECOVERY_TEST_DISABLED: disabled?'1':'0', ONE_TEST_PORT_FILE: portFile, ONE_TEST_PORT: '0'}, stdio: ['ignore', log, log]});
   fs.closeSync(log);
   children.push(child);
   await wait(() => {
     if (child.exitCode !== null) throw new Error(`Fixture ${name} exited ${child.exitCode}`);
     return fs.existsSync(portFile) && fs.readFileSync(portFile, 'utf8').trim();
   }, `fixture ${name} listens`);
-  const node = {child, port: Number(fs.readFileSync(portFile, 'utf8').trim())};
+  const node = {child, hostFile, port: Number(fs.readFileSync(portFile, 'utf8').trim())};
   nodes.set(name, node);
   return node;
 };
@@ -85,6 +86,9 @@ proxy.on('upgrade', (request, socket, head) => {
 
 try {
   await start('a'); await start('b');
+  const expectedHost=fs.readFileSync('src/backends/web/host.js','utf8');
+  fs.writeFileSync(nodes.get('a').hostFile,"throw new Error('synthetic stale host protocol');");
+  check(await (await fetch(`http://127.0.0.1:${nodes.get('a').port}/one/host.js`)).text()===expectedHost,'a running node keeps its matching host protocol when a later build replaces the source file');
   await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${proxy.address().port}`;
   browser = await chromium.launch({executablePath: '/nix/store/62wviylhmg1g9b3ypjxf4l6qzjspvvyw-playwright-chromium-headless-shell/chrome-linux/headless_shell'});

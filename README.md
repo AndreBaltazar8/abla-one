@@ -36,6 +36,11 @@ class Counter(var count: int by State(0)) : OneApp {
 
 ## Live web first paint
 
+`OneLiveOptions.hostScript` is read when `oneLiveServer` is constructed. The
+running server keeps those bytes, so a later build that replaces the source
+tree cannot swap its browser protocol. Keep the binary and host script at the
+same SDK revision before starting each node; restart to load a changed host.
+
 A `one_width` cookie improves the server-rendered layout guess; it does not make
 that guess interactive. With JavaScript, the live document waits until the host
 applies a patch acknowledging the current viewport width. Delayed handshakes,

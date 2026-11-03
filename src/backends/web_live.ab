@@ -58,7 +58,8 @@ class OneLiveOptions(
     val lang: string,
     val background: string,
     val iconBase: string,
-    // Path of web/host.js on disk, served at /one/host.js.
+    // Path of web/host.js, read once when the server is constructed and
+    // served at /one/host.js. Deploy it with the matching server revision.
     val hostScript: string,
     // Extra markup for the document head (fonts, favicons, meta tags).
     val head: string,
@@ -122,7 +123,10 @@ resource class OneLiveServer(
     val sessions: array<OneLiveSession>,
     var stopped: bool,
     val recovery: OneLiveRecoveryStore,
-    val recoveryOwner: string
+    val recoveryOwner: string,
+    // Pin the thin client to this running server. A later build may replace
+    // the source tree, but must not change the protocol of an existing node.
+    val hostSource: string
 ) {
     fun drop(): void {
         for (slot in slots) if (slot.descriptor >= 0) linuxTcpCloseDescriptor(slot.descriptor)
@@ -159,7 +163,7 @@ fun oneLiveServer(
     listener.setNonblocking()
     val poller = socketPoller()
     if (listener.descriptor >= 0 && poller.descriptor >= 0) poller.watchDescriptor(listener.descriptor)
-    OneLiveServer(handler, isPage, factory, theme, options, storage, sockets, defers, move(listener), move(poller), [], [], false, recovery, oneLiveSessionId())
+    OneLiveServer(handler, isPage, factory, theme, options, storage, sockets, defers, move(listener), move(poller), [], [], false, recovery, oneLiveSessionId(), linuxReadFile(options.hostScript,1048576))
 }
 
 // Claims the paths an app declares, as `isPage`: "/people", "/form/:n", "/docs/*".
@@ -473,7 +477,7 @@ fun OneLiveServer.httpWithPeer(slot: int): void {
     val response = if (request.path == "/one/upload" && request.method == "POST") upload(request)
         else if (request.path == "/one/cookies") cookies(request)
         else if (request.path == "/one/host.js")
-        HttpResponse(200, [HttpHeader("Content-Type", "text/javascript; charset=utf-8"), HttpHeader("Cache-Control", "no-cache")], linuxReadFile(options.hostScript, 1048576))
+        HttpResponse(200, [HttpHeader("Content-Type", "text/javascript; charset=utf-8"), HttpHeader("Cache-Control", "no-cache")], hostSource)
         else if (request.path == "/one/canvas.js")
         HttpResponse(200, [HttpHeader("Content-Type", "text/javascript; charset=utf-8"), HttpHeader("Cache-Control", "no-cache")], linuxReadFile(oneLiveSibling(options.hostScript, "canvas.js"), 1048576))
         else if (request.path.size > 11 && request.path.slice(0, 11) == "/one/fonts/" && oneLiveFontName(request.path.slice(11, request.path.size)))
