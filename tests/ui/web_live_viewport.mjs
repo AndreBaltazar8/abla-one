@@ -51,9 +51,10 @@ try {
  check(await page.getByText('Phone layout',{exact:true}).isVisible() && await page.locator('#one-root').isVisible(),'SSR stays readable without JavaScript');
  check(await page.getByRole('status').isHidden(),'no-JS readers do not see a false connection state');await noJS.close();
  const broken=await browser.newPage({viewport:{width:1280,height:900}});
- await broken.route('**/one/host.js',route=>route.abort());await broken.goto(`${base}/viewport`);
+ await broken.route('**/one/host.js',route=>route.abort());await broken.goto(`${base}/viewport?origin=proof#signin-proof`);
  check(await broken.getByRole('status').isVisible() && await broken.locator('#one-root').isHidden(),'failed host script leaves a useful connection state');
- check(await broken.getByRole('link',{name:'Reload',exact:true}).getAttribute('href')==='/viewport','reload stays on the fixed current page');await broken.close();
+ await Promise.all([broken.waitForNavigation(),broken.getByRole('link',{name:'Reload',exact:true}).click()]);
+ check(broken.url()===`${base}/viewport?origin=proof#signin-proof`,'reload preserves the full current URL including query and sign-in fragment');await broken.close();
 }finally{await browser.close();}
 if(failures)process.exit(1);
 console.log('PASS viewport handshake');

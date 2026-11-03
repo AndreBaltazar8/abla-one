@@ -557,7 +557,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
 // A remembered width is only an SSR hint. With JS, a page becomes interactive
 // after host.js applies the matching viewport acknowledgement. Without JS the
 // attribute is never set, so the server-rendered page remains readable.
-val oneLiveHoldFirstPaint = "<style>#one-connecting{display:none}[data-one-held] #one-root{visibility:hidden}[data-one-held] #one-connecting{display:flex;position:fixed;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:24px;background:Canvas;color:CanvasText;font:16px system-ui}#one-connecting a{color:inherit}</style><script>document.documentElement.setAttribute('data-one-held','')</script>"
+val oneLiveHoldFirstPaint = "<style>#one-connecting{display:none}[data-one-held] #one-root{visibility:hidden}[data-one-held] #one-connecting{display:flex;position:fixed;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:24px;background:Canvas;color:CanvasText;font:16px system-ui}#one-connecting a{color:inherit}</style><script>document.documentElement.setAttribute('data-one-held','');document.addEventListener('click',e=>{if(e.target.closest&&e.target.closest('#one-connecting a')){e.preventDefault();location.reload()}})</script>"
 fun oneLiveConnection(options: OneLiveOptions, route: string): string =
     "<div id=\"one-connecting\"><span role=\"status\" aria-live=\"polite\">${oneHtmlEscape(options.connectionText)}</span><a href=\"${oneHtmlEscape(route)}\">${oneHtmlEscape(options.reloadText)}</a></div>"
 
