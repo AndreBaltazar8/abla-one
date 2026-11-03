@@ -14,6 +14,9 @@ fun orders(status: string, limit: int): Page<Order> {
 fun acceptOrder(order: Order): int = order.id
 
 @server
+fun countValues(values: Map<string, int>): int = values.keys().size
+
+@server
 fun ping(): string = "pong"
 
 @server

@@ -29,6 +29,8 @@ check "string integer rejected" "$(post orders '{"status":"open","limit":"23"}')
 check "overflow integer rejected" "$(post orders '{"status":"open","limit":9223372036854775808}')" 400
 check "nested fractional integer rejected" "$(post acceptOrder '{"order":{"id":1,"lines":[{"sku":"a","count":2.5}]}}')" 400
 check "nested integers accepted" "$(post acceptOrder '{"order":{"id":1,"lines":[{"sku":"a","count":2}]}}')" 200
+check "fractional map value rejected" "$(post countValues '{"values":{"a":2.5}}')" 400
+check "integer map value accepted" "$(post countValues '{"values":{"a":2}}')" 200
 check "retired route" "$(post oldOrders '{}')" 410
 check "retired says why" "$(cat "$work/out")" '"use orders"'
 check "unknown route" "$(post nope '{}')" 404
