@@ -28,7 +28,7 @@ class ServicesDemo(
 
     fun render(var ui: Ui): Node = column(style().fill().background("@surface"), [
         topBar(ui, [], text("Serviços", style().text("title")), []),
-        text(log, style().padding(12).text("caption").color("@muted").maxLines(4)).set("label", "log"),
+        text(log, style().padding(12).text("caption").color("@muted").maxLines(4)).set("label", "log").set("id", "services-log"),
         scroll(style().grow(1).padding(16).gap(8), [
             button(ui, "JSON PUT", "secondary", ui.press { run("json", services.send(oneRequest("PUT", "$base/echo").header("X-Abla", "one").json(jsonObject(["n"], [jsonInteger(7)])))) }, style()),
             button(ui, "Bytes POST", "secondary", ui.press { run("bytes", services.send(oneRequest("POST", "$base/echo").bytes("AAECAwQ=", "application/octet-stream"))) }, style()),

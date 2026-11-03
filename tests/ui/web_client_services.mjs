@@ -36,7 +36,7 @@ try {
   await page.waitForSelector('html[data-one-ready]', {timeout: 10000});
   const line = async (name) => {
     // The log is one text node, newest line first.
-    const lines = () => [...document.querySelectorAll('.k-text')].pop().textContent.split('\n');
+    const lines = () => document.getElementById('services-log').textContent.split('\n');
     await page.waitForFunction(([n, f]) => eval(f)().some(l => l.startsWith(n + ':')), [name, lines.toString()], {timeout: 10000});
     return page.evaluate(([n, f]) => eval(f)().find(l => l.startsWith(n + ':')), [name, lines.toString()]);
   };
