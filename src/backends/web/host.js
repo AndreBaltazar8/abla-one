@@ -23,6 +23,80 @@
   let eventReady = false;
   let handshaking = true;
   let viewportAfterHello = false;
+  // An unacknowledged operation cannot be discarded or renumbered. Limit
+  // admission before assigning its sequence, and keep a single in-flight
+  // composition in its field until acknowledgements make room.
+  const pendingLimit = 256, pendingByteLimit = 512 * 1024;
+  let deferredEdit = null;
+  const deferredRest = [];
+  const deferredControls = [];
+  let manualRecovery = false;
+  let deferredRoute = null;
+  let deferredNavigation = null;
+  let bufferNotice = null;
+  let oversizedEdit = false;
+  let missingDraftField = false;
+  const pendingSize = () => {
+    let bytes = 0, count = 0;
+    for (const item of [...unacked, ...unackedRoutes, ...beforeHello, ...queue]) {
+      const text = item.text || JSON.stringify(item.message || item);
+      bytes += new TextEncoder().encode(text).length + 64;
+      count++;
+    }
+    return {bytes, count};
+  };
+  const fits = (message) => {
+    const size = pendingSize();
+    return size.count < pendingLimit && size.bytes + new TextEncoder().encode(JSON.stringify(message)).length + 64 <= pendingByteLimit;
+  };
+  const blocked = () => !!deferredEdit || !!deferredRoute || !!deferredNavigation || !!deferredControls.length || !!bufferNotice;
+  const notice = (tooLarge = false, fieldMissing = false) => {
+    oversizedEdit = tooLarge;
+    missingDraftField ||= fieldMissing;
+    if (!bufferNotice) {
+      bufferNotice = document.createElement('div');
+      bufferNotice.setAttribute('data-one-backpressure', '');
+      bufferNotice.setAttribute('role', 'status');
+      bufferNotice.style.cssText = 'position:fixed;z-index:2147483647;bottom:1rem;left:1rem;right:1rem;padding:1rem;background:#222;color:white;border-radius:.5rem';
+      document.body.appendChild(bufferNotice);
+    }
+    const pt = document.documentElement.lang.toLowerCase().startsWith('pt');
+    const recoveryField = deferredEdit && bufferNotice.contains(deferredEdit.target) ? deferredEdit.target : null;
+    bufferNotice.textContent = manualRecovery
+      ? (pt ? 'Não foi possível guardar todas as alterações. Copie os rascunhos visíveis antes de continuar.' : 'Some changes could not be queued. Copy the visible drafts before continuing.')
+      : missingDraftField
+      ? (pt ? 'O campo deixou de estar disponível. Copie o rascunho antes de sair.' : 'The field is no longer available. Copy your draft before leaving.')
+      : tooLarge
+      ? (pt ? 'O texto é demasiado longo. Reduza-o para continuar.' : 'The text is too long. Shorten it to continue.')
+      : (pt ? 'A ligação está atrasada. Aguarde para continuar.' : 'The connection is delayed. Wait to continue.');
+    if (recoveryField) bufferNotice.appendChild(recoveryField);
+    else if (fieldMissing && deferredEdit && !deferredEdit.target.isConnected) bufferNotice.appendChild(deferredEdit.target);
+    if (missingDraftField) {
+      const discard = document.createElement('button');
+      discard.type = 'button';
+      discard.textContent = pt ? 'Descartar rascunho' : 'Discard draft';
+      discard.addEventListener('click', () => {
+        deferredEdit = deferredRest.shift() || null;
+        clearNotice();
+        if (deferredEdit) notice();
+        drainDeferred();
+      });
+      bufferNotice.appendChild(discard);
+    }
+    if (manualRecovery) {
+      const discard = document.createElement('button');
+      discard.type = 'button';
+      discard.textContent = pt ? 'Descartar alterações não guardadas' : 'Discard unqueued changes';
+      discard.addEventListener('click', () => {
+        manualRecovery = false;
+        clearNotice();
+        if (deferredEdit || deferredRoute || deferredNavigation || deferredControls.length) notice();
+        if (!socket || socket.readyState === 3) connect();
+      });
+      bufferNotice.appendChild(discard);
+    }
+  };
+  const clearNotice = () => { if (bufferNotice) bufferNotice.remove(); bufferNotice = null; oversizedEdit = false; missingDraftField = false; };
   // Relative URLs mean the app's root on every route: the page's <base> is fixed
   // when it loads, whatever pushState does later.
   const base = document.baseURI;
@@ -46,27 +120,58 @@
     unacked.push({message, order});
     wire(JSON.stringify(message));
   };
-  const send = (message) => {
+  const send = (message, admittingDeferred = false, reservedOrder = null) => {
     if (boot.wasm) {
       if (local) local(message);
       else queue.push(message);
       return;
     }
     if (message.t === 'event') {
-      if (eventReady) liveEvent(message);
-      else beforeHello.push({message, order: ++sendOrder});
-      return;
+      if ((!admittingDeferred && blocked()) || !fits(message)) { notice(oversizedEdit); return false; }
+      const order = reservedOrder === null ? ++sendOrder : reservedOrder;
+      if (eventReady) liveEvent(message, order);
+      else beforeHello.push({message, order});
+      return true;
     }
     if (message.t === 'route') {
-      const item = {message, order: ++sendOrder};
+      if ((!admittingDeferred && (deferredEdit || deferredRoute || deferredNavigation)) || !fits(message)) {
+        deferredRoute = {message, order: reservedOrder === null ? ++sendOrder : reservedOrder};
+        notice(oversizedEdit);
+        return false;
+      }
+      const item = {message, order: reservedOrder === null ? ++sendOrder : reservedOrder};
       unackedRoutes.push(item);
       wire(JSON.stringify(message));
       return;
     }
+    if (!admittingDeferred && blocked()) {
+      const last = deferredControls[deferredControls.length - 1];
+      if (message.t === 'viewport' && last && last.message.t === 'viewport' && last.order === sendOrder) {
+        last.message = message;
+        return false;
+      }
+      if (deferredControls.length >= 8 || !fits(message) && JSON.stringify(message).length > pendingByteLimit) {
+        manualRecovery = true;
+        notice();
+        try { if (socket) socket.close(); } catch (_) {}
+        return false;
+      }
+      deferredControls.push({message, order: ++sendOrder});
+      notice(oversizedEdit);
+      return false;
+    }
     const text = JSON.stringify(message);
-    const order = ++sendOrder;
+    const order = reservedOrder === null ? ++sendOrder : reservedOrder;
     const viewportOnly = message.t === 'viewport' && !unacked.length && !unackedRoutes.length && !beforeHello.length && !queue.length;
-    if (!wire(text, viewportOnly)) queue.push({text, order});
+    if (!wire(text, viewportOnly)) {
+      const previous = queue[queue.length - 1];
+      // Consecutive width reports have no intervening action; only the last
+      // width matters. Do not coalesce across an event or navigation.
+      if (message.t === 'viewport' && previous && previous.kind === 'viewport' && previous.order === order - 1) {
+        previous.text = text;
+        previous.order = order;
+      } else queue.push({text, order, kind: message.t});
+    }
   };
   const event = (id, value) => send({t: 'event', r: revision, id: Number(id), v: value == null ? '' : String(value)});
   // Typing the session hasn't answered yet, and a press waiting for it: a control may only come
@@ -74,15 +179,52 @@
   let typed = 0;
   let typedSeen = 0;
   let held = null;
-  const change = (id, value, target) => {
+  const change = (id, value, target, admittingDeferred = false) => {
+    if (manualRecovery) return;
     held = null;
-    const message = {t: 'event', r: revision, id: Number(id), v: String(value), c: ++typed};
+    const message = {t: 'event', r: revision, id: Number(id), v: String(value), c: typed + 1};
     // Local-only metadata keeps unfocused drafts across a stale recovery render.
     // It is not part of the event's wire payload or the server's authority.
     const field = target.getAttribute('data-one-field');
     Object.defineProperty(message, '_field', {value: field ? `f:${field}` : `k:${target.getAttribute('data-one') || ''}`});
     Object.defineProperty(message, '_entry', {value: entry.e});
-    send(message);
+    if (!boot.wasm && deferredEdit && !deferredRest.length && oversizedEdit && deferredEdit.target === target && fits(message)) {
+      deferredEdit = null;
+      clearNotice();
+    }
+    if (!boot.wasm && (deferredEdit || !fits(message))) {
+      const boundedValue = message.v.length <= pendingByteLimit && new TextEncoder().encode(message.v).length <= pendingByteLimit;
+      const edit = {id, target, field: message._field, entry: message._entry, revision, value: boundedValue ? message.v : null, order: 0};
+      if (!deferredEdit) { edit.order = ++sendOrder; deferredEdit = edit; }
+      else {
+        const last = deferredRest.length ? deferredRest[deferredRest.length - 1] : deferredEdit;
+        if (last.field === edit.field && last.entry === edit.entry && (!deferredNavigation || last.order > deferredNavigation.order) && (!deferredRoute || last.order > deferredRoute.order)) {
+          last.target = target;
+          last.value = edit.value;
+          last.id = id;
+          last.revision = revision;
+        } else {
+          // Normally beforeinput stops edits while full. An IME or autofill
+          // can still produce a few non-cancelable changes. If even this
+          // reserve fills, stop patching rather than silently overwrite them.
+          const value = last.value === null ? last.target.value : last.value;
+          if (deferredRest.length >= 7 || value.length > pendingByteLimit || new TextEncoder().encode(value).length > pendingByteLimit) {
+            if (last.value === null && value.length <= pendingByteLimit) last.value = value;
+            manualRecovery = true;
+            notice();
+            try { if (socket) socket.close(); } catch (_) {}
+            return;
+          }
+          if (last.value === null) last.value = value;
+          edit.order = ++sendOrder;
+          deferredRest.push(edit);
+        }
+      }
+      notice(new TextEncoder().encode(JSON.stringify(message)).length + 64 > pendingByteLimit);
+      return;
+    }
+    typed++;
+    send(message, admittingDeferred);
   };
   const live = (target) => {
     const id = target.getAttribute('data-one-press');
@@ -100,6 +242,7 @@
 
   // --- events -------------------------------------------------------------
   root.addEventListener('click', (e) => {
+    if (!boot.wasm && blocked()) { e.preventDefault(); e.stopImmediatePropagation(); return; }
     // With a <base>, "#section" would leave a page that isn't at the root.
     const anchor = e.target.closest('a[href^="#"]');
     if (anchor && new URL(anchor.href).pathname !== location.pathname) {
@@ -130,7 +273,11 @@
     if (id) change(id, e.target.value, e.target);
     if (e.target.tagName === 'TEXTAREA') grow(e.target);
   });
+  root.addEventListener('beforeinput', (e) => {
+    if (!boot.wasm && blocked() && e.cancelable && !(oversizedEdit && deferredEdit && e.target === deferredEdit.target)) e.preventDefault();
+  }, true);
   root.addEventListener('keydown', (e) => {
+    if (!boot.wasm && blocked() && e.key === 'Enter') { e.preventDefault(); return; }
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
     const field = e.target;
     const submit = field.getAttribute && field.getAttribute('data-one-submit');
@@ -292,6 +439,12 @@
     if (moved) leaveScreen();
     const carried = moved && document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-one-field');
     const typing = carried ? document.activeElement.value : '';
+    const deferredValues = deferredEdit ? [deferredEdit, ...deferredRest].map(edit => edit.value === null ? edit.target.value : edit.value) : [];
+    const deferredValue = deferredValues[0];
+    // An unkeyed field on the new screen is not necessarily the old field,
+    // even if the renderer reuses its DOM node. Keep a copy for recovery.
+    const stranded = moved && deferredEdit && !deferredEdit.field.startsWith('f:') ? deferredEdit.target.cloneNode(false) : null;
+    if (stranded) stranded.value = deferredValue;
     apply(message);
     // A recovered checkpoint may be older than a blurred local input too.
     // Preserve every not-yet-durable draft in this history entry until replay.
@@ -316,8 +469,43 @@
         field.focus();
       }
     }
+    if (stranded) {
+      deferredEdit.target = stranded;
+      notice(false, true);
+    } else if (deferredEdit && (deferredEdit.entry === entry.e || deferredEdit.field.startsWith('f:'))) {
+      const key = deferredEdit.field;
+      const attribute = key.startsWith('f:') ? 'data-one-field' : 'data-one';
+      const field = root.querySelector(`[${attribute}="${CSS.escape(key.slice(2))}"]`);
+      if (field && field.getAttribute('data-one-change') && field.getAttribute('data-one-change') !== '0') {
+        field.value = deferredValue;
+        deferredEdit.target = field;
+        deferredEdit.entry = entry.e;
+        deferredEdit.id = field.getAttribute('data-one-change');
+        deferredEdit.revision = revision;
+      } else {
+        if (deferredEdit.target.isConnected) {
+          const copy = deferredEdit.target.cloneNode(false);
+          copy.value = deferredValue;
+          deferredEdit.target = copy;
+        }
+        notice(false, true);
+      }
+    }
+    for (let i = 0; i < deferredRest.length; i++) {
+      const edit = deferredRest[i];
+      if (edit.entry !== entry.e && !edit.field.startsWith('f:')) continue;
+      const attribute = edit.field.startsWith('f:') ? 'data-one-field' : 'data-one';
+      const field = root.querySelector(`[${attribute}="${CSS.escape(edit.field.slice(2))}"]`);
+      if (field) {
+        field.value = deferredValues[i + 1];
+        edit.target = field;
+        edit.entry = entry.e;
+        edit.id = field.getAttribute('data-one-change');
+        edit.revision = revision;
+      }
+    }
     if (message.ack) answered = message.ack;
-    if (message.at && answered === asked && noHash(message.at) !== noHash(here())) history.replaceState(entry, '', urlOf(message.at));
+    if (!deferredNavigation && message.at && answered === asked && noHash(message.at) !== noHash(here())) history.replaceState(entry, '', urlOf(message.at));
     shown = here();
     if (moved) placeScroll(null);
     else if (message.ack && message.ack === asked) placeScroll(savedScroll(entry.e));
@@ -330,17 +518,71 @@
       document.documentElement.setAttribute('data-one-ready', '');
     }
   };
-  const ask = (path, id) => {
+  const ask = (path, id, reservedOrder = null) => {
     leaveScreen();
     asked++;
-    send({t: 'route', p: path, e: id, n: asked});
+    send({t: 'route', p: path, e: id, n: asked}, reservedOrder !== null, reservedOrder);
+  };
+  const drainDeferred = () => {
+    for (let i = 0; i < 24; i++) {
+      const choices = [];
+      if (deferredRoute) choices.push({kind: 'route', order: deferredRoute.order});
+      if (deferredEdit) choices.push({kind: 'edit', order: deferredEdit.order});
+      if (deferredNavigation) choices.push({kind: 'navigation', order: deferredNavigation.order});
+      if (deferredControls.length) choices.push({kind: 'control', order: deferredControls[0].order});
+      if (!choices.length) break;
+      choices.sort((a, b) => a.order - b.order);
+      const first = choices[0].kind;
+      if (first === 'route') {
+        if (!fits(deferredRoute.message)) break;
+        const route = deferredRoute;
+        deferredRoute = null;
+        send(route.message, true, route.order);
+      } else if (first === 'edit') {
+        const pending = deferredEdit;
+        const candidate = {t: 'event', r: pending.revision, id: Number(pending.id), v: pending.value === null ? pending.target.value : pending.value, c: typed + 1};
+        if (!pending.id || pending.entry !== entry.e || !root.contains(pending.target) || !fits(candidate)) break;
+        Object.defineProperty(candidate, '_field', {value: pending.field});
+        Object.defineProperty(candidate, '_entry', {value: pending.entry});
+        deferredEdit = deferredRest.shift() || null;
+        typed++;
+        send(candidate, true, pending.order);
+      } else if (first === 'navigation') {
+        const next = deferredNavigation;
+        deferredNavigation = null;
+        saveScroll();
+        entry = next.entry;
+        shown = next.route;
+        ask(next.route, entry.e, next.order);
+      } else {
+        const control = deferredControls[0];
+        if (!fits(control.message)) break;
+        deferredControls.shift();
+        send(control.message, true, control.order);
+      }
+    }
+    if (!deferredEdit && !deferredRoute && !deferredNavigation && !deferredControls.length && bufferNotice && fits({t:'event',v:''})) clearNotice();
   };
   addEventListener('popstate', (e) => {
     const route = here();
     // A fragment within the page isn't a move.
     if (noHash(route) === noHash(shown)) { shown = route; return; }
+    const nextEntry = e.state && e.state.one ? e.state : {one: 1, i: 0, e: Date.now()};
+    if (!boot.wasm && blocked()) {
+      const last = deferredRest.length ? deferredRest[deferredRest.length - 1] : deferredEdit;
+      if (deferredNavigation && last && last.order > deferredNavigation.order) {
+        manualRecovery = true;
+        notice();
+        try { if (socket) socket.close(); } catch (_) {}
+        return;
+      }
+      deferredNavigation = {route, entry: nextEntry, order: deferredNavigation ? deferredNavigation.order : ++sendOrder};
+      shown = route;
+      notice(oversizedEdit);
+      return;
+    }
     saveScroll();
-    entry = e.state && e.state.one ? e.state : {one: 1, i: 0, e: Date.now()};
+    entry = nextEntry;
     if (!(e.state && e.state.one)) history.replaceState(entry, '', location.href);
     shown = route;
     ask(route, entry.e);
@@ -496,6 +738,7 @@
 
   // --- connection -------------------------------------------------------------
   const receive = (message) => {
+    if (manualRecovery) return;
     const first = !boot.wasm && !eventReady && message.t === 'patch' && Number.isSafeInteger(message.a) && message.a >= 0;
     if (first) {
       const savedTyped = Number.isSafeInteger(message.c) && message.c >= 0 ? message.c : 0;
@@ -503,6 +746,7 @@
       typed += savedTyped;
       const savedAsked = Number.isSafeInteger(message.ack) && message.ack >= 0 ? message.ack : 0;
       for (const item of unackedRoutes) item.message.n += savedAsked;
+      if (deferredRoute) deferredRoute.message.n += savedAsked;
       asked += savedAsked;
     }
     if (message.t === 'patch') patched(message);
@@ -528,6 +772,7 @@
       } else if (message.a <= eventSequence) {
         while (unacked.length && unacked[0].message.n <= message.a) unacked.shift();
       }
+      drainDeferred();
       if (handshaking) {
         const pending = [...queue, ...unacked, ...unackedRoutes].sort((a, b) => a.order - b.order);
         queue.length = 0;
@@ -636,7 +881,7 @@
       handshaking = true;
       // Only hello crosses the recovery boundary. No old control can run on
       // another node until its authorized app and durable frontier are ready.
-      const waiting = queue.length > 0 || unacked.length > 0 || unackedRoutes.length > 0 || beforeHello.length > 0;
+      const waiting = queue.length > 0 || unacked.length > 0 || unackedRoutes.length > 0 || beforeHello.length > 0 || !!deferredEdit || !!deferredRoute || !!deferredNavigation || deferredControls.length > 0;
       const hello = waiting ? {t: 'hello', r: revision, e: entry.e} : {t: 'hello', r: revision, w: innerWidth, e: entry.e};
       if (boot.proof) hello.proof = boot.proof;
       wire(JSON.stringify(hello), true);
@@ -646,6 +891,7 @@
     socket.onclose = (e) => {
       handshaking = true;
       document.documentElement.setAttribute('data-one-offline', '');
+      if (manualRecovery) return;
       // An unknown or ended session needs a fresh page, unless one is already on its way.
       if (e.code === 1008) return setTimeout(() => location.reload(), leaving ? 3000 : 0);
       setTimeout(connect, Math.min(1000 * 2 ** retry++, 10000));

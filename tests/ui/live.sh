@@ -23,6 +23,7 @@ for _ in $(seq 100); do curl -sf -o /dev/null "$ONE_TEST_BASE/" && break; sleep 
 node tests/ui/web_live_gallery.mjs
 node tests/ui/web_live_routes.mjs
 node tests/ui/web_live_events.mjs
+node tests/ui/web_live_backpressure.mjs
 node tests/ui/web_canvas_gallery.mjs
 # Last: it restarts the server.
 stop_server
