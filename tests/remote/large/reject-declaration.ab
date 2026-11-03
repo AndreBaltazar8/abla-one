@@ -1,0 +1,11 @@
+import "../../../src/server/remote.ab"
+compile fun reject(): void {
+    var source = OneRemoteSource("", [], [], [], [], [], [])
+    var declaration = "x"
+    while (declaration.size <= 524288) declaration = "$declaration$declaration"
+    oneRemoteAppend(source,declaration)
+    oneRemotePublish(source)
+    return
+}
+#compiler.transform(reject)
+fun main: int = 0

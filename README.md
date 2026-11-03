@@ -47,6 +47,15 @@ before creating sessions, advance that clock explicitly, then call
 `oneLiveResetClock()` after the test. Timers, poll budgets and session expiry share
 that source. Normal applications use the platform monotonic clock.
 
+`make test-remote` checks typed `@server` calls over HTTP, contract locks and
+client-only binaries. It includes a 400-route fixture whose generated source
+must exceed 1 MiB, exercising split client codecs and server dispatch.
+Remote generation keeps complete declarations in modules of at most 512 KiB
+and dispatcher functions in smaller parts. A single oversized declaration or
+more than 48 parts produces a named compile error even when no call is reachable;
+no partial set of routes is accepted. The part cap leaves compiler module slots
+for other transforms. Split the contract or data shape if that bound is reached.
+
 ## Android toolchain
 
 Abla One needs the current compiler (generics, the runtime written in Abla), so its Android builds use the installed `ablac` (v0.2.22) with that release's runtime sources, exported once into `build/abla-runtime-v0.2.22`. abla-mobile's native CMake detects which runtime model it is given; projects still on the older pinned toolchain keep building unchanged.

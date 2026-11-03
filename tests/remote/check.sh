@@ -12,6 +12,8 @@ check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2',
 copy() { rm -rf "$work/p"; mkdir -p "$work/p/tests"; cp -r src "$work/p/"; cp -r tests/remote "$work/p/tests/"; cp tests/port.ab "$work/p/tests/"; }
 build() { (cd "$work/p/tests/remote/app" && "$ablac" build "$1" -o "$work/$2" --fast 2>&1); }
 
+shop="$work/p/tests/remote/server/shop.ab"
+if [ "${1:-}" != "--large-only" ]; then
 copy
 build server.ab server > "$work/log" || { cat "$work/log"; exit 1; }
 lock="$work/p/tests/remote/app/server.lock"
@@ -53,7 +55,6 @@ build both_unconsumed.ab both_unconsumed > "$work/log"; check "a contract call w
 check "naming the error" "$(grep -c E_CONTRACT_CALL_NOT_CONSUMED "$work/log")" 1
 
 # The lock: adding passes, changing and removing fail, @retired is the way out.
-shop="$work/p/tests/remote/server/shop.ab"
 printf '\n@server\nfun added(): int = 1\n' >> "$shop"
 build server.ab server > "$work/log"; check "adding a route passes" "$?" 0
 check "and is recorded" "$(grep -c '^route added' "$lock")" 1
@@ -107,4 +108,33 @@ check "the last answers" "$(post many60 '{"first":"x"}')" 200
 check "with its shape" "$(grep -c '"sku":"a"' "$work/out")" 1
 kill $pid; wait $pid 2>/dev/null; pid=0
 build both.ab both > "$work/log"; check "and a client beside the server" "$?" 0
+fi
+
+# More than a MiB of codecs and calls, with dispatcher parts and aliases.
+# The compile-time probe checks the actual generated size, not a route-count guess.
+copy
+fields=""; values=""
+for field in $(seq 1 48); do
+  fields="$fields, val reviewed_fixture_field_$field: string"
+  values="$values, first"
+done
+for n in $(seq 1 400); do
+  printf '\nclass Large%d(val first: string, val nested: array<Line>, val optional: string?, val counts: Map<string,int>%s)\n@server\nfun large%d(first: string): Large%d = Large%d(first, [Line("a", 2)], null, Map<string,int>()%s)\n' "$n" "$fields" "$n" "$n" "$n" "$values" >> "$shop"
+done
+cp tests/remote/large/probe.ab "$work/p/tests/remote/app/large_probe.ab"
+cp tests/remote/large/client.ab "$work/p/tests/remote/app/large_client.ab"
+cp tests/remote/large/server.ab "$work/p/tests/remote/app/large_server.ab"
+build large_client.ab large_client > "$work/log" || { cat "$work/log"; exit 1; }
+check "large client calls and decodes" "$("$work/large_client")" '1 a 2'
+check "large client contains no server bodies" "$(grep -c SERVER_ONLY_MARKER "$work/large_client")" 0
+build large_server.ab large_server > "$work/log" || { cat "$work/log"; exit 1; }
+check "split dispatcher first/middle/last and unknown" "$("$work/large_server")" '200 200 200 404 400'
+
+# Generation limits fail even when no runtime remote call is referenced.
+for kind in declaration parts; do
+  copy
+  cp "tests/remote/large/reject-$kind.ab" "$work/p/tests/remote/app/reject.ab"
+  build reject.ab reject > "$work/log"; check "oversized $kind is a hard compile failure" "$?" 1
+  check "oversized $kind names remote generation" "$(grep -c 'ONE_ERROR__remote_' "$work/log" | head -1)" 1
+done
 exit $failed

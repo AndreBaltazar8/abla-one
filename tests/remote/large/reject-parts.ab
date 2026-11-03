@@ -1,0 +1,10 @@
+import "../../../src/server/remote.ab"
+compile fun reject(): void {
+    var source = OneRemoteSource("", [], [], [], [], [], [])
+    var index = 0
+    while (index < 49) { source.parts.append(""); index = index + 1 }
+    oneRemotePublish(source)
+    return
+}
+#compiler.transform(reject)
+fun main: int = 0
