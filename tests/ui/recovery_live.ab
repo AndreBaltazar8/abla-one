@@ -98,7 +98,7 @@ fun proofFactory(request: HttpRequest, id: string): OneApp = RecoveryProof(oneLi
 
 fun main: int {
     if (processEnvironmentOr("ONE_RECOVERY_TEST_DIR", "") == "" || !proofDirectory().exists()) return 1
-    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", testPort()), proofHandler, oneLivePaths(["/recovery", "/recovery/*"]), proofFactory, oneDefaultTheme(), OneLiveOptions("Recovery proof", "en", "#fff", "/icons", "src/backends/web/host.js", ""), OneLiveStorage(proofSeed, proofCookies, proofResumes), recovery = proofStore())
+    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", testPort()), proofHandler, oneLivePaths(["/recovery", "/recovery/*"]), proofFactory, oneDefaultTheme(), OneLiveOptions("Recovery proof", "en", "#fff", "/icons", "src/backends/web/host.js", ""), OneLiveStorage(proofSeed, proofCookies, proofResumes), recovery = if(processEnvironmentOr("ONE_RECOVERY_TEST_DISABLED", "")=="1") oneLiveNoRecovery() else proofStore())
     if (!server.listening()) return 1
     testPublishPort(server.listener.localPort())
     while (!server.stopped) {

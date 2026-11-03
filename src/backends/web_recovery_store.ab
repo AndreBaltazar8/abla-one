@@ -21,6 +21,8 @@ class OneRecoveryWrite(
 // authenticated persistence and off-path blob IO. The save CAS must atomically
 // consume only the inbox IDs represented by its checkpoint. Reads leave inbox
 // rows available until that CAS, so death between delivery and save loses none.
+fun oneRecoveryAllPages(): (HttpRequest)->bool = { request: HttpRequest -> true }
+
 class OneLiveRecoveryStore(
     val enabled: bool,
     val create: (HttpRequest, string, string, string, string) -> OneRecoveryResult,
@@ -36,7 +38,10 @@ class OneLiveRecoveryStore(
     // Accepted jobs complete through inbox, not by blocking the live loop on
     // object storage. Handles are scoped to session and fenced owner epoch.
     val readFile: (string, string, int, int, string, int, int) -> int,
-    val deleteFile: (string, string, int, int, string) -> int
+    val deleteFile: (string, string, int, int, string) -> int,
+    // A trusted app policy, evaluated once for a newly constructed SSR app.
+    // Public pages with no drafts can retain the dependency-free legacy path.
+    val participates: (HttpRequest)->bool = oneRecoveryAllPages()
 )
 
 fun oneLiveNoRecovery(): OneLiveRecoveryStore = OneLiveRecoveryStore(false,

@@ -17,6 +17,14 @@ fun oneRecoveryAttachRequest(request: HttpRequest): HttpRequest {
     HttpRequest(request.method,request.path,request.query,headers,request.body,request.parameterNames,request.parameterValues)
 }
 
+// A missing local ID is never a public-page downgrade. Only an existing app
+// constructed by the server's exclusion policy may use legacy transport.
+fun OneLiveServer.recoveryRequired(id: string): bool {
+    if(!recovery.enabled)return false
+    val index=findSession(id)
+    index<0 || sessions[index].recoveryEligible || oneRecoverySessions.has(id)
+}
+
 fun OneLiveServer.recoveryCapture(index: int): string? {
     val state = oneRecoverySessions.get(sessions[index].id)
     if (state == null) return null
@@ -29,7 +37,7 @@ fun OneLiveServer.recoveryCapture(index: int): string? {
 }
 
 fun OneLiveServer.recoveryStart(request: HttpRequest, index: int): int {
-    if (!recovery.enabled) return 200
+    if (!recovery.enabled || !sessions[index].recoveryEligible) return 200
     val id = sessions[index].id
     if (!oneRecoverySessions.has(id)) {
         val created = OneRecoveryState(id, "${oneLiveSessionId()}${oneLiveSessionId()}", recoveryOwner, recovery)
@@ -150,6 +158,10 @@ fun OneLiveServer.recoveryOpen(request: HttpRequest, id: string, proof: string, 
     var rounds = 0
     while (rounds < 16 && pump(index)) rounds = rounds + 1
     oneCheckpointRestore(sessions[index], saved)
+    // Cookie delivery can be lost independently of the durable checkpoint.
+    // Re-offer current storage after every authorized restore, even if the
+    // fresh app has no organization and performs no new secureWrite.
+    sessions[index].queue.cookiesChanged=true
     sessions[index].app.receive("restore", jsonStringify(saved.get("app")))
     rounds = 0
     while (rounds < 16 && pump(index)) rounds = rounds + 1

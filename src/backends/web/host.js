@@ -667,15 +667,17 @@
       // A retry names the same logical upload, even if its first response was
       // lost after the private object and completion were committed.
       const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+      const deadline = Date.now() + (boot.proof ? 180000 : 120000);
       await cookieWork;
       for (let attempt = 0; ; attempt++) {
+        if (Date.now() >= deadline) throw new Error("File upload timed out");
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 120000);
+        const timeout = setTimeout(() => controller.abort(), Math.min(120000, deadline - Date.now()));
         try {
           const response = await fetch(`one/upload?s=${encodeURIComponent(boot.s)}&${query}`, {method: 'POST', body,
             headers: {...headers, ...(boot.proof ? {'X-One-Proof': boot.proof, 'X-One-Upload': nonce} : {})},
             credentials: 'same-origin', redirect: 'error', signal: controller.signal});
-          if (!boot.proof || ![502, 503, 504].includes(response.status) || attempt >= 2) {
+          if (!boot.proof || ![502, 503, 504].includes(response.status) || attempt >= 15) {
             // The opaque handle is part of delivery too: losing the response
             // body after headers must retry the same committed upload nonce.
             const text = await response.text();
@@ -684,9 +686,9 @@
           }
           await response.body?.cancel();
         } catch (error) {
-          if (!boot.proof || attempt >= 2) throw error;
+          if (!boot.proof || attempt >= 15) throw error;
         } finally { clearTimeout(timeout); }
-        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        await new Promise(resolve => setTimeout(resolve, Math.min(4000, 250 * 2 ** attempt, Math.max(0, deadline - Date.now()))));
       }
     }
     // In the page, the module takes the bytes directly.
@@ -965,7 +967,7 @@
   const connect = () => {
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Relative to the page, so the app also works under a path prefix.
-    const url = new URL(`one/live?s=${encodeURIComponent(boot.s)}`, base);
+    const url = new URL(`one/live?s=${encodeURIComponent(boot.s)}${boot.proof ? "&recovery=1" : ""}`, base);
     socket = new WebSocket(`${scheme}//${url.host}${url.pathname}${url.search}`);
     socket.onopen = () => {
       handshaking = true;

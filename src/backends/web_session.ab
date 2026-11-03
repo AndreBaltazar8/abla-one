@@ -417,6 +417,8 @@ class OneLiveSession(
     var durableFrontier: int = 0,
     var eventAckSent: int = 0,
     var deferEventAck: bool = false,
+    // Set by trusted SSR policy; never restored from a client/checkpoint.
+    var recoveryEligible: bool = true,
     // Retained separately: changeAnswer is consumed while preparing a patch,
     // but a new node must acknowledge typing whose durable patch was lost.
     var changeFrontier: int = 0,

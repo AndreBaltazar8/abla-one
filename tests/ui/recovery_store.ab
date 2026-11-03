@@ -234,4 +234,4 @@ fun proofUploadPump(var server: OneLiveServer): void {
     proofUploads.clear()
     return
 }
-fun proofStore(): OneLiveRecoveryStore = OneLiveRecoveryStore(true, proofCreate, proofAttach, proofInspect, proofSave, proofFence, proofEnd, proofInbox, proofUpload, proofRead, proofDelete)
+fun proofStore(): OneLiveRecoveryStore = OneLiveRecoveryStore(true, proofCreate, proofAttach, proofInspect, proofSave, proofFence, proofEnd, proofInbox, proofUpload, proofRead, proofDelete, participates={ request: HttpRequest -> request.path!="/recovery/public" })

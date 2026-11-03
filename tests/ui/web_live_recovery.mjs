@@ -16,7 +16,8 @@ const requests = [];
 let socketNode = 'b';
 let pageNode = 'a';
 let proofs = 0;
-let refuseUpload = false;
+let disabledConnections = 0;
+let refuseUpload = 0;
 const uploadNonces = [];
 let browser;
 const trace=[];
@@ -27,10 +28,10 @@ const wait = async (test, label, milliseconds = 15000) => {
   throw new Error(`Timed out: ${label}`);
 };
 const check = (condition, label) => { assert(condition, label); proofs++; console.log(`ok   ${label}`); };
-const start = async name => {
+const start = async (name,disabled=false) => {
   const portFile = path.join(directory, `${name}-${children.length}.port`);
   const log = fs.openSync(path.join(directory, `${name}-${children.length}.log`), 'w');
-  const child = spawn(executable, [], {cwd: process.cwd(), env: {...process.env, ONE_RECOVERY_TEST_DIR: directory, ONE_RECOVERY_TEST_ASYNC_MS: '150', ONE_TEST_PORT_FILE: portFile, ONE_TEST_PORT: '0'}, stdio: ['ignore', log, log]});
+  const child = spawn(executable, [], {cwd: process.cwd(), env: {...process.env, ONE_RECOVERY_TEST_DIR: directory, ONE_RECOVERY_TEST_ASYNC_MS: '150', ONE_RECOVERY_TEST_DISABLED: disabled?'1':'0', ONE_TEST_PORT_FILE: portFile, ONE_TEST_PORT: '0'}, stdio: ['ignore', log, log]});
   fs.closeSync(log);
   children.push(child);
   await wait(() => {
@@ -52,7 +53,7 @@ const kill = async node => {
 const proxy = http.createServer((request, response) => {
   if (request.url.startsWith('/one/upload')) {
     uploadNonces.push(request.headers['x-one-upload']);
-    if (refuseUpload) { refuseUpload = false; request.resume(); response.writeHead(503); response.end('unavailable'); return; }
+    if (refuseUpload > 0) { refuseUpload--; request.resume(); response.writeHead(503); response.end('unavailable'); return; }
   }
   const alternate = socketNode === 'a' ? 'b' : 'a';
   const name = request.url.startsWith('/one/upload') || request.url.startsWith('/one/cookies') ? alternate : pageNode;
@@ -67,6 +68,7 @@ const proxy = http.createServer((request, response) => {
   request.pipe(upstream);
 });
 proxy.on('upgrade', (request, socket, head) => {
+  if(socketNode==='off')disabledConnections++;
   const node = target(socketNode);
   if (!node) { socket.destroy(); return; }
   const upstream = net.connect(node.port, '127.0.0.1', () => {
@@ -104,6 +106,19 @@ try {
   await page.goto(`${base}/recovery`);
   await page.waitForSelector('html[data-one-ready]');
   const boot = await page.evaluate(() => ({s: window.__one.s, proof: window.__one.proof}));
+  const publicContext=await browser.newContext();
+  const publicPage=await publicContext.newPage();
+  socketNode='a';
+  const recordsBeforePublic=fs.readdirSync(directory).filter(name=>/^[a-f0-9]{32}\.json$/.test(name)).length;
+  await publicPage.goto(`${base}/recovery/public`);
+  await publicPage.locator('html[data-one-ready]').waitFor();
+  check(await publicPage.evaluate(()=>!window.__one.proof) && fs.readdirSync(directory).filter(name=>/^[a-f0-9]{32}\.json$/.test(name)).length===recordsBeforePublic,'an excluded public page keeps readable legacy SSR and viewport interaction without a checkpoint');
+  await publicPage.getByRole('textbox').fill('public-only draft');
+  await publicPage.getByRole('button',{name:'Other view',exact:true}).click();
+  await publicPage.waitForURL(`${base}/recovery/other`);
+  check(await publicPage.getByRole('textbox').inputValue()==='public-only draft','an excluded local public session still dispatches legacy controls');
+  await publicContext.close();
+  socketNode='b';
   check((await context.cookies()).some(cookie => cookie.name === 'proof-bootstrap' && cookie.httpOnly), 'asynchronous creation delivers bootstrap cookies in the original SSR response');
   const row = () => JSON.parse(fs.readFileSync(path.join(directory, `${boot.s}.json`), 'utf8'));
   const checkpoint = () => JSON.parse(row().payload);
@@ -147,8 +162,15 @@ try {
   // The explicit simultaneous reload above adds one document navigation.
   navigations--;
 
-  socketNode = 'a';
+  await start('off',true);
+  socketNode = 'off';
   await kill(nodes.get('b'));
+  await wait(()=>disabledConnections>0,'recovery socket reaches a node whose feature is disabled');
+  await pause(250);
+  check(navigations===1 && await page.getByRole('textbox').inputValue()==='ação 📝 249','a node with recovery disabled cannot downgrade a private session or erase its local draft');
+  const unavailableCookie=await fetch(`http://127.0.0.1:${nodes.get('off').port}/one/cookies?s=${boot.s}`,{method:'POST',headers:{'X-One-Proof':boot.proof}});
+  check(unavailableCookie.status===503,'a disabled node cannot report successful private cookie delivery through its legacy handler');
+  socketNode='a';
   await wait(() => row().epoch >= 3 && page.evaluate(() => !document.documentElement.hasAttribute('data-one-offline')), 'node A recovers dead node B');
   await page.waitForFunction(() => document.querySelector('input').value === 'ação 📝 249');
   check(navigations === 1 && page.url() === `${base}/recovery`, 'node death restores route and draft without reloading the page');
@@ -173,7 +195,7 @@ try {
   check(checkpoint().effects.some(effect => JSON.parse(effect.message).t === 'pick'), 'a committed picker effect survives owner death before browser delivery');
   await start('a');
   const uploadNode = nodes.get('a').port;
-  refuseUpload = true;
+  refuseUpload = 4;
   await recoveredChooser.setFiles({name: 'ação.txt', mimeType: 'text/plain', buffer: Buffer.from('shared opaque bytes ç')});
   await wait(() => checkpoint().files?.length === 1 && checkpoint().app.reading > 0, 'pending file read descriptor is durable before owner loss');
   socketNode = 'a';
@@ -182,7 +204,7 @@ try {
   await page.getByText('Read bytes: shared opaque bytes ç', {exact: true}).waitFor();
   check(checkpoint().app.reading === 0 && checkpoint().files.length === 0, 'pending file read is resubmitted on the next owner and consumed with its checkpoint');
   check(requests.some(request => request.url.startsWith('/one/upload') && request.port === uploadNode), 'upload completes on a different node and attached owner reads its opaque handle');
-  check(uploadNonces.length === 2 && /^[a-f0-9]{32}$/.test(uploadNonces[0]) && uploadNonces[0] === uploadNonces[1], 'a temporary upload failure retries with the same opaque idempotency nonce');
+  check(uploadNonces.length === 5 && /^[a-f0-9]{32}$/.test(uploadNonces[0]) && uploadNonces.every(nonce => nonce === uploadNonces[0]), 'temporary lease contention retries beyond three attempts with the same opaque upload nonce');
   check(navigations === 1, 'cookie and upload recovery keep the document alive');
   await start('b');
 

@@ -405,7 +405,13 @@ fun OneLiveServer.httpWithPeer(slot: int): void {
     slots[slot].input = input.slice(end + length, input.size)
     if (request.path == "/one/live" && webSocketIsUpgradeRequest(request)) {
         val id = request.queryParameter("s")
-        if (recovery.enabled) {
+        if(!recovery.enabled && request.queryParameter("recovery")=="1") {
+            queue(slot,webSocketUpgradeResponse(request).render())
+            queue(slot,webSocketEncodeFrame(webSocketClosePayload(1013,"recovery unavailable"),8))
+            slots[slot].closing=true
+            return
+        }
+        if (recoveryRequired(id)) {
             if (!oneRecoveryIdentifier(id)) { queue(slot, httpText("Invalid session", 400).render()); slots[slot].closing = true; return }
             slots[slot].recoveryRequest = oneRecoveryAttachRequest(request)
             slots[slot].awaitingRecovery = true
@@ -450,9 +456,14 @@ fun OneLiveServer.httpWithPeer(slot: int): void {
         if (slots[slot].descriptor >= 0) frames(slot)
         return
     }
+    if(!recovery.enabled && request.header("x-one-proof")!="" && (request.path=="/one/upload" || request.path=="/one/cookies")) {
+        queue(slot,httpText("Session recovery unavailable",503).render())
+        slots[slot].closing=true
+        return
+    }
     val defers = this.defers
     if (!oneLiveReserved(request.path) && defers(request, this.ticket(slot))) return
-    if (recovery.enabled && request.path == "/one/upload" && request.method == "POST") {
+    if (request.path == "/one/upload" && request.method == "POST" && recoveryRequired(request.queryParameter("s"))) {
         val start = recovery.upload
         if (start(request, this.ticket(slot))) return
         queue(slot, httpText("Storage unavailable", 503).render())
@@ -520,7 +531,7 @@ fun OneLiveServer.upload(request: HttpRequest): HttpResponse {
 // The cookies for a session's stored values, fetched by the page after the
 // session reports a change (`{"t":"cookies"}`).
 fun OneLiveServer.cookies(request: HttpRequest): HttpResponse {
-    if (recovery.enabled) return recoveryCookies(request)
+    if (recoveryRequired(request.queryParameter("s"))) return recoveryCookies(request)
     val index = findSession(request.queryParameter("s"))
     val headers: array<HttpHeader> = [HttpHeader("Cache-Control", "no-store")]
     if (index >= 0) for (line in sessionCookies(request, index)) headers.append(HttpHeader("Set-Cookie", line))
@@ -572,6 +583,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
         val app = factory(request, id)
         sessions.append(oneSession(id, app, oneLiveQueueList[queueIndex]))
         index = sessions.size - 1
+        if(recovery.enabled)sessions[index].recoveryEligible=recovery.participates(request)
     } else {
         if (oneRouteWithoutHash(sessions[index].queue.routes.current()) != route) sessions[index].queue.routes.arrive(route, sessions[index].queue.routes.fresh())
         // The person asked for the page again: what the app read earlier may have changed since, so it hears of it.
@@ -881,7 +893,7 @@ fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimer
         if (timersReady(sessions[index])) sessions[index].queue.fireTimers(now)
         var rounds = 0
         while (rounds < 8 && pump(index)) rounds = rounds + 1
-        if (recovery.enabled) {
+        if (recovery.enabled && sessions[index].recoveryEligible) {
             recoverySettle(index)
             index = index + 1
             continue
