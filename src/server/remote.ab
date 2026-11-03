@@ -109,9 +109,11 @@ fun <T> oneRemoteSend(services: OneServices, base: string, route: string, body: 
 
 fun oneRemoteOutInt(value: int): Json = jsonInteger(value)
 fun oneRemoteInInt(json: Json): int = json.asInt()
-// Missing and null fields keep the existing defaulting behavior. A supplied integer
-// must be an exact representable JSON integer; asInt alone silently truncates.
-fun oneRemoteValidInt(json: Json): bool = json.isNull() || (json.isNumber() && json.asNumber().integer && json.intAvailable())
+// Missing fields retain decoder defaults; explicit null belongs only to nullable types.
+fun oneRemoteValidInt(json: Json): bool = json.isNumber() && json.asNumber().integer && json.intAvailable()
+fun oneRemoteValidString(json: Json): bool = json.isString()
+fun oneRemoteValidBool(json: Json): bool = json.isBoolean()
+fun oneRemoteValidF64(json: Json): bool = json.isNumber()
 fun oneRemoteValidOther(json: Json): bool = true
 fun oneRemoteOutString(value: string): Json = jsonString(value)
 fun oneRemoteInString(json: Json): string = json.asString()
@@ -436,16 +438,19 @@ compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool,
     name
 }
 
-// Validate integer inputs before decoding, including fields inside arrays, maps and classes.
-// The generated checks are shared by type and tolerate missing fields as the decoder does.
-compile fun oneRemoteIntValidator(var source: OneRemoteSource, type: string): string {
+// Validate supplied request values before decoding, including nested/generic collections.
+// Checks share type definitions and distinguish an absent default from explicit null.
+compile fun oneRemoteValidator(var source: OneRemoteSource, type: string): string {
     if (type == "int") return "oneRemoteValidInt"
-    if (type == "string" || type == "bool" || type == "f64" || type == "Json") return "oneRemoteValidOther"
-    val name = "oneRemoteValidateInt_${oneRemoteHash(type)}"
+    if (type == "string") return "oneRemoteValidString"
+    if (type == "bool") return "oneRemoteValidBool"
+    if (type == "f64") return "oneRemoteValidF64"
+    if (type == "Json") return "oneRemoteValidOther"
+    val name = "oneRemoteValidate_${oneRemoteHash(type)}"
     for (seen in source.seen) if (seen == name) return name
     source.seen.append(name)
     if (type.endsWith("?")) {
-        val inner = oneRemoteIntValidator(source, type.slice(0, type.size - 1))
+        val inner = oneRemoteValidator(source, type.slice(0, type.size - 1))
         oneRemoteAppend(source, "fun $name(json: Json): bool = json.isNull() || $inner(json)\n")
         return name
     }
@@ -454,8 +459,9 @@ compile fun oneRemoteIntValidator(var source: OneRemoteSource, type: string): st
     val head = type.slice(0, open)
     val arguments = if (open < type.size) oneRemoteArguments(type.slice(open + 1, type.size - 1)) else []
     if (head == "array" || head == "Map") {
-        val inner = oneRemoteIntValidator(source, arguments[if (head == "array") 0 else 1])
-        oneRemoteAppend(source, "fun $name(json: Json): bool {\n    for (value in json.values) if (!$inner(value)) return false\n    true\n}\n")
+        val inner = oneRemoteValidator(source, arguments[if (head == "array") 0 else 1])
+        val shape = if (head == "array") "json.isArray()" else "json.isObject()"
+        oneRemoteAppend(source, "fun $name(json: Json): bool {\n    if (!$shape) return false\n    for (value in json.values) if (!$inner(value)) return false\n    true\n}\n")
         return name
     }
     val declaration = compilerFindClass(head)
@@ -471,12 +477,24 @@ compile fun oneRemoteIntValidator(var source: OneRemoteSource, type: string): st
     while (index < compilerClassFieldCount(declaration)) {
         val field = compilerClassFieldName(declaration, index)
         val fieldType = oneRemoteSubstitute(compilerClassFieldType(declaration, index), parameters, arguments)
-        val valid = oneRemoteIntValidator(source, fieldType)
-        if (valid != "oneRemoteValidOther") checks = "$checks    if (!$valid(oneRemoteField(json, \"$field\"))) return false\n"
+        val valid = oneRemoteValidator(source, fieldType)
+        if (valid != "oneRemoteValidOther") checks = "$checks    if (json.has(\"$field\") && !$valid(oneRemoteField(json, \"$field\"))) return false\n"
         index = index + 1
     }
-    oneRemoteAppend(source, "fun $name(json: Json): bool {\n${checks}    true\n}\n")
+    oneRemoteAppend(source, "fun $name(json: Json): bool {\n    if (!json.isObject()) return false\n${checks}    true\n}\n")
     name
+}
+
+// Compatibility is explicit per route, never inferred from a caller header.
+// Opaque JSON adapters can retain their historical field coercion while new
+// typed routes reject malformed arguments before executing application code.
+compile fun oneRemoteLegacyJson(function: int): bool {
+    var index = 0
+    while (index < compiler.annotationCount(function)) {
+        if (compiler.annotation(function, index) == "server" && compiler.annotationArgumentCount(function, index)>0 && compiler.annotationArgumentText(function,index,0)=="legacy-json") return true
+        index = index + 1
+    }
+    false
 }
 
 compile fun oneRemoteIsRetired(function: int): bool {
@@ -558,7 +576,7 @@ compile fun oneRemoteWriteRoutes(var source: OneRemoteSource): void {
     var part = 0
     for (function in functions) {
         if (cases.size > 65536) {
-            oneRemoteAppend(source, "fun ${oneRemoteDispatchName(part)}(route: string, body: Json): OneServerReply {\n$cases    ${oneRemoteDispatchName(part + 1)}(route, body)\n}\n")
+            oneRemoteAppend(source, "fun ${oneRemoteDispatchName(part)}(route: string, body: Json): OneServerReply {\n    if (!body.isObject()) return OneServerReply(400, jsonStringify(jsonString(\"invalid arguments\")))\n$cases    ${oneRemoteDispatchName(part + 1)}(route, body)\n}\n")
             part = part + 1
             cases = ""
         }
@@ -574,8 +592,11 @@ compile fun oneRemoteWriteRoutes(var source: OneRemoteSource): void {
                 val name = compiler.parameterName(function, index)
                 val type = oneRemoteNormal(compiler.parameterType(function, index))
                 val read = "${oneRemoteCodec(source, type, false, "$route($name)")}(oneRemoteField(body, \"$name\"))"
-                val valid = oneRemoteIntValidator(source, type)
-                if (valid != "oneRemoteValidOther") checks = "$checks        if (!$valid(oneRemoteField(body, \"$name\"))) return OneServerReply(400, jsonStringify(jsonString(\"invalid integer in $name\")))\n"
+                val valid = oneRemoteValidator(source, type)
+                if (!oneRemoteLegacyJson(function) && valid != "oneRemoteValidOther") {
+                    val reason = if (type == "int") "invalid integer in $name" else "invalid type in $name"
+                    checks = "$checks        if (body.has(\"$name\") && !$valid(oneRemoteField(body, \"$name\"))) return OneServerReply(400, jsonStringify(jsonString(\"$reason\")))\n"
+                }
                 arguments = if (arguments == "") read else "$arguments, $read"
                 index = index + 1
             }
@@ -583,7 +604,7 @@ compile fun oneRemoteWriteRoutes(var source: OneRemoteSource): void {
             cases = "$cases    if (route == \"$route\") {\n${checks}        return OneServerReply(200, jsonStringify($encode($full($arguments))))\n    }\n"
         }
     }
-    oneRemoteAppend(source, "fun ${oneRemoteDispatchName(part)}(route: string, body: Json): OneServerReply {\n$cases    OneServerReply(404, jsonStringify(jsonString(\"no such route\")))\n}\n")
+    oneRemoteAppend(source, "fun ${oneRemoteDispatchName(part)}(route: string, body: Json): OneServerReply {\n    if (!body.isObject()) return OneServerReply(400, jsonStringify(jsonString(\"invalid arguments\")))\n$cases    OneServerReply(404, jsonStringify(jsonString(\"no such route\")))\n}\n")
     if (compilerFindFunction("oneServerAnswer") >= 0) oneRemoteAppend(source, "fun oneServerHandler(request: HttpRequest): HttpResponse = oneServerAnswer(request, oneServerDispatch)\n")
     return
 }

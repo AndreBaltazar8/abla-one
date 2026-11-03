@@ -33,3 +33,25 @@ class Tree(val label: string, val children: array<Tree>)
 
 @server
 fun tree(depth: int): Tree = Tree("root", if (depth > 0) [Tree("leaf", [])] else [])
+
+@server
+fun acceptPage(page: Page<Order>): int = page.items.size
+
+@server
+fun acceptTree(value: Tree): string = value.label
+
+@server
+fun optionalValue(value: string?, enabled: bool): string = if (enabled && value != null) value else "none"
+
+// Deliberate installed-client adapter; strictness never depends on request data.
+@server("legacy-json")
+fun legacyJson(payload: string, limit: int): string = "$limit:$payload"
+
+@server
+fun decimalValue(value: f64): f64 = value
+
+var recordedOrders = 0
+@server
+fun recordOrder(order: Order): int { recordedOrders = recordedOrders+1; order.id }
+@server
+fun recordedOrderCount(): int = recordedOrders

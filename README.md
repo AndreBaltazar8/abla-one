@@ -70,6 +70,27 @@ more than 48 parts produces a named compile error even when no call is reachable
 no partial set of routes is accepted. The part cap leaves compiler module slots
 for other transforms. Split the contract or data shape if that bound is reached.
 
+## Request decoding
+
+Generated server dispatch validates every supplied argument before calling the
+application: strings, booleans, representable integers, numbers, nullable values,
+arrays, string-keyed maps and nested/generic/recursive classes. Wrong types and
+explicit null for non-nullable fields return HTTP 400. Missing fields retain the
+existing decoder defaults; nullable null and unknown class fields remain valid.
+Arguments must be a JSON object. Explicit `Json` parameters remain arbitrary
+JSON values whose contents the application validates. Errors identify the
+argument, never its value.
+
+An existing opaque JSON adapter can deliberately preserve its former field
+coercion with `@server("legacy-json")`. This is a per-route migration policy;
+request headers or body fields cannot select it. The root must still be an
+object and invalid JSON remains refused. Keep new typed routes strict. This
+annotation leaves route signatures and `server.lock` unchanged, so installed
+clients can keep their established wire contract.
+
+The checked client-reply decoding API is a separate migration; this server-side
+change does not change the return type of `$remoteDecode`.
+
 ## Android toolchain
 
 Abla One needs the current compiler (generics, the runtime written in Abla), so its Android builds use the installed `ablac` (v0.2.22) with that release's runtime sources, exported once into `build/abla-runtime-v0.2.22`. abla-mobile's native CMake detects which runtime model it is given; projects still on the older pinned toolchain keep building unchanged.

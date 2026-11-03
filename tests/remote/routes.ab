@@ -16,5 +16,14 @@ fun main: int {
     val grown = jsonParse(oneServerDispatch("tree", jsonParse("{\"depth\":1}").value).body).value
     expectEqual(grown.get("children").at(0).get("label").asString(), "leaf", "recursive shape")
     expectEqual(oneServerDispatch("nope", jsonObject([], [])).status, 404, "unknown route")
+    for (bad in ["{\"status\":false}", "{\"status\":null}", "{\"limit\":\"3\"}", "{\"limit\":null}", "[]"]) {
+        expectEqual(oneServerDispatch("orders", jsonParse(bad).value).status, 400, "bad primitive/root shape")
+    }
+    for (bad in ["{\"order\":[]}", "{\"order\":{\"paid\":1}}", "{\"order\":{\"lines\":{}}}", "{\"order\":{\"lines\":[null]}}", "{\"order\":{\"tags\":{\"a\":false}}}"]) {
+        expectEqual(oneServerDispatch("acceptOrder", jsonParse(bad).value).status, 400, "bad nested shape")
+    }
+    expectEqual(oneServerDispatch("orders", jsonObject([], [])).status, 200, "missing fields retain defaults")
+    expectEqual(oneServerDispatch("legacyJson", jsonParse("{\"payload\":false,\"limit\":\"7\"}").value).body, "\"0:\"", "explicit legacy adapter keeps old field coercion")
+
     0
 }

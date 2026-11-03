@@ -33,6 +33,39 @@ check "nested fractional integer rejected" "$(post acceptOrder '{"order":{"id":1
 check "nested integers accepted" "$(post acceptOrder '{"order":{"id":1,"lines":[{"sku":"a","count":2}]}}')" 200
 check "fractional map value rejected" "$(post countValues '{"values":{"a":2.5}}')" 400
 check "integer map value accepted" "$(post countValues '{"values":{"a":2}}')" 200
+check "wrong string rejected" "$(post orders '{"status":false,"limit":3}')" 400
+check "explicit null string rejected" "$(post orders '{"status":null,"limit":3}')" 400
+check "explicit null integer rejected" "$(post orders '{"limit":null}')" 400
+check "missing fields retain defaults" "$(post orders '{}')" 200
+check "non-object arguments rejected" "$(post ping '[]')" 400
+check "class array shape rejected" "$(post acceptOrder '{"order":[]}')" 400
+check "class null rejected" "$(post acceptOrder '{"order":null}')" 400
+check "wrong bool rejected" "$(post acceptOrder '{"order":{"paid":"false"}}')" 400
+check "null bool rejected" "$(post acceptOrder '{"order":{"paid":null}}')" 400
+check "array object shape rejected" "$(post acceptOrder '{"order":{"lines":{}}}')" 400
+check "wrong array element rejected" "$(post acceptOrder '{"order":{"lines":[3]}}')" 400
+check "nested string rejected" "$(post acceptOrder '{"order":{"lines":[{"sku":9}]}}')" 400
+check "map array shape rejected" "$(post countValues '{"values":[]}')" 400
+check "null map rejected" "$(post countValues '{"values":null}')" 400
+check "wrong map member rejected" "$(post acceptOrder '{"order":{"tags":{"secret":7}}}')" 400
+check "generic nested input rejected" "$(post acceptPage '{"page":{"items":[{"paid":1}]}}')" 400
+check "generic nested input accepted" "$(post acceptPage '{"page":{"items":[{"paid":true}],"next":null}}')" 200
+check "recursive wrong input rejected" "$(post acceptTree '{"value":{"label":"x","children":[{"label":2}]}}')" 400
+check "recursive input accepted" "$(post acceptTree '{"value":{"label":"x","children":[{"label":"á"}]}}')" 200
+check "nullable null accepted" "$(post optionalValue '{"value":null,"enabled":false}')" 200
+check "nullable wrong type rejected" "$(post optionalValue '{"value":7,"enabled":false}')" 400
+check "nullable real string accepted" "$(post optionalValue '{"value":"á","enabled":true}')" 200
+check "floating number accepted" "$(post decimalValue '{"value":2.5}')" 200
+check "floating string rejected" "$(post decimalValue '{"value":"2.5"}')" 400
+check "floating null rejected" "$(post decimalValue '{"value":null}')" 400
+check "legacy adapter keeps coercion" "$(post legacyJson '{"payload":false,"limit":"7"}')" 200
+check "legacy adapter defaults are historical" "$(cat "$work/out")" '"0:"'
+check "legacy adapter still needs an object" "$(post legacyJson 'null')" 400
+check "invalid mutation refused" "$(post recordOrder '{"order":{"id":1,"paid":"false"}}')" 400
+check "mutation count is readable" "$(post recordedOrderCount '{}')" 200
+check "invalid input never executes application code" "$(cat "$work/out")" 0
+
+
 check "retired route" "$(post oldOrders '{}')" 410
 check "retired says why" "$(cat "$work/out")" '"use orders"'
 check "unknown route" "$(post nope '{}')" 404
