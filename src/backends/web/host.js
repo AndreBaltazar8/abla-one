@@ -18,6 +18,7 @@
   const unacked = [];
   const beforeHello = [];
   let eventSequence = 0;
+  let sendOrder = 0;
   let eventReady = false;
   let viewportAfterHello = false;
   // Relative URLs mean the app's root on every route: the page's <base> is fixed
@@ -29,7 +30,7 @@
   const liveEvent = (message) => {
     message.n = ++eventSequence;
     message.u = crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
-    unacked.push(message);
+    unacked.push({message, order: ++sendOrder});
     if (socket && socket.readyState === 1) socket.send(JSON.stringify(message));
   };
   const send = (message) => {
@@ -44,8 +45,9 @@
       return;
     }
     const text = JSON.stringify(message);
+    const order = ++sendOrder;
     if (socket && socket.readyState === 1) socket.send(text);
-    else queue.push(text);
+    else queue.push({text, order});
   };
   const event = (id, value) => send({t: 'event', r: revision, id: Number(id), v: value == null ? '' : String(value)});
   // Typing the session hasn't answered yet, and a press waiting for it: a control may only come
@@ -473,7 +475,7 @@
           send({t: 'viewport', w: innerWidth});
         }
       } else if (message.a <= eventSequence) {
-        while (unacked.length && unacked[0].n <= message.a) unacked.shift();
+        while (unacked.length && unacked[0].message.n <= message.a) unacked.shift();
       }
     }
   };
@@ -567,8 +569,11 @@
       // Early scripted intents were made on the SSR revision: replay them there, then acknowledge the real viewport.
       const waiting = queue.length > 0 || unacked.length > 0 || beforeHello.length > 0;
       socket.send(JSON.stringify(waiting ? {t: 'hello', r: revision, e: entry.e} : {t: 'hello', r: revision, w: innerWidth, e: entry.e}));
-      while (queue.length) socket.send(queue.shift());
-      for (const message of unacked) socket.send(JSON.stringify(message));
+      // Keep queued route/viewport messages in their original order relative
+      // to events made while disconnected.
+      const pending = [...queue, ...unacked].sort((a, b) => a.order - b.order);
+      queue.length = 0;
+      for (const item of pending) socket.send(item.text || JSON.stringify(item.message));
       if (waiting && !eventReady && beforeHello.length) viewportAfterHello = true;
       else if (waiting) socket.send(JSON.stringify({t: 'viewport', w: innerWidth}));
     };
