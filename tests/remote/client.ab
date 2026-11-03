@@ -4,6 +4,9 @@ import contract "server/shop.ab" as shop
 import "../../src/core/services.ab"
 import "../../src/server/remote.ab"
 
+var constructed = 0
+fun countedReply(json: Json): int { constructed = constructed + 1; json.asInt() }
+
 fun main: int {
     var services: OneServices = oneRecordedServices()
     val call = $remote(services, "https://x.test", shop.orders("open", 3))
@@ -21,5 +24,46 @@ fun main: int {
     expectEqual(failed.kind, "failed", "no network")
     expectEqual(failed.message, "offline", "says why")
     expect(!failed.ok(), "not ok")
-    0
+    for (body in ["null", "[]", "{}", "{\"items\":[],\"next\":7}", "{\"items\":{},\"next\":null}", "{\"items\":[null],\"next\":null}", "{\"items\":[{\"id\":\"SECRET_WRONG_TYPE\",\"paid\":true,\"lines\":[],\"note\":null,\"tags\":{}}],\"next\":null}", "{\"items\":[{\"id\":1.5,\"paid\":true,\"lines\":[],\"note\":null,\"tags\":{}}],\"next\":null}", "{\"items\":[{\"id\":1,\"paid\":\"false\",\"lines\":[],\"note\":null,\"tags\":{}}],\"next\":null}", "{\"items\":[{\"id\":1,\"paid\":true,\"lines\":[{\"sku\":2,\"count\":1}],\"note\":null,\"tags\":{}}],\"next\":null}", "{\"items\":[{\"id\":1,\"paid\":true,\"lines\":[],\"note\":null,\"tags\":{\"x\":false}}],\"next\":null}"]) {
+        val bad = call.result(oneResponse(oneResponsePayload(call.id, 200, body, "")))
+        expect(!bad.ok() && bad.values.size == 0, "invalid reply has no typed value")
+        expectEqual(bad.message, "invalid result type", "type refusal never echoes body data")
+        val compact = $remoteDecode(jsonParse(body).value, shop.orders())
+        expect(!compact.ok() && compact.values.size == 0, "compact decoder validates too")
+    }
+    val jsonReply = oneRemoteReply(oneResponse(oneResponsePayload(call.id, 201, "{\"items\":[],\"next\":null,\"future\":true}", "")))
+    val compact = $remoteDecode(jsonReply, shop.orders())
+    expect(compact.ok() && compact.status == 201 && compact.value().items.size == 0, "checked reply preserves HTTP status and accepts extra fields")
+    val retired = $remoteDecode(oneRemoteReply(oneResponse(oneResponsePayload(call.id, 410, "\"update\"", ""))), shop.orders())
+    expect(retired.kind == "retired" && retired.values.size == 0 && retired.message == "update", "compact retired reply has no value")
+    val offline = $remoteDecode(oneRemoteReply(oneResponse(oneResponsePayload(call.id, 0, "", "offline"))), shop.orders())
+    expect(!offline.ok() && offline.values.size == 0, "compact transport failure has no value")
+    val broken = call.result(oneResponse(oneResponsePayload(call.id, 200, "{not json", "")))
+    expect(!broken.ok() && broken.values.size == 0 && broken.message == "not JSON", "invalid JSON has no value")
+    val refusalReply = OneRemoteReply(200, "ok", "", jsonParse("{\"status\":403,\"error\":\"Denied\"}").value)
+    val refusal = oneRemoteRefusal(refusalReply)
+    expect(refusal != null && refusal.status == 403 && refusal.message == "Denied", "explicit business refusal")
+    expect(!$remoteDecode(refusalReply, shop.orders()).ok(), "partial refusal is never success data")
+    for (body in ["{\"status\":200,\"error\":\"\"}", "{\"status\":\"403\",\"error\":\"Denied\"}", "{\"status\":403.5,\"error\":\"Denied\"}", "{\"status\":403,\"error\":false}", "{\"status\":600,\"error\":\"Denied\"}", "{}", "null"]) {
+        expect(oneRemoteRefusal(OneRemoteReply(200, "ok", "", jsonParse(body).value)) == null, "wrong refusal envelope is not coerced")
+    }
+    val tree = $remoteDecode(jsonParse("{\"label\":\"á😀\",\"children\":[{\"label\":\"leaf\",\"children\":[]}]}").value, shop.tree())
+    expect(tree.ok() && tree.value().children[0].label == "leaf", "recursive unicode reply")
+    expect(!$remoteDecode(jsonParse("{\"label\":\"x\",\"children\":[{\"label\":7,\"children\":[]}]}").value, shop.tree()).ok(), "recursive wrong type")
+    for (body in ["\"2.5\"", "null", "1e1000000000", "1e999999999999999999999999999"]) {
+        expect(!$remoteDecode(jsonParse(body).value, shop.decimalValue()).ok(), "invalid floating reply")
+    }
+    expect($remoteDecode(jsonParse("2.5").value, shop.decimalValue()).ok(), "valid floating reply")
+    expect($remoteDecode(jsonParse("1e-1000000000").value, shop.decimalValue()).ok(), "underflow reply is bounded")
+    val nullable = $remoteDecode(jsonNull(), shop.optionalValue())
+    expect(!nullable.ok(), "null cannot fill a nonnullable string result")
+    val nothing = $remoteDecode(jsonNull(), shop.optionalReply())
+    expect(nothing.ok() && nothing.values.size == 1 && nothing.value() == null, "a valid nullable result is a present null")
+    expect(!$remoteDecode(jsonBoolean(false), shop.optionalReply()).ok(), "nullable does not accept another type")
+    val counted = OneRemote<int>(99, countedReply, oneRemoteValidInt)
+    val refusedValue = counted.result(oneResponse(oneResponsePayload(99, 200, "\"wrong\"", "")))
+    expect(!refusedValue.ok() && constructed == 0, "invalid data never reaches the typed constructor")
+    val acceptedValue = counted.result(oneResponse(oneResponsePayload(99, 200, "7", "")))
+    expect(acceptedValue.ok() && acceptedValue.value() == 7 && constructed == 1, "valid data decodes once")
+    testsPassed()
 }

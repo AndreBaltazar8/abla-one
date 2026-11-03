@@ -9,8 +9,9 @@ fun main: int {
     println("${$remoteCall(services, "https://example.test", shop.orders("open", 3))}")
     val refused = oneRemoteReply(oneResponse("{\"requestId\":1,\"status\":410,\"body\":\"\\\"use orders\\\"\"}"))
     println("${refused.kind} ${refused.message}")
-    val reply = oneRemoteReply(oneResponse("{\"requestId\":1,\"status\":200,\"body\":\"{\\\"items\\\":[{\\\"id\\\":7,\\\"lines\\\":[{\\\"sku\\\":\\\"a\\\",\\\"count\\\":2}]}]}\"}"))
-    val orders = $remoteDecode(reply.json, shop.orders())
-    println("${reply.kind} ${orders.items[0].id} ${orders.items[0].lines[0].sku} ${orders.items[0].lines[0].count}")
+    val reply = oneRemoteReply(oneResponse("{\"requestId\":1,\"status\":200,\"body\":\"{\\\"items\\\":[{\\\"id\\\":7,\\\"paid\\\":true,\\\"lines\\\":[{\\\"sku\\\":\\\"a\\\",\\\"count\\\":2}],\\\"note\\\":null,\\\"tags\\\":{}}],\\\"next\\\":null}\"}"))
+    val orders = $remoteDecode(reply, shop.orders())
+    if (!orders.ok()) return 1
+    println("${orders.kind} ${orders.value().items[0].id} ${orders.value().items[0].lines[0].sku} ${orders.value().items[0].lines[0].count}")
     0
 }

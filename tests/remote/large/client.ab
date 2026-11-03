@@ -7,7 +7,15 @@ import "large_probe.ab"
 fun main: int {
     var services = oneRecordedServices()
     val id = $remoteCall(services, "https://example.test", shop.large400("x"))
-    val reply = $remoteDecode(jsonParse("{\"first\":\"x\",\"nested\":[{\"sku\":\"a\",\"count\":2}],\"optional\":null,\"counts\":{}}").value, shop.large400())
-    println("$id ${reply.nested[0].sku} ${reply.nested[0].count}")
+    val json = jsonParse("{\"first\":\"x\",\"nested\":[{\"sku\":\"a\",\"count\":2}],\"optional\":null,\"counts\":{}}").value
+    var field = 1
+    while (field <= 48) {
+        json.keys.append("reviewed_fixture_field_$field")
+        json.values.append(jsonString("x"))
+        field = field + 1
+    }
+    val reply = $remoteDecode(json, shop.large400())
+    if (!reply.ok()) return 1
+    println("$id ${reply.value().nested[0].sku} ${reply.value().nested[0].count}")
     0
 }

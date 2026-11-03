@@ -25,5 +25,5 @@ fun main: int {
     expectEqual(oneServerDispatch("orders", jsonObject([], [])).status, 200, "missing fields retain defaults")
     expectEqual(oneServerDispatch("legacyJson", jsonParse("{\"payload\":false,\"limit\":\"7\"}").value).body, "\"0:\"", "explicit legacy adapter keeps old field coercion")
 
-    0
+    testsPassed()
 }

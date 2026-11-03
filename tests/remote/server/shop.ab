@@ -55,3 +55,6 @@ var recordedOrders = 0
 fun recordOrder(order: Order): int { recordedOrders = recordedOrders+1; order.id }
 @server
 fun recordedOrderCount(): int = recordedOrders
+
+@server
+fun optionalReply(enabled: bool): string? = if (enabled) "yes" else null

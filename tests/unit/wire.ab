@@ -27,5 +27,5 @@ fun main: int {
     expectEqual(tree.revision, 12, "revision")
     expectEqual(dump(tree.root), dump(screen()), "same tree")
     expect(!oneTreeParse("not json").valid, "garbage is refused")
-    0
+    testsPassed()
 }

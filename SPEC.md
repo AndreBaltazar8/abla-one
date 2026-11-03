@@ -806,6 +806,34 @@ A client imports the same file as a contract, and calls through `$remote`:
 - **Authentication:** every route authenticates the session itself. Being marked
   `@server` hides nothing: a client can call any route with any arguments.
 
+Both `pending.result(response)` and `$remoteDecode(reply, contract.route())`
+return `OneRemoteResult<T>`. `reply` can be an `OneRemoteReply` from
+`oneRemoteReply(response)` (preserves HTTP status and transport/retirement errors),
+or a `Json` value (assumes HTTP200). Check `.ok()` before `.value()`: failed and
+retired results have no value. A valid nullable result has one value containing
+null, which is distinct from a failed decode.
+
+Reply types are checked before constructing any data: primitives, finite numbers,
+nullable values, collections, nested/generic and recursive classes. Every declared
+class field must be present, even when nullable; unknown extra fields are allowed.
+A wrong or incomplete reply fails with `invalid result type`, without echoing
+its body or filling a success object with defaults. Request-side absent fields
+retain the stable-route defaults described below.
+
+An API that sends partial business refusals such as `{"status":403,"error":"Denied"}`
+inside HTTP200 can handle them explicitly before typed success decoding:
+
+    val reply = oneRemoteReply(response)
+    if (!reply.ok()) { showFailure(reply.status, reply.message); return }
+    val refusal = oneRemoteRefusal(reply)
+    if (refusal != null) { showFailure(refusal.status, refusal.message); return }
+    val result = $remoteDecode(reply, orders.orders())
+    if (!result.ok()) { showFailure(502, result.message); return }
+    show(result.value())
+
+`oneRemoteRefusal` accepts only an object with an integer status400–599 and a
+string error. Wrong types and success statuses are not coerced into refusals.
+
 ### Stable routes
 
 A `@server` function can't be named after the live server's own paths under `/one/` (`live`, `upload`,

@@ -16,33 +16,17 @@ import "../core/services.ab"
 // maps with string keys, and classes, nested and generic.
 
 // A call under way. `result` reads its completion.
-class OneRemote<T>(val id: int, val decode: (Json) -> T) {
+class OneRemote<T>(val id: int, val decode: (Json) -> T, val validate: (Json) -> bool) {
     fun matches(response: OneResponse): bool = response.requestId == id
     fun result(response: OneResponse): OneRemoteResult<T> {
-        val values: array<T> = []
-        var kind = "failed"
-        var message = ""
-        if (response.status == 410) {
-            kind = "retired"
-            val reason = jsonParse(response.body)
-            message = if (reason.succeeded) reason.value.asString() else response.body
-        } else if (!response.ok()) message = if (response.error != "") response.error else response.body
-        else {
-            val parsed = jsonParse(response.body)
-            if (!parsed.succeeded) message = "not JSON"
-            else {
-                values.append(decode(parsed.value))
-                kind = "ok"
-            }
-        }
-        OneRemoteResult<T>(values, response.status, kind, message)
+        oneRemoteChecked<T>(oneRemoteReply(response), decode, validate)
     }
 }
 
 // `kind`: "ok" (`value()` is set), "retired" (the server dropped this route: this
-// build must update; `message` says why) or "failed".
+// build must update; `message` says why) or "failed". Check ok() before value().
 class OneRemoteResult<T>(val values: array<T>, val status: int, val kind: string, val message: string) {
-    fun ok(): bool = kind == "ok"
+    fun ok(): bool = kind == "ok" && values.size == 1
     fun value(): borrow(this) T = values[0]
 }
 
@@ -50,6 +34,7 @@ class OneRemoteResult<T>(val values: array<T>, val status: int, val kind: string
 // "ok". `$remoteDecode` reads that into the route's result. With `$remoteCall`, which only gives the
 // request's id, this is what a client with many routes uses: `$remote`'s two generic classes are
 // copied per result type, which an MCU's flash notices.
+// ok() here checks HTTP/JSON only; $remoteDecode checks the declared result type.
 class OneRemoteReply(val status: int, val kind: string, val message: string, val json: Json) {
     fun ok(): bool = kind == "ok"
 }
@@ -64,6 +49,29 @@ fun oneRemoteReply(response: OneResponse): OneRemoteReply {
     val parsed = jsonParse(response.body)
     if (!parsed.succeeded) return OneRemoteReply(response.status, "failed", "not JSON", jsonNull())
     OneRemoteReply(response.status, "ok", "", parsed.value)
+}
+
+// Validate before constructing any typed value. A malformed success never turns
+// into a class filled with default fields; its diagnostic contains no body data.
+fun <T> oneRemoteChecked(reply: OneRemoteReply, decode: (Json) -> T, validate: (Json) -> bool): OneRemoteResult<T> {
+    val values: array<T> = []
+    if (!reply.ok()) return OneRemoteResult<T>(values, reply.status, reply.kind, reply.message)
+    if (!validate(reply.json)) return OneRemoteResult<T>(values, reply.status, "failed", "invalid result type")
+    values.append(decode(reply.json))
+    OneRemoteResult<T>(values, reply.status, "ok", "")
+}
+
+// Some APIs answer a business refusal in a successful HTTP response. Handle that
+// envelope explicitly, before decoding the route's complete success data shape.
+class OneRemoteRefusal(val status: int, val message: string)
+fun oneRemoteRefusal(reply: OneRemoteReply): OneRemoteRefusal? {
+    if (!reply.ok() || !reply.json.isObject()) return null
+    val status = reply.json.get("status")
+    val error = reply.json.get("error")
+    if (!oneRemoteValidInt(status) || !error.isString()) return null
+    val code = status.asInt()
+    if (code < 400 || code > 599) return null
+    OneRemoteRefusal(code, error.asString())
 }
 
 // A call's arguments, filled in by the generated code one call each, so a route costs little.
@@ -100,9 +108,9 @@ fun oneRemoteAt(json: Json, index: int): Json = json.values[index]
 // What a route answers, on the server.
 class OneServerReply(val status: int, val body: string)
 
-fun <T> oneRemoteSend(services: OneServices, base: string, route: string, body: Json, decode: (Json) -> T): OneRemote<T> {
+fun <T> oneRemoteSend(services: OneServices, base: string, route: string, body: Json, decode: (Json) -> T, validate: (Json) -> bool): OneRemote<T> {
     val slash = if (base.size > 0 && base[base.size - 1] == 47) "" else "/"
-    OneRemote<T>(services.send(oneRequest("POST", "$base${slash}one/$route").json(body)), decode)
+    OneRemote<T>(services.send(oneRequest("POST", "$base${slash}one/$route").json(body)), decode, validate)
 }
 
 // --- values to and from JSON (what the generated code calls) --------------------
@@ -448,19 +456,19 @@ compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool,
     name
 }
 
-// Validate supplied request values before decoding, including nested/generic collections.
-// Checks share type definitions and distinguish an absent default from explicit null.
-compile fun oneRemoteValidator(var source: OneRemoteSource, type: string): string {
+// Requests validate supplied fields and preserve absent defaults. Replies require
+// every declared field, including nullable ones, before any typed construction.
+compile fun oneRemoteValidator(var source: OneRemoteSource, type: string, complete: bool = false): string {
     if (type == "int") return "oneRemoteValidInt"
     if (type == "string") return "oneRemoteValidString"
     if (type == "bool") return "oneRemoteValidBool"
     if (type == "f64") return "oneRemoteValidF64"
     if (type == "Json") return "oneRemoteValidOther"
-    val name = "oneRemoteValidate_${oneRemoteHash(type)}"
+    val name = "oneRemoteValidate${if (complete) "Reply" else ""}_${oneRemoteHash(type)}"
     for (seen in source.seen) if (seen == name) return name
     source.seen.append(name)
     if (type.endsWith("?")) {
-        val inner = oneRemoteValidator(source, type.slice(0, type.size - 1))
+        val inner = oneRemoteValidator(source, type.slice(0, type.size - 1), complete)
         oneRemoteAppend(source, "fun $name(json: Json): bool = json.isNull() || $inner(json)\n")
         return name
     }
@@ -469,7 +477,7 @@ compile fun oneRemoteValidator(var source: OneRemoteSource, type: string): strin
     val head = type.slice(0, open)
     val arguments = if (open < type.size) oneRemoteArguments(type.slice(open + 1, type.size - 1)) else []
     if (head == "array" || head == "Map") {
-        val inner = oneRemoteValidator(source, arguments[if (head == "array") 0 else 1])
+        val inner = oneRemoteValidator(source, arguments[if (head == "array") 0 else 1], complete)
         val shape = if (head == "array") "json.isArray()" else "json.isObject()"
         oneRemoteAppend(source, "fun $name(json: Json): bool {\n    if (!$shape) return false\n    for (value in json.values) if (!$inner(value)) return false\n    true\n}\n")
         return name
@@ -487,7 +495,8 @@ compile fun oneRemoteValidator(var source: OneRemoteSource, type: string): strin
     while (index < compilerClassFieldCount(declaration)) {
         val field = compilerClassFieldName(declaration, index)
         val fieldType = oneRemoteSubstitute(compilerClassFieldType(declaration, index), parameters, arguments)
-        val valid = oneRemoteValidator(source, fieldType)
+        val valid = oneRemoteValidator(source, fieldType, complete)
+        if (complete) checks = "$checks    if (!json.has(\"$field\")) return false\n"
         if (valid != "oneRemoteValidOther") checks = "$checks    if (json.has(\"$field\") && !$valid(oneRemoteField(json, \"$field\"))) return false\n"
         index = index + 1
     }
@@ -570,9 +579,10 @@ compile fun oneRemoteWriteClients(var source: OneRemoteSource): void {
         val result = oneRemoteNormal(compiler.resultType(function))
         val spelled = oneRemoteSpell(source, result)
         val decode = oneRemoteCodec(source, result, false, "$route: result")
+        val validate = oneRemoteValidator(source, result, true)
         val body = if (keys == "") "oneRemoteObjectEmpty()" else "jsonObject([$keys], [$values])"
-        oneRemoteAppend(source, "@noinline\nfun oneRemoteSendTo_$route($parameters): int {\n    var oneRemoteArguments = OneRemoteBody()\n$fill    oneRemoteBodySend(oneRemoteArguments, services, base, \"$route\")\n}\nfun oneRemoteDecode_$route(json: Json): $spelled = $decode(json)\n")
-        oneRemoteAppend(source, "fun oneRemoteCall_$route($parameters): OneRemote<$spelled> = oneRemoteSend<$spelled>(services, base, \"$route\", $body, $decode)\n")
+        oneRemoteAppend(source, "@noinline\nfun oneRemoteSendTo_$route($parameters): int {\n    var oneRemoteArguments = OneRemoteBody()\n$fill    oneRemoteBodySend(oneRemoteArguments, services, base, \"$route\")\n}\nfun oneRemoteDecode_$route(json: Json): OneRemoteResult<$spelled> = oneRemoteChecked<$spelled>(OneRemoteReply(200, \"ok\", \"\", json), $decode, $validate)\nfun oneRemoteDecode_$route(reply: OneRemoteReply): OneRemoteResult<$spelled> = oneRemoteChecked<$spelled>(reply, $decode, $validate)\n")
+        oneRemoteAppend(source, "fun oneRemoteCall_$route($parameters): OneRemote<$spelled> = oneRemoteSend<$spelled>(services, base, \"$route\", $body, $decode, $validate)\n")
     }
     return
 }
@@ -712,7 +722,8 @@ compile fun oneRemoteCallParse(cursor: ParserCursor): SyntaxExpression {
 
 #compilerRegisterSubparser("remoteCall", oneRemoteCallParse)
 
-// `$remoteDecode(reply.json, contract.function())`: that route's result. The call only names the route.
+// `$remoteDecode(reply, contract.function())`: a checked result. Accepts either
+// OneRemoteReply (preserves HTTP failures/status) or Json (assumes HTTP200).
 compile fun oneRemoteDecodeParse(cursor: ParserCursor): SyntaxExpression {
     parserExpect(cursor, "(")
     parserRawSkipWhitespace(cursor)

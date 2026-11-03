@@ -49,5 +49,5 @@ fun main: int {
         oneLayoutRescroll(box, scroll, "r")
         expectEqual(dump(onePaintFrame(box, 300, 400)), fresh(screen("Add", 1), t, scroll), "rescrolled")
     }
-    0
+    testsPassed()
 }
