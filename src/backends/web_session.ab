@@ -436,7 +436,8 @@ class OneLiveSession(
 fun oneLiveEventBegin(var session: OneLiveSession, m: Json): bool {
     if (!m.has("n") && !m.has("u")) return true
     val id = m.getString("u")
-    if (!m.get("n").intAvailable() || id.size < 1 || id.size > 128) return false
+    val number = m.get("n")
+    if (!number.isNumber() || !number.asNumber().integer || !number.intAvailable() || !m.get("u").isString() || id.size < 1 || id.size > 128) return false
     val n = m.get("n").asInt()
     if (n < 1 || n > 9007199254740991) return false
     if (n <= session.eventFrontier) { session.changed = true; return false }
@@ -462,7 +463,7 @@ fun oneSessionMessage(var session: OneLiveSession, theme: Theme, m: Json): void 
     else if (kind == "hello") {
         session.htmlSent = ""
         session.cssSent = 0
-        session.eventAckSent = 0
+        session.eventAckSent = -1
         session.changed = true
         if (m.get("w").intAvailable()) {
             session.width = m.get("w").asInt()
@@ -511,7 +512,7 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
     session.htmlSent = markup
     val keys = ["t", "r", "css", "title"]
     val values = [jsonString(if (session.canvas) "frame" else "patch"), jsonInteger(session.revision), jsonString(css), jsonString(session.title)]
-    if (frontier > 0) {
+    if (frontier > 0 || session.eventAckSent < 0) {
         keys.append("a")
         values.append(jsonInteger(frontier))
         session.eventAckSent = frontier
