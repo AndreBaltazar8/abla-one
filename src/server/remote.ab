@@ -204,7 +204,23 @@ fun oneRemoteParseF64(text: string): f64 {
 // before analysis) writes plain Abla: one encoder and decoder per type, and for each
 // `@server` function either the client call (a contract) or a route (its real body).
 
-compile class OneRemoteSource(var code: string, val seen: array<string>, val problems: array<string>, val prefixes: array<string>, val classes: array<string>, val spellings: array<string>)
+compile class OneRemoteSource(var code: string, val seen: array<string>, val problems: array<string>, val prefixes: array<string>, val classes: array<string>, val spellings: array<string>, val parts: array<string>)
+
+// Keep complete declarations (including annotations) together. A program can have more
+// than ablac's 1 MiB per-module limit; individual generated units stay below 512 KiB.
+// Reserve compiler module slots for other transforms, such as the server lock.
+compile fun oneRemoteAppend(var source: OneRemoteSource, declaration: string): void {
+    if (declaration.size > 524288) {
+        source.problems.append("remote declaration exceeds 512 KiB; split this data shape or route")
+        return
+    }
+    if (source.code.size + declaration.size > 524288) {
+        source.parts.append(source.code)
+        source.code = ""
+    }
+    source.code = "${source.code}$declaration"
+    return
+}
 
 compile fun oneRemoteHash(text: string): int {
     var value = 17
@@ -367,7 +383,7 @@ compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool,
     val helperKind = if (out) "Out" else "In"
     if (type.endsWith("?")) {
         val inner = oneRemoteCodec(source, type.slice(0, type.size - 1), out, path)
-        source.code = "${source.code}$signature = oneRemote${helperKind}Nullable($argument, $inner)\n"
+        oneRemoteAppend(source, "$signature = oneRemote${helperKind}Nullable($argument, $inner)\n")
         return name
     }
     var open = 0
@@ -377,14 +393,14 @@ compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool,
     if (head == "array") {
         val inner = oneRemoteCodec(source, arguments[0], out, "$path[]")
         // Reading, the loop is written out for each type: a shared generic would be copied per type anyway, with a closure.
-        if (out) source.code = "${source.code}$signature = oneRemoteOutArray(value, $inner)\n"
-        else source.code = "${source.code}fun $name(json: Json): $spelled {\n    val items: $spelled = []\n    val count = oneRemoteCount(json)\n    var index = 0\n    while (index < count) {\n        items.append($inner(oneRemoteAt(json, index)))\n        index = index + 1\n    }\n    items\n}\n"
+        if (out) oneRemoteAppend(source, "$signature = oneRemoteOutArray(value, $inner)\n")
+        else oneRemoteAppend(source, "fun $name(json: Json): $spelled {\n    val items: $spelled = []\n    val count = oneRemoteCount(json)\n    var index = 0\n    while (index < count) {\n        items.append($inner(oneRemoteAt(json, index)))\n        index = index + 1\n    }\n    items\n}\n")
         return name
     }
     if (head == "Map") {
         if (arguments[0] != "string") source.problems.append("$path: maps need string keys")
         val inner = oneRemoteCodec(source, arguments[1], out, "$path{}")
-        source.code = "${source.code}$signature = oneRemote${helperKind}Map($argument, $inner)\n"
+        oneRemoteAppend(source, "$signature = oneRemote${helperKind}Map($argument, $inner)\n")
         return name
     }
     val declaration = compilerFindClass(head)
@@ -416,7 +432,7 @@ compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool,
     }
     val body = if (out) (if (keys == "") "oneRemoteObjectEmpty()" else "jsonObject([$keys], [$values])")
         else "$spelled($values)"
-    source.code = "${source.code}$signature = $body\n"
+    oneRemoteAppend(source, "$signature = $body\n")
     name
 }
 
@@ -430,7 +446,7 @@ compile fun oneRemoteIntValidator(var source: OneRemoteSource, type: string): st
     source.seen.append(name)
     if (type.endsWith("?")) {
         val inner = oneRemoteIntValidator(source, type.slice(0, type.size - 1))
-        source.code = "${source.code}fun $name(json: Json): bool = json.isNull() || $inner(json)\n"
+        oneRemoteAppend(source, "fun $name(json: Json): bool = json.isNull() || $inner(json)\n")
         return name
     }
     var open = 0
@@ -439,7 +455,7 @@ compile fun oneRemoteIntValidator(var source: OneRemoteSource, type: string): st
     val arguments = if (open < type.size) oneRemoteArguments(type.slice(open + 1, type.size - 1)) else []
     if (head == "array" || head == "Map") {
         val inner = oneRemoteIntValidator(source, arguments[if (head == "array") 0 else 1])
-        source.code = "${source.code}fun $name(json: Json): bool {\n    for (value in json.values) if (!$inner(value)) return false\n    true\n}\n"
+        oneRemoteAppend(source, "fun $name(json: Json): bool {\n    for (value in json.values) if (!$inner(value)) return false\n    true\n}\n")
         return name
     }
     val declaration = compilerFindClass(head)
@@ -459,7 +475,7 @@ compile fun oneRemoteIntValidator(var source: OneRemoteSource, type: string): st
         if (valid != "oneRemoteValidOther") checks = "$checks    if (!$valid(oneRemoteField(json, \"$field\"))) return false\n"
         index = index + 1
     }
-    source.code = "${source.code}fun $name(json: Json): bool {\n${checks}    true\n}\n"
+    oneRemoteAppend(source, "fun $name(json: Json): bool {\n${checks}    true\n}\n")
     name
 }
 
@@ -527,17 +543,25 @@ compile fun oneRemoteWriteClients(var source: OneRemoteSource): void {
         val spelled = oneRemoteSpell(source, result)
         val decode = oneRemoteCodec(source, result, false, "$route: result")
         val body = if (keys == "") "oneRemoteObjectEmpty()" else "jsonObject([$keys], [$values])"
-        source.code = "${source.code}@noinline\nfun oneRemoteSendTo_$route($parameters): int {\n    var oneRemoteArguments = OneRemoteBody()\n$fill    oneRemoteBodySend(oneRemoteArguments, services, base, \"$route\")\n}\nfun oneRemoteDecode_$route(json: Json): $spelled = $decode(json)\n"
-        source.code = "${source.code}fun oneRemoteCall_$route($parameters): OneRemote<$spelled> = oneRemoteSend<$spelled>(services, base, \"$route\", $body, $decode)\n"
+        oneRemoteAppend(source, "@noinline\nfun oneRemoteSendTo_$route($parameters): int {\n    var oneRemoteArguments = OneRemoteBody()\n$fill    oneRemoteBodySend(oneRemoteArguments, services, base, \"$route\")\n}\nfun oneRemoteDecode_$route(json: Json): $spelled = $decode(json)\n")
+        oneRemoteAppend(source, "fun oneRemoteCall_$route($parameters): OneRemote<$spelled> = oneRemoteSend<$spelled>(services, base, \"$route\", $body, $decode)\n")
     }
     return
 }
+
+compile fun oneRemoteDispatchName(part: int): string = if (part == 0) "oneServerDispatch" else "oneServerDispatch_$part"
 
 compile fun oneRemoteWriteRoutes(var source: OneRemoteSource): void {
     val functions = compiler.functionsAnnotated("server")
     if (functions.size == 0) return
     var cases = ""
+    var part = 0
     for (function in functions) {
+        if (cases.size > 65536) {
+            oneRemoteAppend(source, "fun ${oneRemoteDispatchName(part)}(route: string, body: Json): OneServerReply {\n$cases    ${oneRemoteDispatchName(part + 1)}(route, body)\n}\n")
+            part = part + 1
+            cases = ""
+        }
         val route = oneRemoteRoute(compiler.functionName(function))
         val full = oneRemoteFunctionName(function, route)
         val retired = oneRemoteRetiredReason(function)
@@ -559,8 +583,8 @@ compile fun oneRemoteWriteRoutes(var source: OneRemoteSource): void {
             cases = "$cases    if (route == \"$route\") {\n${checks}        return OneServerReply(200, jsonStringify($encode($full($arguments))))\n    }\n"
         }
     }
-    source.code = "${source.code}fun oneServerDispatch(route: string, body: Json): OneServerReply {\n$cases    OneServerReply(404, jsonStringify(jsonString(\"no such route\")))\n}\n"
-    if (compilerFindFunction("oneServerAnswer") >= 0) source.code = "${source.code}fun oneServerHandler(request: HttpRequest): HttpResponse = oneServerAnswer(request, oneServerDispatch)\n"
+    oneRemoteAppend(source, "fun ${oneRemoteDispatchName(part)}(route: string, body: Json): OneServerReply {\n$cases    OneServerReply(404, jsonStringify(jsonString(\"no such route\")))\n}\n")
+    if (compilerFindFunction("oneServerAnswer") >= 0) oneRemoteAppend(source, "fun oneServerHandler(request: HttpRequest): HttpResponse = oneServerAnswer(request, oneServerDispatch)\n")
     return
 }
 
@@ -570,18 +594,34 @@ compile fun oneRemoteReservedRoute(route: string): bool =
     route == "live" || route == "upload" || route == "cookies" || route == "host" || route == "canvas" || route == "fonts" || route == "thin"
 
 compile fun oneRemoteGenerate(): void {
-    var source = OneRemoteSource("", [], [], oneRemotePrefixes(), [], [])
+    var source = OneRemoteSource("", [], [], oneRemotePrefixes(), [], [], [])
     for (function in compiler.functionsAnnotated("server")) {
         val route = oneRemoteRoute(compiler.functionName(function))
         if (oneRemoteReservedRoute(route)) source.problems.append("route $route is reserved by the live server: rename it")
     }
     oneRemoteWriteClients(source)
     oneRemoteWriteRoutes(source)
-    if (source.code == "") return
+    oneRemotePublish(source)
+    return
+}
+
+compile fun oneRemotePublish(var source: OneRemoteSource): void {
+    if (source.code != "") source.parts.append(source.code)
+    if (source.parts.size > 48) source.problems.append("remote generation exceeds 48 module parts; split the contract")
+    if (source.parts.size == 0 && source.problems.size == 0) return
     var problem = ""
     for (p in source.problems) problem = "$problem    ${oneRemoteErrorName(p)}()\n"
-    if (problem != "") source.code = "${source.code}fun oneRemoteProblems(): void {\n$problem}\n"
-    compiler.generateModule("one_remote", source.code)
+    // Unsupported generation must remain a hard compile error, even if no calls
+    // are reachable: publish a small diagnostic unit, never just omit the routes.
+    if (problem != "") {
+        compiler.generateModule("one_remote_problems", "fun oneRemoteProblems(): void {\n$problem}\n")
+        return
+    }
+    var part = 0
+    for (code in source.parts) {
+        compiler.generateModule("one_remote_$part", code)
+        part = part + 1
+    }
     return
 }
 

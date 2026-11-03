@@ -1,0 +1,18 @@
+import "abla/compiler"
+import "../../../src/server/remote.ab"
+compile fun largeProbe(): void {
+    var source = OneRemoteSource("", [], [], oneRemotePrefixes(), [], [], [])
+    oneRemoteWriteClients(source)
+    oneRemoteWriteRoutes(source)
+    var bytes = source.code.size
+    var split = source.code.contains("oneServerDispatch_1")
+    for (part in source.parts) {
+        bytes = bytes + part.size
+        if (part.contains("oneServerDispatch_1")) split = true
+        if (part.size > 524288) compiler.generateModule("large_probe_bad_part", "fun badPart(): void { LARGE_PART_TOO_BIG() }\n")
+    }
+    if (bytes <= 1048576) compiler.generateModule("large_probe_small", "fun tooSmall(): void { LARGE_FIXTURE_MUST_EXCEED_ONE_MIB() }\n")
+    if (compiler.functionsAnnotated("server").size > 0 && !split) compiler.generateModule("large_probe_dispatch", "fun notSplit(): void { LARGE_DISPATCHER_MUST_SPLIT() }\n")
+    return
+}
+#compiler.transform(largeProbe)

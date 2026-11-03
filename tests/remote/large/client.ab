@@ -1,0 +1,13 @@
+import "abla/io"
+import "abla/json"
+import contract "../server/shop.ab" as shop
+import "../../../src/core/services.ab"
+import "../../../src/server/remote.ab"
+import "large_probe.ab"
+fun main: int {
+    var services = oneRecordedServices()
+    val id = $remoteCall(services, "https://example.test", shop.large400("x"))
+    val reply = $remoteDecode(jsonParse("{\"first\":\"x\",\"nested\":[{\"sku\":\"a\",\"count\":2}],\"optional\":null,\"counts\":{}}").value, shop.large400())
+    println("$id ${reply.nested[0].sku} ${reply.nested[0].count}")
+    0
+}
