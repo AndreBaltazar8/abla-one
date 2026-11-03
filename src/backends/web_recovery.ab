@@ -14,12 +14,13 @@ class OneRecoveryBatch(
     var committedAt: int = -1000,
     var retryAt: int = 0,
     var changes: int = 0,
-    var durable: int = 0
+    var durable: int = 0,
+    var forcedAt: int = 0
 ) {
     fun changed(immediate: bool = false): void {
         changes = changes + 1
         pending = true
-        if (immediate) forced = true
+        if (immediate) { forced = true; forcedAt = changes }
         return
     }
     fun due(now: int): bool = pending && now >= retryAt &&
@@ -32,7 +33,7 @@ class OneRecoveryBatch(
         committedAt = now
         retryAt = 0
         pending = generation < changes
-        if (!pending) forced = false
+        forced = pending && forcedAt > generation
         true
     }
     fun failed(now: int): void {

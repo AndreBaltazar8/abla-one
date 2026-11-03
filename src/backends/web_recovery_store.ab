@@ -4,9 +4,18 @@ import "web_recovery.ab"
 
 // Adapters distinguish unavailable (503), absent/expired (404), unauthorized
 // (403) and fenced/version-conflicting (409). No failure is a fresh session.
-class OneRecoveryResult(val status: int, val epoch: int = 0, val version: int = 0, val payload: string = "")
+class OneRecoveryResult(val status: int, val epoch: int = 0, val version: int = 0, val payload: string = "", val cookies: array<string> = [], val cookiesReady: bool = false)
 class OneRecoveryCompletion(val id: string, val payload: string)
 class OneRecoveryInbox(val status: int, val items: array<OneRecoveryCompletion> = [])
+class OneRecoveryFileJob(val request: int, val handle: string, val offset: int, val length: int, val deleting: bool, var admitted: bool = false)
+
+// A frozen candidate survives a pending/uncertain adapter result. New edits
+// may continue in memory, but cannot be mistaken for this candidate's commit.
+class OneRecoveryWrite(
+    val generation: int, val frontier: int, val payload: string,
+    val patch: string, val outbox: array<string>, val cookies: bool,
+    val consumed: array<string>, val activity: int, val active: bool
+)
 
 // The SDK never picks a database, key or bucket. Applications supply bounded
 // authenticated persistence and off-path blob IO. The save CAS must atomically
@@ -58,8 +67,18 @@ class OneRecoveryState(
     val consumed: array<string> = [],
     var inboxAt: int = -1000,
     var active: bool = true,
-    val pickers: Map<int, string> = Map()
+    val pickers: Map<int, string> = Map(),
+    val files: Map<int, OneRecoveryFileJob> = Map(),
+    var prepared: OneRecoveryWrite? = null,
+    var activitySerial: int = 0,
+    var committedActivity: int = -1,
+    var initialPayload: string = "",
+    var pendingPage: bool = false,
+    var inboxPending: bool = false
 )
+
+class OneRecoveryHttp(val owner: string, val ticket: int, val request: HttpRequest, var stage: string, var session: string, val started: int)
+val oneRecoveryHttp: array<OneRecoveryHttp> = []
 
 val oneRecoverySessions: Map<string, OneRecoveryState> = Map()
 
@@ -83,15 +102,19 @@ fun oneRecoveryReady(id: string): bool {
 fun oneRecoveryFileRead(id: string, request: int, handle: string, offset: int, length: int): int {
     val state = oneRecoverySessions.get(id)
     if (state == null || state.status != 200) return 503
-    val read = state.store.readFile
-    read(id, state.owner, state.epoch, request, handle, offset, length)
+    if (state.files.keys().size >= 64 || handle.size == 0 || handle.size > 256) return 429
+    state.files.set(request, OneRecoveryFileJob(request, handle, offset, length, false))
+    state.batch.changed(true)
+    202
 }
 
 fun oneRecoveryFileDelete(id: string, request: int, handle: string): int {
     val state = oneRecoverySessions.get(id)
     if (state == null || state.status != 200) return 503
-    val remove = state.store.deleteFile
-    remove(id, state.owner, state.epoch, request, handle)
+    if (state.files.keys().size >= 64 || handle.size == 0 || handle.size > 256) return 429
+    state.files.set(request, OneRecoveryFileJob(request, handle, 0, 0, true))
+    state.batch.changed(true)
+    202
 }
 
 fun oneRecoveryPickerBegin(id: string, request: int, kind: string): bool {

@@ -30,6 +30,7 @@ fun main: int {
     a.routeFrontier = 3
     val aState = OneRecoveryState("node-a", "test-proof", "test-owner", oneLiveNoRecovery())
     aState.pickers.set(40, "files")
+    aState.files.set(39, OneRecoveryFileJob(39, "opaque-handle", 100, 262144, false, true))
     oneRecoverySessions.set("node-a", aState)
     aQueue.eventContext = "opaque-operation"
     aQueue.eventOrdinal = 1
@@ -56,6 +57,10 @@ fun main: int {
     expect(b.changeFrontier == 12 && b.changeAnswer == 12, "lost durable typing patch is acknowledged on the new node")
     expect(b.routeFrontier == 3 && b.routeAnswer == 3, "lost durable navigation patch is acknowledged on the new node")
     expect(bState.pickers.get(40) == "files", "pending picker metadata survives owner loss")
+    val fileJob = bState.files.get(39)
+    expect(fileJob != null && fileJob.handle == "opaque-handle" && fileJob.offset == 100 && fileJob.length == 262144 && !fileJob.admitted, "file job descriptors survive owner loss and require idempotent readmission")
+    val badJob = jsonObject(["id", "handle", "offset", "length", "delete"], [jsonInteger(39), jsonString("opaque-handle"), jsonInteger(0), jsonInteger(262145), jsonBoolean(false)])
+    expect(oneCheckpointRead(jsonStringify(replace(saved, "files", jsonArray([badJob])))) == null, "restored file reads cannot bypass the chunk bound")
     expect(bQueue.eventContext == "opaque-operation" && bQueue.requestContexts.get(40) == "opaque-operation/r1", "opaque pending-operation ancestry survives without raw HTTP requests")
     expect(bQueue.storage.get("test-session") == "fresh-credential", "authorization hydration wins over old checkpoint credentials")
     expect(b.changed && b.htmlSent == "" && b.cssSent == 0, "restored session sends a full fresh authorized render")

@@ -27,7 +27,7 @@ const check = (condition, label) => { assert(condition, label); proofs++; consol
 const start = async name => {
   const portFile = path.join(directory, `${name}-${children.length}.port`);
   const log = fs.openSync(path.join(directory, `${name}-${children.length}.log`), 'w');
-  const child = spawn(executable, [], {cwd: process.cwd(), env: {...process.env, ONE_RECOVERY_TEST_DIR: directory, ONE_TEST_PORT_FILE: portFile, ONE_TEST_PORT: '0'}, stdio: ['ignore', log, log]});
+  const child = spawn(executable, [], {cwd: process.cwd(), env: {...process.env, ONE_RECOVERY_TEST_DIR: directory, ONE_RECOVERY_TEST_ASYNC_MS: '150', ONE_TEST_PORT_FILE: portFile, ONE_TEST_PORT: '0'}, stdio: ['ignore', log, log]});
   fs.closeSync(log);
   children.push(child);
   await wait(() => {
@@ -110,6 +110,26 @@ try {
   check(writes <= Math.ceil(elapsed / 1000) + 1 && writes < 15, `typing250 edits: ${writes} durable writes in${elapsed}ms`);
   check(checkpoint().frontier === 250 && checkpoint().typed === 250, 'event and input acknowledgements name the durable typing frontier');
 
+  const openedTab = context.waitForEvent('page');
+  await page.evaluate(() => window.open('/recovery', '_blank'));
+  const second = await openedTab;
+  await second.waitForSelector('html[data-one-ready]');
+  const secondBoot = await second.evaluate(() => ({s: window.__one.s, proof: window.__one.proof}));
+  check(secondBoot.s !== boot.s && await second.getByRole('textbox').inputValue() === '', 'new tab with cloned sessionStorage starts its own draft');
+  await second.getByRole('textbox').fill('separate tab draft');
+  await wait(() => JSON.parse(JSON.parse(fs.readFileSync(path.join(directory, `${secondBoot.s}.json`), 'utf8')).payload).app.draft === 'separate tab draft', 'second tab durable draft');
+  // Deterministically poison the former origin-wide handoff. Both tabs must
+  // recover their own claims despite the same cookies accompanying each GET.
+  await context.addCookies([{name: 'one_resume', value: secondBoot.s, url: base}, {name: 'one_resume_proof', value: secondBoot.proof, url: base}]);
+  await Promise.all([page.reload(), second.reload()]);
+  await Promise.all([page.waitForSelector('html[data-one-ready]'), second.waitForSelector('html[data-one-ready]')]);
+  check(await page.evaluate(() => window.__one.s) === boot.s && await second.evaluate(() => window.__one.s) === secondBoot.s && await page.getByRole('textbox').inputValue() === 'ação 📝 249' && await second.getByRole('textbox').inputValue() === 'separate tab draft', 'simultaneous reloads ignore shared resume cookies and retain per-tab drafts');
+  const claim = await page.evaluate(() => JSON.parse(sessionStorage.getItem('one:claim:/')));
+  check(Object.keys(claim).sort().join(',') === 'proof,s', 'browser claim storage contains only opaque session ID and proof');
+  await second.close();
+  // The explicit simultaneous reload above adds one document navigation.
+  navigations--;
+
   socketNode = 'a';
   await kill(nodes.get('b'));
   await wait(() => row().epoch >= 3 && page.evaluate(() => !document.documentElement.hasAttribute('data-one-offline')), 'node A recovers dead node B');
@@ -126,12 +146,19 @@ try {
   check(Buffer.from(cookie.value, 'base64').toString() === JSON.stringify('cookie-value') && cookie.httpOnly, 'another node reads latest durable cookie storage and retains HttpOnly');
   check(requests.some(request => request.url.startsWith('/one/cookies') && request.port === nodes.get('b').port), 'cookie request reaches a node without the attached app');
 
+  fs.writeFileSync(path.join(directory, 'hold-reads'), '1');
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', {name: 'Pick file', exact: true}).click();
   await (await chooser).setFiles({name: 'ação.txt', mimeType: 'text/plain', buffer: Buffer.from('shared opaque bytes ç')});
+  await wait(() => checkpoint().files?.length === 1 && checkpoint().app.reading > 0, 'pending file read descriptor is durable before owner loss');
+  socketNode = 'b';
+  await kill(nodes.get('a'));
+  fs.unlinkSync(path.join(directory, 'hold-reads'));
   await page.getByText('Read bytes: shared opaque bytes ç', {exact: true}).waitFor();
+  check(checkpoint().app.reading === 0 && checkpoint().files.length === 0, 'pending file read is resubmitted on the next owner and consumed with its checkpoint');
   check(requests.some(request => request.url.startsWith('/one/upload') && request.port === nodes.get('b').port), 'upload completes on a different node and attached owner reads its opaque handle');
   check(navigations === 1, 'cookie and upload recovery keep the document alive');
+  await start('a');
 
   pageNode = 'b'; socketNode = 'b';
   await page.reload();
@@ -155,18 +182,67 @@ try {
   await stored('unacked during outage');
   check(navigations === 2 && await page.getByRole('textbox').inputValue() === 'unacked during outage', 'unacknowledged typing replays on a new owner without reload or input loss');
 
+  fs.writeFileSync(path.join(directory, 'unavailable'), '1');
+  await page.evaluate(() => {
+    const field = document.querySelector('input');
+    for (let i = 0; i < 600; i++) {
+      field.value = 'outage burst ' + i;
+      field.dispatchEvent(new Event('input', {bubbles: true}));
+    }
+  });
+  await page.locator('[data-one-backpressure]').waitFor({timeout: 10000});
+  check(await page.getByRole('textbox').inputValue() === 'outage burst 599', 'full replay buffer keeps the latest draft during a shared-store outage');
+  fs.unlinkSync(path.join(directory, 'unavailable'));
+  await stored('outage burst 599');
+  await page.locator('[data-one-backpressure]').waitFor({state: 'hidden', timeout: 15000});
+  check(await page.getByRole('textbox').inputValue() === 'outage burst 599', 'backpressure drains the retained draft after the store recovers');
+
   await start('b'); socketNode = 'b';
   await fetch(`http://127.0.0.1:${nodes.get('a').port}/arm-kill`, {headers: {'X-Test-User': 'alice'}});
   await page.getByRole('button', {name: 'Commit once', exact: true}).click();
   await page.getByText('Committed mutations: 1', {exact: true}).waitFor({timeout: 15000});
   const business = JSON.parse(fs.readFileSync(path.join(directory, 'business.json'), 'utf8'));
   check(business.count === 1 && Object.keys(business.seen).length === 1, 'death after business commit before checkpoint replays one opaque operation key');
-  check(navigations === 2 && await page.getByRole('textbox').inputValue() === 'unacked during outage', 'business replay preserves route, view and draft without page reload');
+  check(navigations === 2 && await page.getByRole('textbox').inputValue() === 'outage burst 599', 'business replay preserves route, view and draft without page reload');
 
   const foreign = await fetch(`${base}/one/cookies?s=${boot.s}`, {method: 'POST', headers: {'X-Test-User': 'bob', 'X-One-Proof': boot.proof}});
   check(foreign.status === 403, 'foreign account cannot read cookie or recovery storage with another tab capability');
   const tampered = await fetch(`${base}/one/cookies?s=${boot.s}`, {method: 'POST', headers: {'X-Test-User': 'alice', 'X-One-Proof': '0'.repeat(64)}});
   check(tampered.status === 403, 'tampered tab capability is refused');
+
+  const rawContext = await browser.newContext();
+  await rawContext.addCookies([{name: 'test-user', value: 'alice', url: base}]);
+  const rawPage = await rawContext.newPage();
+  await rawPage.route('**/one/host.js', route => route.abort());
+  await rawPage.goto(`${base}/recovery`);
+  const rawBoot = await rawPage.evaluate(() => window.__one);
+  const rawPath = path.join(directory, `${rawBoot.s}.json`);
+  const rawCheckpoint = JSON.parse(JSON.parse(fs.readFileSync(rawPath, 'utf8')).payload);
+  const field = rawCheckpoint.maps.at(-1).events.find(event => event.place.endsWith('#onChange'));
+  fs.rmSync(path.join(directory, 'restoring'), {force: true});
+  fs.writeFileSync(path.join(directory, 'hold-ready'), '1');
+  fs.writeFileSync(path.join(directory, 'attach-conflict'), '1');
+  await rawPage.evaluate(boot => new Promise(resolve => {
+    window.rawFrames = [];
+    window.rawSocket = new WebSocket(`${location.origin.replace('http', 'ws')}/one/live?s=${boot.s}`);
+    rawSocket.onmessage = message => rawFrames.push(JSON.parse(message.data));
+    rawSocket.onopen = () => { rawSocket.send(JSON.stringify({t: 'hello', proof: boot.proof, r: boot.r, w: 1280})); resolve(); };
+  }), rawBoot);
+  await pause(500);
+  check(!fs.existsSync(path.join(directory, 'restoring')) && await rawPage.evaluate(() => rawFrames.length === 0 && rawSocket.readyState === WebSocket.OPEN), 'attach conflict holds the original recovery claim without opening a fresh app');
+  fs.unlinkSync(path.join(directory, 'attach-conflict'));
+  await wait(() => fs.existsSync(path.join(directory, 'restoring')), 'restore reaches deliberately delayed hydration');
+  await rawPage.evaluate(({saved, field}) => {
+    rawSocket.send(JSON.stringify({t: 'event', r: saved.revision, id: field.id, v: 'injected before authorization', c: saved.typed + 1, n: saved.frontier + 1, u: 'crafted-before-ready'}));
+    rawSocket.send(JSON.stringify({t: 'route', p: '/recovery/other', e: 'forged-entry', n: saved.asked + 1}));
+  }, {saved: rawCheckpoint, field});
+  await pause(300);
+  check(await rawPage.evaluate(() => rawFrames.length) === 0, 'crafted input and route frames receive no patch or acknowledgement before hydration');
+  fs.unlinkSync(path.join(directory, 'hold-ready'));
+  await wait(() => rawPage.evaluate(() => rawFrames.some(frame => frame.t === 'patch')), 'authorized restored app emits first patch');
+  const hydrated = JSON.parse(JSON.parse(fs.readFileSync(rawPath, 'utf8')).payload);
+  check(hydrated.app.draft === '' && hydrated.route === '/recovery' && hydrated.frontier === 0 && hydrated.asked === 0, 'server rejects pre-hydration controls without changing draft, route or durable frontier');
+  await rawContext.close();
   console.log(`PASS recovery: ${proofs} checks`);
 } finally {
   if (browser) await browser.close();

@@ -893,7 +893,10 @@
       document.documentElement.setAttribute('data-one-offline', '');
       if (manualRecovery) return;
       // An unknown or ended session needs a fresh page, unless one is already on its way.
-      if (e.code === 1008) return setTimeout(() => location.reload(), leaving ? 3000 : 0);
+      if (e.code === 1008) {
+        if (boot.proof) { try { sessionStorage.removeItem(claimKey); } catch (_) {} }
+        return setTimeout(() => location.reload(), leaving ? 3000 : 0);
+      }
       setTimeout(connect, Math.min(1000 * 2 ** retry++, 10000));
     };
   };
@@ -915,9 +918,11 @@
   // asks for the page right after the click, and a link that turns out to be a download stays here.
   let followed = 0;
   const resume = () => {
-    if (!followed) {
+    if (boot.proof) {
+      // No draft, input, token or checkpoint is persisted in the browser.
+      try { sessionStorage.setItem(claimKey, JSON.stringify({s: boot.s, proof: boot.proof})); } catch (_) {}
+    } else if (!followed) {
       document.cookie = `one_resume=${boot.s}; path=${basePath}; max-age=15; samesite=lax`;
-      if (boot.proof) document.cookie = `one_resume_proof=${boot.proof}; path=${basePath}; max-age=15; samesite=lax`;
     }
   };
   document.addEventListener('click', (e) => {
@@ -948,6 +953,34 @@
       else target.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
     }
   }
+  const claimKey = `one:claim:${basePath}`;
+  let claimChannel = null;
+  const connectTab = async () => {
+    if (!boot.proof) { connect(); return; }
+    const navigation = performance.getEntriesByType('navigation')[0];
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem(claimKey)); } catch (_) {}
+    const valid = saved && /^[a-f0-9]{32}$/.test(saved.s) && /^[a-f0-9]{64}$/.test(saved.proof);
+    const restoring = valid && navigation && ['reload', 'back_forward'].includes(navigation.type);
+    let occupied = false;
+    // Advisory clone detection only. Server authentication and the monotonic
+    // owner epoch remain authoritative even if this channel is unavailable.
+    try {
+      claimChannel = new BroadcastChannel(`one:tabs:${basePath}`);
+      claimChannel.onmessage = ({data}) => {
+        if (!data || typeof data.s !== 'string') return;
+        if (data.t === 'probe' && data.s === boot.s && !leaving) claimChannel.postMessage({t: 'occupied', s: boot.s});
+        if (data.t === 'occupied' && restoring && data.s === saved.s) occupied = true;
+      };
+      if (restoring) {
+        claimChannel.postMessage({t: 'probe', s: saved.s});
+        await new Promise(resolve => setTimeout(resolve, 75));
+      }
+    } catch (_) {}
+    if (restoring && !occupied) { boot.s = saved.s; boot.proof = saved.proof; }
+    resume();
+    connect();
+  };
   if (boot.wasm) run().catch((error) => { console.error(error); document.documentElement.setAttribute('data-one-offline', ''); });
-  else connect();
+  else connectTab();
 })();

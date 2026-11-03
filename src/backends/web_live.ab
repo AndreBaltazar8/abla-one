@@ -48,7 +48,9 @@ class OneLiveSlot(
     // A socket of the application's (OneLiveSockets), not a page's.
     var appSocket: bool,
     var recoveryRequest: HttpRequest? = null,
-    var awaitingRecovery: bool = false
+    var awaitingRecovery: bool = false,
+    var recoveryMessage: string = "",
+    var recoveryStarted: int = 0
 )
 
 class OneLiveOptions(
@@ -279,6 +281,8 @@ fun OneLiveServer.closeSlot(slot: int): void {
     slots[slot].closing = false
     slots[slot].recoveryRequest = null
     slots[slot].awaitingRecovery = false
+    slots[slot].recoveryMessage = ""
+    slots[slot].recoveryStarted = 0
     return
 }
 
@@ -403,6 +407,7 @@ fun OneLiveServer.httpWithPeer(slot: int): void {
             if (!oneRecoveryIdentifier(id)) { queue(slot, httpText("Invalid session", 400).render()); slots[slot].closing = true; return }
             slots[slot].recoveryRequest = request
             slots[slot].awaitingRecovery = true
+            slots[slot].recoveryStarted = oneLiveNow()
             slots[slot].upgraded = true
             slots[slot].session = id
             queue(slot, webSocketUpgradeResponse(request).render())
@@ -463,6 +468,10 @@ fun OneLiveServer.httpWithPeer(slot: int): void {
         else if (request.method == "GET" && !oneLiveReserved(request.path) && isPage(request)) page(request)
         else handler(request)
     val rendered = if (request.method == "HEAD") response.renderHead() else response.render()
+    if (response.status == 202 && response.header("X-One-Recovery-Pending") != "") {
+        recoveryWaitHttp(slot, request, response)
+        return
+    }
     queue(slot, rendered)
     slots[slot].closing = true
     return
@@ -545,15 +554,9 @@ fun oneLiveFontName(name: string): bool = name == "Inter-400.ttf" || name == "In
 fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val route = oneLiveRoute(request)
     var index = if (recovery.enabled) -1 else resumable(request, oneLiveCookie(request, "one_resume"))
-    if (recovery.enabled) {
-        val id = oneLiveCookie(request, "one_resume")
-        val proof = oneLiveCookie(request, "one_resume_proof")
-        if (oneRecoveryIdentifier(id) && oneRecoveryIdentifier(proof)) {
-            val opened = recoveryOpen(request, id, proof)
-            if (opened.status == 503) return httpText("Session storage unavailable", 503)
-            if (opened.status == 200) index = opened.index
-        }
-    }
+    // Recovery claims belong to a browser tab, never origin-wide cookies.
+    // SSR stays readable and starts fresh; a reloaded tab presents its opaque
+    // claim over the authenticated WebSocket before any controls are accepted.
     if (index < 0) {
         val id = oneLiveSessionId()
         val queueIndex = oneLiveQueueIndex(id)
@@ -572,6 +575,11 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
         // The person asked for the page again: what the app read earlier may have changed since, so it hears of it.
         if (!recovery.enabled) sessions[index].receive("pageLoad", "")
     }
+    pageRender(request, index)
+}
+
+fun OneLiveServer.pageRender(request: HttpRequest, index: int): HttpResponse {
+    val route = oneLiveRoute(request)
     sessions[index].lastSeen = oneLiveNow()
     // The remembered width improves the SSR/no-JS guess. It does not acknowledge
     // the layout of this browser: scripted pages still wait for their viewport.
@@ -582,6 +590,8 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     // so the first paint shows content rather than a loading state.
     var rounds = 0
     while (rounds < 16 && pump(index)) rounds = rounds + 1
+    val restoring = oneRecoverySessions.get(sessions[index].id)
+    if (restoring != null && restoring.restored && !restoring.ready) return oneRecoveryPendingResponse("render", sessions[index].id)
     // The first paint is always a document (canvas pages show it until the
     // canvas takes over); a canvas session switches after.
     sessions[index].canvas = false
@@ -595,6 +605,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     sessions[index].cssSent = sessions[index].css.rules.size
     sessions[index].htmlSent = markup
     val recoveryStatus = recoveryStart(request, index)
+    if (recoveryStatus == 202) return oneRecoveryPendingResponse("render", sessions[index].id)
     if (recoveryStatus != 200) return httpText("Session storage unavailable", recoveryStatus)
     val recoverable = oneRecoverySessions.get(sessions[index].id)
     val proof = if (recoverable != null) ",\"proof\":${oneLiveScriptString(recoverable.proof)}" else ""
@@ -676,6 +687,7 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     val before = sessions[index].eventFrontier
     if (persisted != null) {
         val kind = m.getString("t")
+        if (!persisted.ready && kind != "hello" && kind != "viewport") return
         if (kind != "hello" && kind != "event" && kind != "route" && kind != "viewport" && kind != "scroll" && kind != "pick-error") return
         if (kind == "event" && (!m.has("n") || !m.has("u"))) return
     }
@@ -684,6 +696,7 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     if (persisted != null && (m.getString("t") != "event" || sessions[index].eventFrontier > before)) {
         persisted.batch.changed(m.getString("t") == "hello" || m.getString("t") == "route" || m.getString("t") == "pick-error" || (m.getString("t") == "event" && m.get("id").asInt() <= oneChangeBase))
         persisted.active = true
+        persisted.activitySerial = persisted.activitySerial + 1
     }
     return
 }
@@ -737,12 +750,19 @@ fun oneLiveExecuteWithoutPeer(handler: (HttpRequest) -> HttpResponse, item: OneL
         i = i + 1
     }
     val headers: array<HttpHeader> = []
-    for (h in r.headers) if (oneLowerAscii(h.name) != "x-one-live-operation") headers.append(HttpHeader(oneLowerAscii(h.name), h.value))
+    for (h in r.headers) {
+        val name = oneLowerAscii(h.name)
+        if (name != "x-one-live-operation" && name != "x-one-live-session" && name != "x-one-live-epoch") headers.append(HttpHeader(name, h.value))
+    }
     if (item.operation != "") headers.append(HttpHeader("x-one-live-operation", item.operation))
+    if (item.session != "" && item.epoch > 0) {
+        headers.append(HttpHeader("x-one-live-session", item.session))
+        headers.append(HttpHeader("x-one-live-epoch", "${item.epoch}"))
+    }
     var body = r.body
     if (r.bodyBase64 != "") body = base64Decode(r.bodyBase64)
     if (r.bodyFile != "") {
-        val bytes = oneLiveFileBytes(r.bodyFile)
+        val bytes = oneLiveFileBytesFor(item.session, r.bodyFile)
         if (bytes == null) return oneResponsePayload(item.id, 0, "", "unknown file handle")
         body = bytes
     }
@@ -802,6 +822,16 @@ fun oneLiveFileBytes(handle: string): string? {
     null
 }
 
+fun oneLiveFileBytesFor(session: string, handle: string): string? {
+    if (session == "") return oneLiveFileBytes(handle)
+    var i = 0
+    while (i < oneLiveQueueIds.size) {
+        if (oneLiveQueueIds[i] == session) return oneLiveQueueList[i].fileBytes.get(handle)
+        i = i + 1
+    }
+    null
+}
+
 // One loop iteration after IO: broadcasts, due timers, platform work, then a
 // patch for each connected session whose page changed.
 // A dependency may defer due timers without pausing HTTP, pushes, platform
@@ -809,6 +839,7 @@ fun oneLiveFileBytes(handle: string): string? {
 fun oneLiveAllTimersReady(): (OneLiveSession) -> bool = { session: OneLiveSession -> true }
 
 fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimersReady()): void {
+    if (recovery.enabled) recoveryPending()
     if (oneLiveBroadcasts.size > 0) {
         var i = 0
         while (i + 1 < oneLiveBroadcasts.size) {
@@ -824,6 +855,8 @@ fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimer
     val now = oneLiveNow()
     var index = 0
     while (index < sessions.size) {
+        val recoveryState = oneRecoverySessions.get(sessions[index].id)
+        if (recoveryState != null && recoveryState.pendingPage) { index = index + 1; continue }
         if (timersReady(sessions[index])) sessions[index].queue.fireTimers(now)
         var rounds = 0
         while (rounds < 8 && pump(index)) rounds = rounds + 1
@@ -862,7 +895,14 @@ fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimer
 fun OneLiveServer.nextTimeout(timersReady: (OneLiveSession) -> bool = oneLiveAllTimersReady()): int {
     var timeout = 1000
     val now = oneLiveNow()
+    for (pending in oneRecoveryHttp) if (pending.owner == recoveryOwner) timeout = 10
+    for (slot in slots) if (slot.awaitingRecovery && slot.recoveryMessage != "") timeout = 10
     for (session in sessions) {
+        val recoveryState = oneRecoverySessions.get(session.id)
+        if (recoveryState != null && (recoveryState.prepared != null || recoveryState.inboxPending || recoveryState.status == 202)) {
+            val pending = if (recoveryState.batch.retryAt > now) recoveryState.batch.retryAt - now else 10
+            if (pending < timeout) timeout = pending
+        }
         if (timersReady(session)) {
             val wait = session.queue.nextTimer(now)
             if (wait < timeout) timeout = wait

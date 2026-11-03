@@ -27,6 +27,16 @@ fun oneCheckpointMap(map: OneEventMap): Json {
     jsonObject(["screen", "events"], [jsonInteger(map.screen), jsonArray(events)])
 }
 
+fun oneCheckpointFiles(session: OneLiveSession): Json {
+    val items: array<Json> = []
+    val state = oneRecoverySessions.get(session.id)
+    if (state != null) for (id in state.files.keys()) {
+        val job = state.files.get(id)
+        if (job != null) items.append(jsonObject(["id", "handle", "offset", "length", "delete"], [jsonInteger(id), jsonString(job.handle), jsonInteger(job.offset), jsonInteger(job.length), jsonBoolean(job.deleting)]))
+    }
+    jsonArray(items)
+}
+
 fun oneCheckpointStringMap(map: Map<string, string>): Json {
     val keys: array<string> = []
     val values: array<Json> = []
@@ -41,8 +51,8 @@ fun oneCheckpoint(session: OneLiveSession, draft: Json): string {
     val maps: array<Json> = []
     for (map in session.maps) maps.append(oneCheckpointMap(map))
     jsonStringify(jsonObject(
-        ["v", "app", "route", "entry", "epoch", "revision", "nextId", "storage", "maps", "fenceFrom", "frontier", "typed", "asked", "operations", "pickers", "shown", "width", "height", "canvas"],
-        [jsonInteger(1), draft, jsonString(session.queue.routes.current()), jsonInteger(session.queue.routes.entry()), jsonInteger(session.queue.routes.epoch), jsonInteger(session.revision), jsonInteger(session.queue.nextId), oneCheckpointStringMap(session.queue.storage), jsonArray(maps), jsonInteger(session.fence.from), jsonInteger(session.eventFrontier), jsonInteger(session.changeFrontier), jsonInteger(session.routeFrontier), oneLiveOperationCheckpoint(session.queue), oneCheckpointPickers(session), jsonInteger(session.shown), jsonInteger(session.width), jsonInteger(session.height), jsonBoolean(session.canvas)]))
+        ["v", "app", "route", "entry", "epoch", "revision", "nextId", "storage", "maps", "fenceFrom", "frontier", "typed", "asked", "operations", "pickers", "shown", "width", "height", "canvas", "files"],
+        [jsonInteger(1), draft, jsonString(session.queue.routes.current()), jsonInteger(session.queue.routes.entry()), jsonInteger(session.queue.routes.epoch), jsonInteger(session.revision), jsonInteger(session.queue.nextId), oneCheckpointStringMap(session.queue.storage), jsonArray(maps), jsonInteger(session.fence.from), jsonInteger(session.eventFrontier), jsonInteger(session.changeFrontier), jsonInteger(session.routeFrontier), oneLiveOperationCheckpoint(session.queue), oneCheckpointPickers(session), jsonInteger(session.shown), jsonInteger(session.width), jsonInteger(session.height), jsonBoolean(session.canvas), oneCheckpointFiles(session)]))
 }
 
 fun oneCheckpointStringObject(value: Json): bool {
@@ -58,6 +68,17 @@ fun oneCheckpointValid(value: Json): bool {
     val protocol = oneLiveQueue()
     protocol.nextId = value.get("nextId").asInt()
     if (!oneLiveOperationRestore(protocol, value.get("operations"))) return false
+    if (value.has("files")) {
+        val files = value.get("files")
+        if (!files.isArray() || files.values.size > 64) return false
+        val seen: Map<int, bool> = Map()
+        for (job in files.values) {
+            if (!job.isObject() || !oneCheckpointCounter(job.get("id")) || job.getInt("id") == 0 || job.getInt("id") > protocol.nextId || seen.has(job.getInt("id"))) return false
+            if (!job.get("handle").isString() || job.getString("handle").size == 0 || job.getString("handle").size > 256 || !job.get("delete").isBoolean()) return false
+            if (!oneCheckpointCounter(job.get("offset")) || !oneCheckpointCounter(job.get("length")) || job.getInt("length") > 262144) return false
+            seen.set(job.getInt("id"), true)
+        }
+    }
     val pickers = value.get("pickers")
     if (!pickers.isArray() || pickers.values.size > oneRecoveryPickerLimit) return false
     val pending: Map<int, bool> = Map()
@@ -148,6 +169,8 @@ fun oneCheckpointRestore(var session: OneLiveSession, value: Json): void {
     if (state != null) {
         for (id in state.pickers.keys()) state.pickers.remove(id)
         for (picker in value.get("pickers").values) state.pickers.set(picker.get("id").asInt(), picker.get("kind").asString())
+        state.files.clear()
+        for (job in value.get("files").values) state.files.set(job.getInt("id"), OneRecoveryFileJob(job.getInt("id"), job.getString("handle"), job.getInt("offset"), job.getInt("length"), job.get("delete").asBoolean()))
     }
     return
 }

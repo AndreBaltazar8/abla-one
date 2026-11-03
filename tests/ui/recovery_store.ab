@@ -34,7 +34,17 @@ fun proofOwned(row: Json, owner: string, epoch: int): bool = row.isObject() &&
     row.getString("owner") == owner && row.getInt("epoch") == epoch && !row.get("revoked").asBoolean() && row.getInt("expires") > proofNow()
 fun proofResult(row: Json): OneRecoveryResult = OneRecoveryResult(200, row.getInt("epoch"), row.getInt("version"), row.getString("payload"))
 
+val proofDelays: Map<string, int> = Map()
+fun proofDelayed(key: string): bool {
+    val delay = oneParseInt(processEnvironmentOr("ONE_RECOVERY_TEST_ASYNC_MS", "0"), 0)
+    if (delay <= 0) return false
+    val started = proofDelays.get(key)
+    if (started == null) { proofDelays.set(key, proofNow()); return true }
+    proofNow() - started < delay
+}
+
 fun proofCreate(request: HttpRequest, id: string, proof: string, owner: string, payload: string): OneRecoveryResult {
+    if (proofDelayed("create/$id/$owner")) return OneRecoveryResult(202)
     if (!oneRecoveryIdentifier(id) || proofUser(request) == "") return OneRecoveryResult(403)
     val lock = proofDirectory().child("store.lock").fileLock()
     if (!lock.tryHold()) { proofRelease(lock); return OneRecoveryResult(503) }
@@ -46,6 +56,7 @@ fun proofCreate(request: HttpRequest, id: string, proof: string, owner: string, 
     if (ok) proofResult(row) else OneRecoveryResult(503)
 }
 fun proofInspect(request: HttpRequest, id: string, proof: string): OneRecoveryResult {
+    if (proofDelayed("inspect/$id/${hexEncode(sha256(proof))}/${proofUser(request)}")) return OneRecoveryResult(202)
     if (!oneRecoveryIdentifier(id)) return OneRecoveryResult(403)
     val lock = proofDirectory().child("store.lock").fileLock()
     if (!lock.tryHold()) { proofRelease(lock); return OneRecoveryResult(503) }
@@ -55,6 +66,8 @@ fun proofInspect(request: HttpRequest, id: string, proof: string): OneRecoveryRe
     result
 }
 fun proofAttach(request: HttpRequest, id: string, proof: string, owner: string): OneRecoveryResult {
+    if (proofDelayed("attach/$id/$owner")) return OneRecoveryResult(202)
+    if (proofDirectory().child("attach-conflict").exists()) return OneRecoveryResult(409)
     if (!oneRecoveryIdentifier(id)) return OneRecoveryResult(403)
     val lock = proofDirectory().child("store.lock").fileLock()
     if (!lock.tryHold()) { proofRelease(lock); return OneRecoveryResult(503) }
@@ -65,7 +78,15 @@ fun proofAttach(request: HttpRequest, id: string, proof: string, owner: string):
     proofRelease(lock)
     if (ok) proofResult(next) else OneRecoveryResult(503)
 }
+val proofPendingSaves: Map<string, int> = Map()
 fun proofSave(id: string, owner: string, epoch: int, version: int, payload: string, active: bool, consumed: array<string>): OneRecoveryResult {
+    val delay = oneParseInt(processEnvironmentOr("ONE_RECOVERY_TEST_ASYNC_MS", "0"), 0)
+    if (delay > 0) {
+        val key = "$id/$owner/$epoch/$version"
+        val started = proofPendingSaves.get(key)
+        if (started == null) { proofPendingSaves.set(key, proofNow()); return OneRecoveryResult(202) }
+        if (proofNow() - started < delay) return OneRecoveryResult(202)
+    }
     if (!oneRecoveryIdentifier(id) || payload.size > oneRecoveryCheckpointLimit) return OneRecoveryResult(403)
     if (proofDirectory().child("unavailable").exists()) return OneRecoveryResult(503)
     val lock = proofDirectory().child("store.lock").fileLock()
@@ -85,6 +106,7 @@ fun proofSave(id: string, owner: string, epoch: int, version: int, payload: stri
     if (ok) proofResult(next) else OneRecoveryResult(503)
 }
 fun proofFence(id: string, owner: string, epoch: int): int {
+    if (proofDelayed("fence/$id/$owner/$epoch")) return 202
     if (proofDirectory().child("unavailable").exists()) return 503
     val lock = proofDirectory().child("store.lock").fileLock()
     if (!lock.tryHold()) { proofRelease(lock); return 503 }
@@ -102,6 +124,7 @@ fun proofEnd(id: string, owner: string, epoch: int): int {
     if (ok) 200 else 409
 }
 fun proofInbox(id: string, owner: string, epoch: int): OneRecoveryInbox {
+    if (proofDelayed("inbox/$id/$owner/$epoch")) return OneRecoveryInbox(202)
     val lock = proofDirectory().child("store.lock").fileLock()
     if (!lock.tryHold()) { proofRelease(lock); return OneRecoveryInbox(503) }
     val row = proofLoad(id)
@@ -121,6 +144,7 @@ fun proofCompletion(row: Json, payload: string): Json {
 // File jobs in this stand-in are tiny local fixtures. Production callbacks
 // enqueue off-path S3 jobs and deliver their completion through the same inbox.
 fun proofRead(id: string, owner: string, epoch: int, request: int, handle: string, offset: int, count: int): int {
+    if (proofDirectory().child("hold-reads").exists()) return 202
     if (!oneRecoveryIdentifier(id) || !oneRecoveryIdentifier(handle)) return 403
     val lock = proofDirectory().child("store.lock").fileLock()
     if (!lock.tryHold()) { proofRelease(lock); return 503 }

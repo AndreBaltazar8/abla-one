@@ -35,6 +35,15 @@ fun main: int {
     expect(batch.due(6010), "a failed write retries after its backoff")
     expect(batch.saved(batch.changes, 6010) && batch.acknowledged(), "recovery acknowledges only after the write succeeds")
     expect(!batch.pending && !batch.forced && !batch.due(9000), "idle sessions cause no checkpoint writes")
+    val asynchronous = OneRecoveryBatch()
+    asynchronous.changed(true)
+    val forced = asynchronous.changes
+    asynchronous.changed()
+    asynchronous.saved(forced, 100)
+    expect(asynchronous.pending && !asynchronous.forced && !asynchronous.due(101), "a completed forced flush cannot force later ordinary edits to write per keystroke")
+    asynchronous.changed(true)
+    asynchronous.saved(forced + 1, 102)
+    expect(asynchronous.forced && asynchronous.due(102), "a newer submit arriving during a pending write keeps its forced flush")
     expect(oneRecoveryFileLimit * 4 == oneRecoveryFilesLimit && oneRecoveryPickerLimit == 4, "session upload policy retains approved aggregate and picker bounds")
     testsPassed()
 }

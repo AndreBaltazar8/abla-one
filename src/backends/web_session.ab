@@ -32,7 +32,7 @@ fun oneLiveResetClock(): void {
     return
 }
 
-class OneLiveRequest(val id: int, val request: OneRequest, val operation: string = "")
+class OneLiveRequest(val id: int, val request: OneRequest, val operation: string = "", val session: string = "", val epoch: int = 0)
 class OneLiveTimer(val id: int, val due: int)
 
 // A session's platform state, shared between the session and its services.
@@ -275,7 +275,8 @@ class OneLiveServices(val session: string) : OneServices {
         val id = nextId()
         val q = oneLiveQueueList[oneLiveQueueIndex(session)]
         val operation = q.requestContexts.get(id) ?? ""
-        q.request(OneLiveRequest(id, request, operation))
+        val recovery = oneRecoverySessions.get(session)
+        q.request(OneLiveRequest(id, request, operation, session, if (recovery != null) recovery.epoch else 0))
         id
     }
     fun secureRead(key: string): int {
@@ -312,7 +313,7 @@ class OneLiveServices(val session: string) : OneServices {
             val id = nextId()
             val count = if (length > 262144) 262144 else if (length < 0) 0 else length
             val status = oneRecoveryFileRead(session, id, file.handle, if (offset < 0) 0 else offset, count)
-            if (status != 200) complete(id, status, "", "File unavailable")
+            if (status != 200 && status != 202) complete(id, status, "", "File unavailable")
             return id
         }
         val bytes = oneLiveQueueList[oneLiveQueueIndex(session)].fileBytes.get(file.handle)
@@ -328,7 +329,7 @@ class OneLiveServices(val session: string) : OneServices {
         val id = nextId()
         if (oneRecoverySessions.has(session)) {
             val status = oneRecoveryFileDelete(session, id, file.handle)
-            if (status != 200) complete(id, status, "", "File unavailable")
+            if (status != 200 && status != 202) complete(id, status, "", "File unavailable")
             return id
         }
         complete(id, if (oneLiveQueueList[oneLiveQueueIndex(session)].removeFile(file.handle)) 204 else 404, "", "")
