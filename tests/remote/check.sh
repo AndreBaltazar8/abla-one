@@ -23,6 +23,12 @@ port=$(cat "$work/port")
 post() { curl -s -m 5 -o "$work/out" -w '%{http_code}' -X POST -d "$2" "http://127.0.0.1:$port/one/$1"; }
 check "route answers" "$(post orders '{"status":"open","limit":3}')" 200
 check "nested result" "$(grep -c '"sku":"a"' "$work/out")" 1
+check "fractional integer rejected" "$(post orders '{"status":"open","limit":23.5}')" 400
+check "validation error names the argument" "$(cat "$work/out")" '"invalid integer in limit"'
+check "string integer rejected" "$(post orders '{"status":"open","limit":"23"}')" 400
+check "overflow integer rejected" "$(post orders '{"status":"open","limit":9223372036854775808}')" 400
+check "nested fractional integer rejected" "$(post acceptOrder '{"order":{"id":1,"lines":[{"sku":"a","count":2.5}]}}')" 400
+check "nested integers accepted" "$(post acceptOrder '{"order":{"id":1,"lines":[{"sku":"a","count":2}]}}')" 200
 check "retired route" "$(post oldOrders '{}')" 410
 check "retired says why" "$(cat "$work/out")" '"use orders"'
 check "unknown route" "$(post nope '{}')" 404

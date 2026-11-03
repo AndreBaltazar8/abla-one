@@ -11,6 +11,9 @@ fun orders(status: string, limit: int): Page<Order> {
 }
 
 @server
+fun acceptOrder(order: Order): int = order.id
+
+@server
 fun ping(): string = "pong"
 
 @server
