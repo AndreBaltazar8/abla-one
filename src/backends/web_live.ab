@@ -96,6 +96,14 @@ fun oneLiveNoDefers(): (HttpRequest, int) -> bool {
 
 fun oneLiveNoStorage(): OneLiveStorage = OneLiveStorage({ request -> Map<string, string>() }, { request, key, value -> array<string>() }, { request, stored -> true })
 
+// Host-only context for an in-process service call. It is never decoded from
+// a browser message or request header, nor saved in a UI checkpoint. Cookie
+// bytes are transport input, not verified authentication: the app must validate
+// its own signed nonce/session. Synthetic HTTP requests retain no socket peer.
+class OneLiveBrowserContext(val cookie: string, val peerAddress: SocketPeerAddress? = null)
+class OneLiveCallContext(val requestId: int, val operation: string, val session: string, val epoch: int, val browser: OneLiveBrowserContext? = null)
+class OneLivePrivateRequests(val handle: (HttpRequest, OneLiveCallContext) -> HttpResponse)
+
 resource class OneLiveServer(
     val handler: (HttpRequest) -> HttpResponse,
     // Which requests are live pages (SSR + session) instead of handler requests:
@@ -120,7 +128,9 @@ resource class OneLiveServer(
     val recoveryOwner: string,
     // Pin the thin client to this running server. A later build may replace
     // the source tree, but must not change the protocol of an existing node.
-    val hostSource: string
+    val hostSource: string,
+    val privateRequests: OneLivePrivateRequests? = null,
+    val browserContexts: Map<string, OneLiveBrowserContext> = Map()
 ) {
     fun drop(): void {
         for (slot in slots) if (slot.descriptor >= 0) linuxTcpCloseDescriptor(slot.descriptor)
@@ -151,13 +161,21 @@ fun oneLiveServer(
     storage: OneLiveStorage = oneLiveNoStorage(),
     sockets: OneLiveSockets = oneLiveNoSockets(),
     defers: (HttpRequest, int) -> bool = oneLiveNoDefers(),
-    recovery: OneLiveRecoveryStore = oneLiveNoRecovery()
+    recovery: OneLiveRecoveryStore = oneLiveNoRecovery(),
+    privateRequests: OneLivePrivateRequests? = null
 ): OneLiveServer {
     val listener = tcpListenAddress(address, 1024)
     listener.setNonblocking()
     val poller = socketPoller()
     if (listener.descriptor >= 0 && poller.descriptor >= 0) poller.watchDescriptor(listener.descriptor)
-    OneLiveServer(handler, isPage, factory, theme, options, storage, sockets, defers, move(listener), move(poller), [], [], false, recovery, oneLiveSessionId(), linuxReadFile(options.hostScript,1048576))
+    OneLiveServer(handler, isPage, factory, theme, options, storage, sockets, defers, move(listener), move(poller), [], [], false, recovery, oneLiveSessionId(), linuxReadFile(options.hostScript,1048576), privateRequests, Map())
+}
+
+// Retain transport origin only when an app opted into the private callback.
+// Never use a Cookie header supplied by a renderer's OneRequest here.
+fun OneLiveServer.rememberBrowser(id: string,request: HttpRequest): void {
+    if(privateRequests!=null)browserContexts.set(id,OneLiveBrowserContext(request.header("cookie"),request.peerAddress))
+    return
 }
 
 // Claims the paths an app declares, as `isPage`: "/people", "/form/:n", "/docs/*".
@@ -297,6 +315,7 @@ fun OneLiveServer.endSession(index: int): void {
             slots[slot].closing = true
         }
     }
+    browserContexts.remove(id)
     oneLiveForget(id)
     oneMemoForget(id)
     val kept: array<OneLiveSession> = []
@@ -426,6 +445,7 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
             slots[slot].closing = true
             return
         }
+        rememberBrowser(id,request)
         if (sessions[session].slot >= 0 && sessions[session].slot != slot) closeSlot(sessions[session].slot)
         sessions[session].slot = slot
         sessions[session].connected = true
@@ -575,6 +595,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
         }
         oneLiveQueueList[queueIndex].browser = true
         oneLiveQueueList[queueIndex].routes.start(route)
+        rememberBrowser(id,request)
         val app = factory(request, id)
         sessions.append(oneSession(id, app, oneLiveQueueList[queueIndex]))
         index = sessions.size - 1
@@ -584,6 +605,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
         // The person asked for the page again: what the app read earlier may have changed since, so it hears of it.
         if (!recovery.enabled) sessions[index].receive("pageLoad", "")
     }
+    rememberBrowser(sessions[index].id,request)
     pageRender(request, index)
 }
 
@@ -732,7 +754,7 @@ fun OneLiveServer.pump(index: int): bool {
     while (requests.size > 0) {
         for (item in requests) {
             if (!recoveryFence(index, true)) { sessions[index].queue.request(item); continue }
-            sessions[index].queue.complete(oneLiveExecute(handler, item))
+            sessions[index].queue.complete(oneLiveExecute(handler, item, privateRequests, browserContexts.get(sessions[index].id)))
         }
         if (!recoveryFence(index, false)) return false
         requests = sessions[index].queue.takeRequests()
@@ -745,7 +767,7 @@ fun OneLiveServer.pump(index: int): bool {
 }
 
 // Same-origin requests run through the application's handler in process.
-fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest): string {
+fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest, privateRequests: OneLivePrivateRequests? = null, browser: OneLiveBrowserContext? = null): string {
     val r = item.request
     if (item.epoch > 0) {
         if (r.bodyFile != "") return oneResponsePayload(item.id,501,"","Recovery sessions must read file bytes before sending a request")
@@ -771,7 +793,7 @@ fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest)
     val headers: array<HttpHeader> = []
     for (h in r.headers) {
         val name = oneLowerAscii(h.name)
-        if (name != "x-one-live-operation" && name != "x-one-live-session" && name != "x-one-live-epoch") headers.append(HttpHeader(name, h.value))
+        if (!name.startsWith("x-one-live-")) headers.append(HttpHeader(name, h.value))
     }
     if (item.operation != "") headers.append(HttpHeader("x-one-live-operation", item.operation))
     if (item.session != "" && item.epoch > 0) {
@@ -801,7 +823,11 @@ fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest)
         body = "$out--$boundary--\r\n"
         headers.append(HttpHeader("content-type", "multipart/form-data; boundary=$boundary"))
     }
-    val response = handler(HttpRequest(r.method, path, query, headers, body, [], []))
+    val dispatched=HttpRequest(r.method,path,query,headers,body,[],[])
+    val response=if(privateRequests==null)handler(dispatched)else{
+        val handle=privateRequests.handle
+        handle(dispatched,OneLiveCallContext(item.id,item.operation,item.session,item.epoch,browser))
+    }
     val names: array<string> = []
     val values: array<Json> = []
     for (h in response.headers) {
@@ -901,6 +927,7 @@ fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimer
     for (session in sessions) {
         if (session.slot >= 0 || now - session.lastSeen < 1800000) kept.append(session)
         else {
+            browserContexts.remove(session.id)
             oneLiveForget(session.id)
             oneMemoForget(session.id)
             oneRecoverySessions.remove(session.id)

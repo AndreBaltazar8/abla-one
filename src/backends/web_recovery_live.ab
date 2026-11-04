@@ -88,6 +88,7 @@ fun OneLiveServer.recoveryForgetLocal(id: string, currentSlot: int): void {
     }
     sessions.clear()
     for (session in kept) sessions.append(session)
+    browserContexts.remove(id)
     oneLiveForget(id)
     oneMemoForget(id)
     oneRecoverySessions.remove(id)
@@ -145,6 +146,7 @@ fun OneLiveServer.recoveryOpen(request: HttpRequest, id: string, proof: string, 
     // revocation off-loop. Calling a DB-backed legacy resumes callback here
     // would reintroduce a blocking authentication query on the live thread.
     recoveryForgetLocal(id, currentSlot)
+    rememberBrowser(id,request)
     val state = OneRecoveryState(id, proof, recoveryOwner, recovery, loaded.epoch, loaded.version)
     state.restored = true
     state.draft = saved.get("app")

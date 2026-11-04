@@ -1,0 +1,95 @@
+import "abla/http"
+import "abla/net"
+import "abla/test"
+import "abla/process/time"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+
+val observed: array<OneLiveCallContext> = []
+val innerHeaders: array<string> = []
+val pageIds: array<string> = []
+var ordinaryCalls=0
+class ContextProbe : OneApp {
+    fun render(var ui: Ui): Node = text("context",style())
+    fun receive(kind: string,payload: string): void { return }
+}
+fun contextFactory(request: HttpRequest,id: string): OneApp {
+    pageIds.append(id)
+    oneLiveServices(id).send(oneRequest("POST","/internal").header("X-One-Live-Context","forged").header("Cookie","untrusted-inner-cookie"))
+    ContextProbe()
+}
+fun ordinary(request: HttpRequest): HttpResponse { ordinaryCalls+=1;httpText("ordinary") }
+fun privateCall(request: HttpRequest,context: OneLiveCallContext): HttpResponse {
+    observed.append(context)
+    innerHeaders.append(request.header("x-one-live-context"))
+    expect(request.peerAddress==null,"synthetic HTTP never acquires a socket peer")
+    httpText("private")
+}
+fun main: int {
+    val item=OneLiveRequest(7,oneRequest("POST","/internal").header("X-OnE-LiVe-Context","forged").header("X-One-Live-Operation","wrong").header("X-One-Live-Epoch","88"),"host-operation","host-session",3)
+    val browser=OneLiveBrowserContext("host-cookie")
+    val handled=oneLiveExecute(ordinary,item,OneLivePrivateRequests(privateCall),browser)
+    expectEqual(oneResponse(handled).body,"private","optional private callback handles only internal RPC")
+    expectEqual(ordinaryCalls,0,"internal callback does not also dispatch ordinary HTTP")
+    expectEqual(observed[0].operation,"host-operation","typed operation comes from queued host metadata")
+    expectEqual(observed[0].session,"host-session","typed session comes from host")
+    expectEqual(observed[0].epoch,3,"typed epoch comes from host")
+    expectEqual(observed[0].requestId,7,"local request identity is preserved")
+    expectEqual(innerHeaders[0],"","mixed-case reserved context headers are stripped")
+    val saved=observed[0].browser
+    expect(saved!=null && saved.cookie=="host-cookie","browser context is separate from renderer headers")
+    expectEqual(oneResponse(oneLiveExecute(ordinary,item)).body,"ordinary","legacy callback remains the default")
+    expectEqual(ordinaryCalls,1,"legacy callback dispatches exactly once")
+    observed.clear();innerHeaders.clear()
+    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),ordinary,oneLivePaths(["/"]),contextFactory,oneDefaultTheme(),OneLiveOptions("Context","en","#fff","/i","src/backends/web/host.js",""),privateRequests=OneLivePrivateRequests(privateCall))
+    expect(server.listening(),"owned loopback listener")
+    expectEqual(server.page(httpRequest("GET","/","",[HttpHeader("Cookie","page-cookie")])).status,200,"page creates a host session")
+    expectEqual(observed.size,1,"bootstrap request reaches the private callback")
+    val origin=observed[0].browser
+    expect(origin!=null && origin.cookie=="page-cookie","initial page transport cookie captured before factory requests")
+    expectEqual(observed[0].operation,"","non-event bootstrap does not invent replay identity")
+    expectEqual(innerHeaders[0],"","bootstrap cannot supply a private context header")
+    val id=pageIds[0]
+    var socket=tcpConnectIpv4("127.0.0.1",server.listener.localPort(),1000)
+    socket.writeResult("GET /one/live?s=$id HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nCookie: socket-cookie\r\n\r\n")
+    socket.setNonblocking()
+    var upgraded=false
+    val deadline=monotonicMilliseconds()+2000
+    while(!upgraded && monotonicMilliseconds()<deadline){server.step();val part=socket.readResult(65536);if(part.hasData() && part.bytes.contains("101 Switching Protocols"))upgraded=true}
+    expect(upgraded,"actual accepted WebSocket attaches")
+    oneLiveServices(id).send(oneRequest("POST","/internal").header("Cookie","forged-inner-cookie").header("x-one-live-cookie","forged-cookie"))
+    server.pump(0)
+    val attached=observed[observed.size-1].browser
+    expect(attached!=null && attached.cookie=="socket-cookie","accepted attachment replaces origin with actual transport cookie")
+    if(attached!=null){val peer=attached.peerAddress;expect(peer!=null && peer.address=="127.0.0.1","private origin retains accepted peer separately")}
+    var direct=tcpConnectIpv4("127.0.0.1",server.listener.localPort(),1000)
+    direct.writeResult("POST /external HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nX-One-Live-Context: forged\r\nX-One-Live-Operation: forged\r\nConnection: close\r\n\r\n")
+    direct.setNonblocking()
+    val before=observed.size
+    var answered=false
+    val directDeadline=monotonicMilliseconds()+2000
+    while(!answered && monotonicMilliseconds()<directDeadline){server.step();val part=direct.readResult(65536);if(part.hasData() && part.bytes.contains("ordinary"))answered=true}
+    expect(answered,"ordinary external HTTP remains available")
+    expectEqual(observed.size,before,"forged external headers cannot invoke the private callback")
+    expectEqual(ordinaryCalls,2,"external request reaches only ordinary handler")
+    direct.close();socket.close()
+    val snapshot=oneCheckpoint(server.sessions[0],jsonObject([],[]))
+    expect(!snapshot.contains("page-cookie") && !snapshot.contains("socket-cookie"),"host-only cookies never enter the checkpoint")
+    server.endSession(0)
+    expect(!server.browserContexts.has(id),"ending session releases private transport context")
+    val none=oneLiveNoRecovery()
+    val store=OneLiveRecoveryStore(true,none.create,{r,s,p,o -> if(r.header("cookie")=="restored-cookie")OneRecoveryResult(200,2,1,snapshot)else OneRecoveryResult(403)},none.inspect,none.save,{s,o,e -> 200},none.end,none.inbox,none.upload,none.readFile,none.deleteFile,none.participates)
+    var restored=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),ordinary,oneLivePaths(["/"]),contextFactory,oneDefaultTheme(),OneLiveOptions("Restored context","en","#fff","/i","src/backends/web/host.js",""),recovery=store,privateRequests=OneLivePrivateRequests(privateCall))
+    val refused=restored.recoveryOpen(httpRequest("GET","/", "",[HttpHeader("Cookie","forged-cookie")]),id,"d".repeat(32))
+    expectEqual(refused.status,403,"unaccepted recovery attachment cannot supply browser context")
+    expect(!restored.browserContexts.has(id),"refused attachment retains no cookies")
+    val restoredStart=observed.size
+    val opened=restored.recoveryOpen(httpRequest("GET","/", "",[HttpHeader("Cookie","restored-cookie")]),id,"d".repeat(32))
+    expectEqual(opened.status,200,"accepted recovery can restore the private callback")
+    expect(observed.size>restoredStart,"restored factory RPC executes through the callback")
+    val restoredOrigin=observed[restoredStart].browser
+    expect(restoredOrigin!=null && restoredOrigin.cookie=="restored-cookie","accepted recovery origin is captured before hydration RPCs, not after")
+    restored.recoveryForgetLocal(id,-1)
+    expect(!restored.browserContexts.has(id),"discarding a local recovery session releases origin context")
+    testsPassed()
+}
