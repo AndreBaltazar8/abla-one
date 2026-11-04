@@ -11,19 +11,22 @@ class PeerProbe : OneApp {
     fun receive(kind: string, payload: string): void { return }
 }
 fun peerApp(request: HttpRequest, id: string): OneApp = PeerProbe()
+fun peerText(request: HttpRequest): string {
+    val peer = request.peerAddress
+    if (peer == null) return ""
+    "${peer.address}/${peer.family}"
+}
 fun peerHandler(request: HttpRequest): HttpResponse {
-    val peer = oneLiveRequestPeer()
+    val peer = peerText(request)
     captured.append(peer)
     val synthetic = OneLiveRequest(1, OneRequest("GET", "/internal", [], "", "", "", [], 1000, false, false))
     oneLiveExecute({ inner ->
-        expectEqual(oneLiveRequestPeer(), "", "an internal request cannot inherit the browser socket identity")
+        expectEqual(peerText(inner), "", "an in-process request carries no socket peer")
         httpText("internal")
     }, synthetic)
-    expectEqual(oneLiveRequestPeer(), peer, "nested internal dispatch restores the external request scope")
     httpText(peer)
 }
 fun main: int {
-    expectEqual(oneLiveRequestPeer(), "", "no transport metadata exists outside a request")
     var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", 0), peerHandler,
         oneLivePaths([]), peerApp, oneDefaultTheme(),
         OneLiveOptions("peer", "en", "#fff", "/i", "src/backends/web/host.js", ""))
@@ -37,14 +40,14 @@ fun main: int {
         val deadline = monotonicMilliseconds() + 3000
         while (!reply.contains("127.0.0.1") && monotonicMilliseconds() < deadline) {
             server.step()
-            expectEqual(oneLiveRequestPeer(), "", "socket metadata is cleared after each event-loop pass")
             val chunk = client.readResult(65536)
             if (chunk.hasData()) reply = "$reply${chunk.bytes}"
         }
-        expect(reply.contains("200 OK") && reply.contains("127.0.0.1"), "transport identity ignores forged forwarding headers and survives slot reuse")
+        expect(reply.contains("200 OK") && reply.contains("127.0.0.1/4"), "the request carries the accepted socket peer, not forged forwarding headers, across slot reuse")
         client.close()
     }
     expectEqual(captured.size, 2, "both real requests reached the handler")
-    expectEqual(captured[0], "127.0.0.1", "a deferred consumer can retain an explicit peer snapshot")
+    expectEqual(captured[0], "127.0.0.1/4", "the peer is an IPv4 socket address")
+    expect(!captured[0].contains("203.0.113.8") && !captured[0].contains("198.51.100.7"), "forwarding headers never become the peer")
     testsPassed()
 }

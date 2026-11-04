@@ -29,12 +29,6 @@ import "../layout/paint.ab"
 // reaches it as `receive("push", payload)`: the server pushes changes instead
 // of waiting for a poll.
 
-// Transport metadata exists only while dispatching an actual HTTP socket.
-// Synthetic same-origin requests explicitly clear it. Applications deferring
-// work must capture the value before returning from the request callback.
-var oneLiveCurrentRequestPeer = ""
-fun oneLiveRequestPeer(): string = oneLiveCurrentRequestPeer
-
 class OneLiveSlot(
     var descriptor: int,
     var input: string,
@@ -381,18 +375,15 @@ fun OneLiveServer.write(slot: int): void {
 
 // One complete HTTP request: a WebSocket upgrade, the host script, a live
 // page, or the application's handler. Plain HTTP connections close after the
-// response.
+// response. The request carries the accepted socket peer (`request.peerAddress`),
+// never one taken from forwarding headers; same-origin requests run in process
+// (oneLiveExecute) carry none.
 fun OneLiveServer.http(slot: int): void {
-    val previous = oneLiveCurrentRequestPeer
-    val connection = TcpConnection(slots[slot].descriptor)
-    oneLiveCurrentRequestPeer = connection.peerAddress().address
-    connection.descriptor = -1
-    httpWithPeer(slot)
-    oneLiveCurrentRequestPeer = previous
+    httpWithPeer(slot, socketPeerAddress(slots[slot].descriptor))
     return
 }
 
-fun OneLiveServer.httpWithPeer(slot: int): void {
+fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
     val input = slots[slot].input
     val end = httpHeaderEnd(input)
     if (end < 0) {
@@ -405,7 +396,7 @@ fun OneLiveServer.httpWithPeer(slot: int): void {
         if (length > 16777216) closeSlot(slot)
         return
     }
-    val request = httpParseRequest(input.slice(0, end + length))
+    val request = httpRequestWithAddress(httpParseRequest(input.slice(0, end + length)), peer)
     slots[slot].input = input.slice(end + length, input.size)
     if (request.path == "/one/live" && webSocketIsUpgradeRequest(request)) {
         val id = request.queryParameter("s")
@@ -755,14 +746,6 @@ fun OneLiveServer.pump(index: int): bool {
 
 // Same-origin requests run through the application's handler in process.
 fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest): string {
-    val previous = oneLiveCurrentRequestPeer
-    oneLiveCurrentRequestPeer = ""
-    val response = oneLiveExecuteWithoutPeer(handler, item)
-    oneLiveCurrentRequestPeer = previous
-    response
-}
-
-fun oneLiveExecuteWithoutPeer(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest): string {
     val r = item.request
     if (item.epoch > 0) {
         if (r.bodyFile != "") return oneResponsePayload(item.id,501,"","Recovery sessions must read file bytes before sending a request")

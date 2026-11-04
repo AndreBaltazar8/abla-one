@@ -518,13 +518,12 @@ if (kind == "route") {
 | Desktop | a stack | the mouse's back and forward buttons, Alt+Left and Alt+Right; `services.back` | per entry, the last 16 |
 | E-paper (full and thin) | a stack; thin, on the server | the app's (`services.back`) | per entry, the last 16 |
 
-**Transport identity.** `oneLiveRequestPeer()` returns the socket's IPv4 peer
-address while the live server dispatches an HTTP request, including page,
-upgrade and deferred-request callbacks. It ignores all request headers. Outside
-that dispatch, and while executing synthetic same-origin requests, it returns
-an empty string. Deferred consumers must capture it before returning; it is
-synchronous event-loop context, not a persistent session identity. Proxy trust
-and forwarded-header validation belong to the application.
+**Transport identity.** The live server builds each request it reads from a socket
+with that socket's accepted peer as `request.peerAddress` (the stdlib's
+`SocketPeerAddress`: address, port and family), for pages, upgrades and the
+application's handler. It never comes from request headers. Same-origin requests
+that a live session runs in process (`oneLiveExecute`) have none. Proxy trust and
+forwarded-header validation belong to the application.
 
 **Web pages.** The live server claims paths through `isPage`, a predicate, or
 `oneLivePaths(["/", "/people", "/form/:n", "/docs/*"])`. A GET of a claimed path renders
