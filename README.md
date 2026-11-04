@@ -53,6 +53,14 @@ can set `OneLiveOptions.connectionText` and `reloadText` (defaults: `Connectingâ
 and `Reload`). Without JavaScript the hold attribute is never set, so the
 server-rendered content remains readable and the connection state stays hidden.
 
+A full live stylesheet belongs to the current owner's atomic CSS table. Hello
+and restored-owner patches carry `cssReset: true` and the complete `css` string,
+including responsive rules. The host replaces `#one-css` before morphing the
+matching tree; ordinary patches append only new rules. This prevents the IDs
+allocated by one node from retaining declarations assigned by an earlier node.
+Feed positions are measured before replacing the styles. Keep the host script
+and server at the same SDK revision as described above.
+
 ## Tests
 
 ```sh

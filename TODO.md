@@ -16,7 +16,6 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Web session recovery
 
-- [ ] A recovered node reuses atomic CSS IDs from its fresh style table, while the host appends its stylesheet to SSR/previous-node rules. Different declarations then share `.oN` selectors and can make real controls unclickable. Send an explicit complete-stylesheet reset on full/hello frames, including media rules; prove old-fail/new-pass across two nodes.
 
 
 - [ ] Support raw `OneRequest.file`/multipart file handles in recovery mode with bounded shared-store chunk materialization and a durable acknowledgement barrier, without serializing raw HTTP requests. Until then recovery sessions return501 for these paths; applications must call `readFile` and send the resulting bytes. NovaKind has no raw bodyFile/multipart callers (lead-approved deferral, 2026-11-03).
