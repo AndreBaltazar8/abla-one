@@ -51,6 +51,7 @@ fun oneCheckpointEffect(message: string): bool {
     val value = parsed.value
     val kind = value.getString("t")
     if (kind == "forward") return value.keys.size == 1
+    if (kind == "copy") return value.keys.size == 2 && value.get("text").isString()
     if (kind == "back") return value.keys.size == 2 && value.get("to").isString() && (value.getString("to") == "" || oneCheckpointRoute(value.getString("to")))
     if (kind != "pick" || value.keys.size != 5 || !oneCheckpointCounter(value.get("id")) || value.getInt("id") == 0 || !value.get("kind").isString() || !value.get("accept").isArray() || !value.get("multiple").isBoolean()) return false
     if (value.getString("kind") != "files" && value.getString("kind") != "profile" && value.getString("kind") != "emoji") return false

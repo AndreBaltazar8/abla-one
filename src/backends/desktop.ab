@@ -221,6 +221,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
     var settling = 0
     while (running) {
         if (oneDesktopPump(app, session)) state.dirty = true
+        for (text in oneLiveQueueList[oneLiveQueueIndex(session)].takeCopies()) window.setClipboard(text)
         if (settling > 0) {
             settling = settling - 1
             state.dirty = true

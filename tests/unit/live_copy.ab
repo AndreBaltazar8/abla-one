@@ -1,0 +1,31 @@
+import "abla/test"
+import "abla/json"
+import "../../src/backends/web_session.ab"
+import "../../src/backends/web_checkpoint.ab"
+
+fun main: int {
+    val window = oneLiveServices("copy-window")
+    val held = oneLiveQueueList[oneLiveQueueIndex("copy-window")]
+    expectEqual(window.effect("copy", "hello\nthere"), true, "a window takes a copy")
+    val copies = held.takeCopies()
+    expectEqual(copies.size, 1, "the window has one copy to make")
+    expectEqual(copies[0], "hello\nthere", "with the text as given")
+    expectEqual(held.takeCopies().size, 0, "made once")
+    expectEqual(held.takeOutbox().size, 0, "and nothing goes to a page")
+
+    val page = oneLiveServices("copy-page")
+    oneLiveQueueList[oneLiveQueueIndex("copy-page")].browser = true
+    expectEqual(page.effect("copy", "https://example.com/?a=1"), true, "a page takes a copy")
+    val queue = oneLiveQueueList[oneLiveQueueIndex("copy-page")]
+    expectEqual(queue.takeCopies().size, 0, "a page copies it itself")
+    val sent = queue.takeOutbox()
+    expectEqual(sent.size, 1, "so it's sent to the page")
+    val message = jsonParse(sent[0]).value
+    expectEqual(message.getString("t"), "copy", "as a copy")
+    expectEqual(message.getString("text"), "https://example.com/?a=1", "of that text")
+    expectEqual(oneCheckpointEffect(sent[0]), true, "which a recovering session keeps")
+    expectEqual(oneCheckpointEffect("{\"t\":\"copy\",\"text\":1}"), false, "but not without text")
+    oneLiveForget("copy-window")
+    oneLiveForget("copy-page")
+    testsPassed()
+}

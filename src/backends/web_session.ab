@@ -56,8 +56,16 @@ class OneLiveQueue(
     val moves: array<Json>,
     var eventContext: string = "",
     var eventOrdinal: int = 0,
-    val requestContexts: Map<int, string> = Map()
+    val requestContexts: Map<int, string> = Map(),
+    // Text to copy, for a window with no page to do it (the desktop).
+    val copies: array<string> = []
 ) {
+    fun takeCopies(): array<string> {
+        val out: array<string> = []
+        for (item in copies) out.append(item)
+        copies.clear()
+        out
+    }
     fun takeRequests(): array<OneLiveRequest> {
         val out: array<OneLiveRequest> = []
         for (item in requests) out.append(item)
@@ -346,6 +354,12 @@ class OneLiveServices(val session: string) : OneServices {
     fun effect(kind: string, payload: string): bool {
         if (kind == "live-checkpoint") return oneRecoveryCapture(session, payload)
         if (kind == "live-restored") return oneRecoveryReady(session)
+        if (kind == "copy") {
+            val queue = oneLiveQueueList[oneLiveQueueIndex(session)]
+            if (queue.browser) queue.toPage(jsonStringify(jsonObject(["t", "text"], [jsonString("copy"), jsonString(payload)])))
+            else queue.copies.append(payload)
+            return true
+        }
         if (kind == "subscribe") {
             oneLiveQueueList[oneLiveQueueIndex(session)].subscribe(payload)
             return true

@@ -731,6 +731,23 @@
       size = Math.round(size * 0.75);
     }
   };
+  // The copy arrives over the socket after the tap, so Safari may refuse the
+  // clipboard API; a selected textarea and execCommand still work there.
+  const copyText = (text) => {
+    if (typeof text !== 'string') return;
+    const fallback = () => {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(area);
+      area.select();
+      try { document.execCommand('copy'); } catch (_) {}
+      area.remove();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(fallback);
+    else fallback();
+  };
   const pick = (message) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -836,7 +853,7 @@
   const receive = (message) => {
     if (manualRecovery) return;
     if (message.t === 'effect') {
-      if (!boot.proof || typeof message.id !== 'string' || !/^[a-f0-9]{32}$/.test(message.id) || !message.message || !['pick', 'back', 'forward'].includes(message.message.t)) return;
+      if (!boot.proof || typeof message.id !== 'string' || !/^[a-f0-9]{32}$/.test(message.id) || !message.message || !['pick', 'back', 'forward', 'copy'].includes(message.message.t)) return;
       const picker = message.message.t === 'pick';
       const repeated = rememberEffect(message.id, !picker);
       if (!repeated) receive(message.message);
@@ -859,6 +876,7 @@
     else if (message.t === 'back') goBack(message.to);
     else if (message.t === 'forward') history.forward();
     else if (message.t === 'pick') pick(message);
+    else if (message.t === 'copy') copyText(message.text);
     else if (message.t === 'cookies') updateCookies();
     else if (message.t === 'reload') location.reload();
     else if (message.t === 'fetch') request(message);
