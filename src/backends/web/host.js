@@ -636,12 +636,15 @@
   });
 
   const apply = (message) => {
-    if (message.css) style.appendChild(document.createTextNode(message.css));
     if (message.title && document.title !== message.title) document.title = message.title;
     const feeds = new Map();
     for (const feed of root.querySelectorAll('[data-one-feed]')) {
       feeds.set(feed.getAttribute('data-one'), feed.scrollHeight - feed.scrollTop - feed.clientHeight < 24);
     }
+    // Full tables replace the SSR/previous-owner namespace atomically. The
+    // old DOM's feed position was measured above, before its rules disappear.
+    if (message.cssReset === true && typeof message.css === 'string') style.textContent = message.css;
+    else if (message.css) style.appendChild(document.createTextNode(message.css));
     if (message.html != null) {
       const template = document.createElement('template');
       template.innerHTML = message.html;

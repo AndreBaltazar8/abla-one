@@ -2,8 +2,12 @@ import "../port.ab"
 import "recovery_store.ab"
 import "../../src/one_kit.ab"
 
+// Different nodes deliberately build different atomic-style tables. Recovery
+// must replace the browser's previous namespace, not mix the two tables.
+fun proofLayout(): Style = if (processEnvironmentOr("ONE_RECOVERY_TEST_CSS_NODE", "") == "a") style().padding(20).gap(12).width(240) else style().padding(20).gap(12)
+
 class RecoveryProof(val services: OneServices, val session: string, var hydrating: int = 0, var draft: string = "", var view: string = "/recovery", var picker: int = 0, var reading: int = 0, var file: OneFile = OneFile("", "", 0, ""), var content: string = "", var mutation: int = 0, var count: int = 0, var awaitingReady: bool = false) : OneApp {
-    fun render(var ui: Ui): Node = column(style().padding(20).gap(12), [
+    fun render(var ui: Ui): Node = column(proofLayout(), [
         text(if (view == "/recovery/other") "Other view" else "Draft view", style()).keyed("view-title"),
         input(draft, "Draft text", ui.change { value -> draft = value }, style()).keyed("draft-text").set("label", "Draft text"),
         button(ui, "Other view", "", ui.press { services.navigate("/recovery/other") }, style()),

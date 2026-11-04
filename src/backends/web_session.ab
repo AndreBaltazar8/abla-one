@@ -603,11 +603,18 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
     val screen = session.maps[session.maps.size - 1].screen
     val kept = moves.size > 0 && screen == session.shown
     session.shown = screen
-    val css = session.css.since(session.cssSent)
+    // Atomic class IDs belong to this session's style table. A fresh owner
+    // may reuse the previous owner's IDs for different declarations.
+    val cssReset = session.cssSent == 0
+    val css = if (cssReset) session.css.text() else session.css.since(session.cssSent)
     session.cssSent = session.css.rules.size
     session.htmlSent = markup
     val keys = ["t", "r", "css", "title"]
     val values = [jsonString(if (session.canvas) "frame" else "patch"), jsonInteger(session.revision), jsonString(css), jsonString(session.title)]
+    if (cssReset) {
+        keys.append("cssReset")
+        values.append(jsonBoolean(true))
+    }
     if (frontier > 0 || session.eventAckSent < 0) {
         keys.append("a")
         values.append(jsonInteger(frontier))

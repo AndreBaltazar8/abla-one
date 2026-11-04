@@ -77,6 +77,7 @@ fun main: int {
     expectEqual(first.getString("title"), "A", "the first render is at the start route")
     expect(!first.has("nav"), "no move to report")
     val shownAtA = s.revision
+    expect(first.get("cssReset").asBoolean(), "the first stylesheet explicitly replaces a previous node namespace")
 
     // The move comes back with the patch.
     s.event(t, shownAtA, 2, "")
@@ -268,5 +269,19 @@ fun main: int {
     hydrating.status = 409
     expect(oneRecoveryHydrationRead("hydration-transient",-2,"opaque-handle",0,3)==409 && !hydrating.files.has(-2),"a fenced owner cannot start trusted hydration")
     oneRecoverySessions.remove("hydration-transient")
+    var styled = session("css-resets", "/a")
+    styled.css.use("max760", "width:123px")
+    val styledFirst = update(styled,t)
+    expect(styledFirst.get("cssReset").asBoolean() && has(styledFirst.getString("css"),"@media(max-width:760px)"),"a full stylesheet includes responsive rules")
+    oneSessionMessage(styled,t,$json {"t":"hello","w":1280})
+    val styledHello = update(styled,t)
+    expect(styledHello.get("cssReset").asBoolean(),"hello marks the entire style table as a replacement")
+    expect(has(styledHello.getString("css"),"@media(max-width:760px)"),"hello resends media rules that the previous render already consumed")
+    styled.css.use("", "border-left-width:17px")
+    oneSessionMessage(styled,t,$json {"t":"viewport","w":1440})
+    val styledIncrement = update(styled,t)
+    expect(!styledIncrement.get("cssReset").asBoolean() && has(styledIncrement.getString("css"),"border-left-width:17px"),"ordinary patches append only new declarations")
+    expect(!has(styledIncrement.getString("css"),"@media(max-width:760px)"),"incremental updates do not resend the full style table")
+
     testsPassed()
 }

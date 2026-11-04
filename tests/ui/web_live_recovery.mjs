@@ -32,7 +32,7 @@ const start = async (name,disabled=false) => {
   const portFile = path.join(directory, `${name}-${children.length}.port`);
   const log = fs.openSync(path.join(directory, `${name}-${children.length}.log`), 'w');
   const hostFile=path.join(directory,`${name}-${children.length}.host.js`);fs.copyFileSync('src/backends/web/host.js',hostFile);
-  const child = spawn(executable, [], {cwd: process.cwd(), env: {...process.env, ONE_RECOVERY_TEST_DIR: directory, ONE_RECOVERY_TEST_HOST:hostFile, ONE_RECOVERY_TEST_ASYNC_MS: '150', ONE_RECOVERY_TEST_DISABLED: disabled?'1':'0', ONE_TEST_PORT_FILE: portFile, ONE_TEST_PORT: '0'}, stdio: ['ignore', log, log]});
+  const child = spawn(executable, [], {cwd: process.cwd(), env: {...process.env, ONE_RECOVERY_TEST_DIR: directory, ONE_RECOVERY_TEST_CSS_NODE: name, ONE_RECOVERY_TEST_HOST:hostFile, ONE_RECOVERY_TEST_ASYNC_MS: '150', ONE_RECOVERY_TEST_DISABLED: disabled?'1':'0', ONE_TEST_PORT_FILE: portFile, ONE_TEST_PORT: '0'}, stdio: ['ignore', log, log]});
   fs.closeSync(log);
   children.push(child);
   await wait(() => {
@@ -128,6 +128,18 @@ try {
   const checkpoint = () => JSON.parse(row().payload);
   const stored = async text => wait(() => checkpoint().app.draft === text, `durable draft ${text.length} bytes`);
   check(Boolean(boot.proof) && row().epoch >= 2, 'page from node A attaches on node B using shared state');
+  const cssConflicts = () => page.evaluate(() => {
+    const seen = new Map(), conflicts = [];
+    for (const rule of document.getElementById('one-css').sheet.cssRules) {
+      if (!rule.selectorText || !/^\.o\d+(?::[^{}]+)?$/.test(rule.selectorText)) continue;
+      const old = seen.get(rule.selectorText);
+      if (old && old !== rule.style.cssText) conflicts.push(rule.selectorText);
+      seen.set(rule.selectorText, rule.style.cssText);
+    }
+    return [...new Set(conflicts)];
+  });
+  const initialConflicts = await cssConflicts();
+  check(initialConflicts.length === 0, `SSR node A and socket node B never mix atomic CSS namespaces: ${initialConflicts.join(',')}`);
 
   const before = row().writes;
   const started = Date.now();
@@ -178,6 +190,7 @@ try {
   await wait(() => row().epoch >= 3 && page.evaluate(() => !document.documentElement.hasAttribute('data-one-offline')), 'node A recovers dead node B');
   await page.waitForFunction(() => document.querySelector('input').value === 'ação 📝 249');
   check(navigations === 1 && page.url() === `${base}/recovery`, 'node death restores route and draft without reloading the page');
+  check((await cssConflicts()).length === 0, 'node-death recovery replaces the previous node stylesheet before real navigation');
 
   await page.getByRole('button', {name: 'Other view', exact: true}).click();
   await page.waitForURL(`${base}/recovery/other`);
