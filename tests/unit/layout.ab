@@ -217,7 +217,41 @@ fun testFeedFollows(): void {
     return
 }
 
+// A row scrolled halfway under a header takes no press there: the header's button does.
+fun testScrolledUnder(): void {
+    val theme = oneDefaultTheme()
+    var ui = oneUi("t", theme)
+    val header = pressable(ui.press { }, style().height(50), [])
+    val rows: array<Node> = []
+    var index = 0
+    while (index < 10) {
+        rows.append(pressable(ui.press { }, style().height(40), []))
+        index = index + 1
+    }
+    val tree = column(style().fill(), [header, scroll(style().grow(1), rows)])
+    var path = ""
+    for (found in onePaintFrame(oneLayout(tree, theme, "desktop", 200, 300, Map()), 200, 300).hits) if (found.kind == "scroll") path = found.key
+    val offsets: Map<string, int> = Map()
+    offsets.set(path, 30)
+    val frame = onePaintFrame(oneLayout(tree, theme, "desktop", 200, 300, offsets), 200, 300)
+    val headerEvent = oneParseInt(header.attr("onPress"), 0)
+    var atTop = 0
+    var firstRow = -1
+    var i = frame.hits.size - 1
+    while (i >= 0) {
+        val h = frame.hits[i]
+        if (atTop == 0 && h.kind == "press" && 30 >= h.y && 30 < h.y + h.h) atTop = h.event
+        if (h.kind == "press" && h.event != headerEvent && (firstRow < 0 || h.y < frame.hits[firstRow].y)) firstRow = i
+        i = i - 1
+    }
+    expectEqual(atTop, headerEvent, "scrolled under: a press on the header is the header's")
+    expectEqual(frame.hits[firstRow].y, 50, "scrolled under: the first row's press starts at the scroll's top")
+    expectEqual(frame.hits[firstRow].h, 10, "scrolled under: only its part in view")
+    return
+}
+
 fun main: int {
+    testScrolledUnder()
     testFeedFollows()
     testCaret()
     testFieldShowsItsEnd()

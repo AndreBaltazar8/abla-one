@@ -242,12 +242,18 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     } else if (kind == "input") {
         onePaintInput(box, x, y, pl, pr, frame, path)
     }
-    if (kind == "pressable" || kind == "link") {
+    // Only the part in view takes a press: a row half scrolled away under a header
+    // would otherwise take the header's taps.
+    val hx = if (x > cx) x else cx
+    val hy = if (y > cy) y else cy
+    val hw = (if (x + box.w < cx + cw) x + box.w else cx + cw) - hx
+    val hh = (if (y + box.h < cy + ch) y + box.h else cy + ch) - hy
+    if ((kind == "pressable" || kind == "link") && hw > 0 && hh > 0) {
         val event = oneParseInt(box.node.attr("onPress"), 0)
-        if (event > 0 && box.node.attr("enabled") != "false") oneAddHit(frame, "press", x, y, box.w, box.h, event, 0, path, box.node.attr("label"), "", false)
+        if (event > 0 && box.node.attr("enabled") != "false") oneAddHit(frame, "press", hx, hy, hw, hh, event, 0, path, box.node.attr("label"), "", false)
+        // A link to outside the app (`external`) says so in the hit's placeholder, for the canvas page to open it in a new tab.
+        if (kind == "link" && box.node.attr("route") != "true") oneAddHit(frame, "link", hx, hy, hw, hh, 0, 0, path, box.node.attr("href"), box.node.attr("external"), false)
     }
-    // A link to outside the app (`external`) says so in the hit's placeholder, for the canvas page to open it in a new tab.
-    if (kind == "link" && box.node.attr("route") != "true") oneAddHit(frame, "link", x, y, box.w, box.h, 0, 0, path, box.node.attr("href"), box.node.attr("external"), false)
     val scrolls = kind == "scroll" || kind == "feed"
     // A scrollRow's children are already placed at its offset (oneMeasureScrollRow, oneLayoutRescroll), which keeps this short.
     val across = kind == "scrollRow"
@@ -258,10 +264,11 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     var nch = ch
     if (scrolls || across || r.get("clip") == "true") {
         oneAddRect(frame, "clip", x, y, box.w, box.h, radius, "")
-        ncx = x
-        ncy = y
-        ncw = box.w
-        nch = box.h
+        // Within the clip around it, if any.
+        ncx = if (x > cx) x else cx
+        ncy = if (y > cy) y else cy
+        ncw = (if (x + box.w < cx + cw) x + box.w else cx + cw) - ncx
+        nch = (if (y + box.h < cy + ch) y + box.h else cy + ch) - ncy
         if (scrolls || across) onePaintScrollHit(box, across, x, y, frame, path)
     }
     var index = 0
