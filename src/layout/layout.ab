@@ -369,7 +369,12 @@ fun oneMeasureFresh(var ctx: OneLayoutContext, node: Node, r: Resolved, availW: 
         var index = 0
         for (child in node.children) {
             val cr = oneResolveNode(ctx, child)
-            val box = oneMeasure(ctx, child, cr, innerW, innerH, -1, -1, oneChildPath(path, child, index))
+            // One that fills takes the stack's size, when it has one, as in a row or column.
+            val box = oneMeasure(
+                ctx, child, cr, innerW, innerH,
+                if (cr.get("width") == "fill" && w >= 0) innerW else -1, if (cr.get("height") == "fill" && h >= 0) innerH else -1,
+                oneChildPath(path, child, index)
+            )
             if (box.w > maxW) maxW = box.w
             if (box.h > maxH) maxH = box.h
             children.append(box)

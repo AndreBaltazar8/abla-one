@@ -250,7 +250,19 @@ fun testScrolledUnder(): void {
     return
 }
 
+// A stack's children that fill take its size: a page under an overlay keeps the window's height.
+fun testStackFill(): void {
+    val theme = oneDefaultTheme()
+    val laid = oneLayout(stack(style().fill(), [column(style().fill(), [block(50)]), row(style().fillWidth(), [block(30)])]), theme, "desktop", 200, 300, Map())
+    expectEqual(laid.children[0].h, 300, "stack: a child that fills is as tall as it")
+    expectEqual(laid.children[0].w, 200, "stack: and as wide")
+    expectEqual(laid.children[1].h, 20, "stack: the others keep their height")
+    expectEqual(laid.children[1].w, 200, "stack: a fillWidth row is as wide")
+    return
+}
+
 fun main: int {
+    testStackFill()
     testScrolledUnder()
     testFeedFollows()
     testCaret()
