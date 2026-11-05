@@ -50,7 +50,8 @@ class OneRequest(
     fun json(value: Json): OneRequest = text(jsonStringify(value), "application/json; charset=utf-8")
     fun bytes(base64: string, contentType: string): OneRequest = copy("", base64, "", []).header("Content-Type", contentType)
     // Streams a platform file as the body; its type is used unless a
-    // Content-Type header is set. Any size.
+    // Content-Type header is set. Any size on streaming backends; server live
+    // recovery materializes at most16MiB/request (see docs/services.md).
     fun file(value: OneFile): OneRequest = copy("", "", value.handle, [])
     // multipart/form-data; the platform sets the boundary header.
     fun multipart(value: array<OnePart>): OneRequest = copy("", "", "", value)
