@@ -141,10 +141,13 @@ fun proofInbox(id: string, owner: string, epoch: int, requests: array<int>): One
     val items: array<OneRecoveryCompletion> = []
     for (item in row.get("inbox").values) if (items.size < 64) {
         var include = requests.size == 0
-        val response = oneResponse(item.getString("payload"))
-        for (request in requests) if (request == response.requestId) include = true
-        if (proofDirectory().child("raw-duplicates").exists() && response.requestId <= -4503599627370496) include = true
-        if (include) items.append(OneRecoveryCompletion(item.getString("id"), item.getString("payload")))
+        val requestId=if(item.has("requestId"))item.getInt("requestId")else oneResponse(item.getString("payload")).requestId
+        for (request in requests) if (request == requestId) include = true
+        if (proofDirectory().child("raw-duplicates").exists() && requestId <= -4503599627370496) include = true
+        if (include) {
+            val payload=if(oneRecoveryIdentifier(item.getString("dataFile")))proofDirectory().child("${item.getString("dataFile")}.chunk").readText()else item.getString("payload")
+            items.append(OneRecoveryCompletion(item.getString("id"),payload))
+        }
     }
     proofRelease(lock)
     OneRecoveryInbox(200, items)
@@ -152,7 +155,14 @@ fun proofInbox(id: string, owner: string, epoch: int, requests: array<int>): One
 fun proofCompletion(row: Json, payload: string): Json {
     val items: array<Json> = []
     for (item in row.get("inbox").values) items.append(item)
-    items.append(jsonObject(["id", "payload"], [jsonString(oneLiveSessionId()), jsonString(payload)]))
+    val id=oneLiveSessionId()
+    val request=oneResponse(payload).requestId
+    // Keep large synthetic chunks separate from frequently parsed metadata.
+    // Production stores already retain individual bounded inbox rows.
+    if(request<= -4503599627370496){
+        proofDirectory().child("$id.chunk").writeText(payload)
+        items.append(jsonObject(["id","payload","requestId","dataFile"],[jsonString(id),jsonString(""),jsonInteger(request),jsonString(id)]))
+    }else items.append(jsonObject(["id", "payload"], [jsonString(id), jsonString(payload)]))
     proofWith(row, "inbox", jsonArray(items))
 }
 
