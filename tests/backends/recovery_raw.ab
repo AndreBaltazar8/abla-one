@@ -7,6 +7,16 @@ class RawDropApp : OneApp {
 }
 fun rawTestPayload(id: int, bytes: string): string = jsonStringify(jsonObject(["requestId","status","body","bodyBase64","error"],[jsonInteger(id),jsonInteger(200),jsonString(""),jsonString(base64Encode(bytes)),jsonString("")]))
 fun main: int {
+    val hydration=OneRecoveryState("namespace","proof","owner",oneLiveNoRecovery(),epoch=1)
+    hydration.restored=true
+    oneRecoverySessions.set("namespace",hydration)
+    expect(oneRecoveryHydrationRead("namespace",-oneRecoveryRawIdBase,"handle",0,1)==409 && oneRecoveryHydrationRead("namespace",-1,"handle",0,1)==202,"trusted hydration cannot enter the internal materialization ID band")
+    oneRecoverySessions.remove("namespace")
+    var distinct=true
+    val generated: Map<int,bool> = Map()
+    var ids=0
+    while(ids<100){val id=oneRecoveryRawReadId();if(id> -oneRecoveryRawIdBase || id< -9007199254740991 || generated.has(id))distinct=false;generated.set(id,true);ids=ids+1}
+    expect(distinct,"chunk IDs stay JS-safe and disjoint from trusted hydration IDs")
     val file=OneFile("shared-handle","a\"b.txt",4,"application/octet-stream")
     val item=OneLiveRequest(7,oneRequest("POST","/raw").file(file),"operation","session",3)
     val raw=oneRecoveryRawBegin(item,100)

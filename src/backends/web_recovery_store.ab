@@ -123,11 +123,12 @@ fun oneRecoveryFileRead(id: string, request: int, handle: string, offset: int, l
 }
 
 // Trusted app hydration is the only file work admitted before live-restored.
-// Negative IDs cannot collide with restored positive app request IDs. No
+// Lower-band negative IDs cannot collide with app IDs or the upper-band
+// internal materialization jobs. No
 // browser frame can invoke this server-side API or choose its handle.
 fun oneRecoveryHydrationRead(id: string, request: int, handle: string, offset: int, length: int): int {
     val state = oneRecoverySessions.get(id)
-    if (state == null || !state.restored || state.ready || request >= 0 || request < -9007199254740991) return 409
+    if (state == null || !state.restored || state.ready || request >= 0 || request <= -oneRecoveryRawIdBase) return 409
     if (state.hydrationFiles.has(request) || state.files.has(request) || offset < 0 || length <= 0 || length > 262144) return 400
     if (state.status == 403 || state.status == 404 || state.status == 409 || state.status == 410) return 409
     if (state.files.keys().size >= 64 || handle.size == 0 || handle.size > 256 || offset > oneRecoveryFileLimit) return 400

@@ -77,3 +77,8 @@ identity reaches the private in-process call handler; applications still need
 atomic business idempotency/fencing for effects that commit before their reply is
 checkpointed. Timer/background work needs its own durable trigger. The SDK does
 not persist arbitrary HTTP requests or provide a new generic exactly-once claim.
+
+Internal chunk IDs reserve the negative JS-safe band from `-2^52` through
+`-(2^53-1)`. Trusted server hydration reads use negative IDs strictly greater
+than `-2^52`; browser app request IDs remain positive. Late internal chunks
+therefore cannot be interpreted as a later hydration completion.

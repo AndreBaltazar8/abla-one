@@ -22,7 +22,7 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Bugs seen
 
-- [ ] Verify multipart protocol fixes with unchanged-code controls: legacy live multipart permits CR/LF/NUL or unescaped quotes in disposition metadata; an existing Content-Type header can override the generated multipart boundary. Current branch rejects control bytes/escapes quoted parameters/replaces stale Content-Type; old-code3-check fixture is queued. A picked newline corrupts a part header, not the outer HTTP request headers.
+- [ ] Finish verification of multipart metadata fixes: unchanged071 protocol3 checks/2 failures confirms unescaped quotes and CRLF filename corruption; boundary override assertion already passes old code (header dedup is cleanup, not a reproduced override failure). Current branch rejects control bytes/escapes quoted parameters; positive control queued. A picked newline corrupts a part header, not the outer HTTP request headers.
 
 - [ ] Audit the live `.file()` MIME contract: OneRequest.file documents using OneFile.mime unless a Content-Type header is already set, but its builder retains only the handle and oneLiveExecute reads bytes without restoring the MIME. Add an actual handler-header control for default MIME and an explicit override before fixing across backends. No MIME behavior change is included in451.
 
