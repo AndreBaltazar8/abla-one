@@ -726,6 +726,11 @@ abla-one/
     by the thin host (`web/host.js`), hydration by event delegation, per-tab
     sessions resumed on reload, a cookie bridge for tokens rotated in a
     session, file pickers and uploads, and pushes to subscribed sessions;
+  - optional `OneLiveRequestAdmission` runs on each complete browser HTTP
+    request, with its accepted socket peer, before SSR, assets, upload,
+    deferred I/O or WebSocket upgrade. Null admits; a refusal closes the
+    connection (HEAD omits its body). Omission preserves existing behavior.
+    Renderer RPC remains separately governed by `OneLivePrivateRequests`;
   - NovaKind's signed-in web app runs on it, with realtime chat (push latency
     in tests: a few ms) and a desktop layout;
   - NovaKind's public landing page runs on it too (`one/landing.ab`): its own

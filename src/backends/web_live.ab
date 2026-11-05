@@ -103,6 +103,10 @@ fun oneLiveNoStorage(): OneLiveStorage = OneLiveStorage({ request -> Map<string,
 class OneLiveBrowserContext(val cookie: string, val peerAddress: SocketPeerAddress? = null)
 class OneLiveCallContext(val requestId: int, val operation: string, val session: string, val epoch: int, val browser: OneLiveBrowserContext? = null)
 class OneLivePrivateRequests(val handle: (HttpRequest, OneLiveCallContext) -> HttpResponse)
+// Admission of actual browser HTTP only, before any page/asset/upload/defer or
+// WebSocket branch. Null admits; a response refuses and closes the connection.
+// Internal renderer RPC is governed by the application's private callback.
+class OneLiveRequestAdmission(val check: (HttpRequest) -> HttpResponse?)
 
 resource class OneLiveServer(
     val handler: (HttpRequest) -> HttpResponse,
@@ -130,7 +134,8 @@ resource class OneLiveServer(
     // the source tree, but must not change the protocol of an existing node.
     val hostSource: string,
     val privateRequests: OneLivePrivateRequests? = null,
-    val browserContexts: Map<string, OneLiveBrowserContext> = Map()
+    val browserContexts: Map<string, OneLiveBrowserContext> = Map(),
+    val admission: OneLiveRequestAdmission? = null
 ) {
     fun drop(): void {
         for (session in sessions) {
@@ -166,13 +171,14 @@ fun oneLiveServer(
     sockets: OneLiveSockets = oneLiveNoSockets(),
     defers: (HttpRequest, int) -> bool = oneLiveNoDefers(),
     recovery: OneLiveRecoveryStore = oneLiveNoRecovery(),
-    privateRequests: OneLivePrivateRequests? = null
+    privateRequests: OneLivePrivateRequests? = null,
+    admission: OneLiveRequestAdmission? = null
 ): OneLiveServer {
     val listener = tcpListenAddress(address, 1024)
     listener.setNonblocking()
     val poller = socketPoller()
     if (listener.descriptor >= 0 && poller.descriptor >= 0) poller.watchDescriptor(listener.descriptor)
-    OneLiveServer(handler, isPage, factory, theme, options, storage, sockets, defers, move(listener), move(poller), [], [], false, recovery, oneLiveSessionId(), linuxReadFile(options.hostScript,1048576), privateRequests, Map())
+    OneLiveServer(handler, isPage, factory, theme, options, storage, sockets, defers, move(listener), move(poller), [], [], false, recovery, oneLiveSessionId(), linuxReadFile(options.hostScript,1048576), privateRequests, Map(), admission)
 }
 
 // Retain transport origin only when an app opted into the private callback.
@@ -436,6 +442,15 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
     }
     val request = httpRequestWithAddress(httpParseRequest(input.slice(0, end + length)), peer)
     slots[slot].input = input.slice(end + length, input.size)
+    val admission = this.admission
+    if (admission != null) {
+        val refusal = admission.check(request)
+        if (refusal != null) {
+            queue(slot, if(request.method=="HEAD")refusal.renderHead()else refusal.render())
+            slots[slot].closing = true
+            return
+        }
+    }
     if (request.path == "/one/live" && webSocketIsUpgradeRequest(request)) {
         val id = request.queryParameter("s")
         if(!recovery.enabled && request.queryParameter("recovery")=="1") {

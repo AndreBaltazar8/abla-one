@@ -1,0 +1,71 @@
+import "abla/http"
+import "abla/net"
+import "abla/test"
+import "abla/process/time"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+
+var admissionCalls=0
+var handlerCalls=0
+var pagePredicates=0
+var factoryCalls=0
+var deferredCalls=0
+class AdmissionProbe : OneApp {
+    fun render(var ui: Ui): Node = text("admitted",style())
+    fun receive(kind: string,payload: string): void { return }
+}
+fun admissionFactory(request: HttpRequest,id: string): OneApp {factoryCalls+=1;AdmissionProbe()}
+fun admissionHandler(request: HttpRequest): HttpResponse {handlerCalls+=1;httpText("handler")}
+fun admissionPage(request: HttpRequest): bool {pagePredicates+=1;request.path=="/"}
+fun admissionDefer(request: HttpRequest,ticket: int): bool {deferredCalls+=1;false}
+fun admissionCheck(request: HttpRequest): HttpResponse? {
+    admissionCalls+=1
+    val peer=request.peerAddress
+    expect(peer!=null && peer.address=="127.0.0.1","admission sees actual accepted peer")
+    if(request.header("X-Admit")=="yes")null else httpText("blocked",403)
+}
+fun admissionExchange(var server: OneLiveServer,wire: string): string {
+    var socket=tcpConnectIpv4("127.0.0.1",server.listener.localPort(),1000)
+    expect(socket.descriptor>=0,"owned loopback connection")
+    socket.writeResult(wire)
+    socket.setNonblocking()
+    var reply=""
+    val deadline=monotonicMilliseconds()+2000
+    while(monotonicMilliseconds()<deadline){
+        server.step()
+        val chunk=socket.readResult(65536)
+        if(chunk.hasData())reply=reply+chunk.bytes
+        if(chunk.reachedEof())break
+    }
+    socket.close()
+    reply
+}
+fun main: int {
+    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),admissionHandler,admissionPage,admissionFactory,oneDefaultTheme(),OneLiveOptions("Admission","en","#fff","/i","src/backends/web/host.js",""),defers=admissionDefer,admission=OneLiveRequestAdmission(admissionCheck))
+    expect(server.listening(),"owned listener")
+    for(path in ["/","/ordinary","/one/upload","/one/cookies","/one/host.js","/one/canvas.js","/one/fonts/DejaVuSans.ttf"]){
+        val method=if(path=="/one/upload")"POST"else"GET"
+        val reply=admissionExchange(server,"$method $path HTTP/1.1\r\nHost: local\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        expect(reply.contains("403 Forbidden") && reply.contains("blocked"),"refused before built-in/ordinary routing: $path")
+    }
+    val ws=admissionExchange(server,"GET /one/live?s=unknown HTTP/1.1\r\nHost: local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+    expect(ws.contains("403 Forbidden") && !ws.contains("101 Switching"),"refused before WebSocket upgrade or unknown-session handling")
+    val head=admissionExchange(server,"HEAD /ordinary HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
+    expect(head.contains("403 Forbidden") && !head.contains("blocked"),"HEAD refusal omits response body")
+    expectEqual(handlerCalls,0,"no ordinary handler reached by refusals")
+    expectEqual(pagePredicates,0,"no page predicate reached by refusals")
+    expectEqual(factoryCalls,0,"no SSR app/session created by refusals")
+    expectEqual(deferredCalls,0,"no deferred I/O starts before admission")
+    expectEqual(server.sessions.size,0,"no session allocated by refusals")
+    expectEqual(admissionCalls,9,"one admission check per actual HTTP request")
+    val admitted=admissionExchange(server,"GET /ordinary HTTP/1.1\r\nHost: local\r\nX-Admit: yes\r\nConnection: close\r\n\r\n")
+    expect(admitted.contains("200 OK") && admitted.contains("handler"),"null admission preserves ordinary handling")
+    expectEqual(handlerCalls,1,"allowed handler executes once")
+    expectEqual(deferredCalls,1,"allowed request reaches normal defer path")
+    var legacy=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),admissionHandler,oneLivePaths([]),admissionFactory,oneDefaultTheme(),OneLiveOptions("Legacy","en","#fff","/i","src/backends/web/host.js",""))
+    val before=admissionCalls
+    val unchanged=admissionExchange(legacy,"GET /ordinary HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
+    expect(unchanged.contains("200 OK") && unchanged.contains("handler"),"omitted hook retains previous behavior")
+    expectEqual(admissionCalls,before,"default has no admission callback")
+    testsPassed()
+}
