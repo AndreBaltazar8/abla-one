@@ -16,6 +16,8 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Bugs seen
 
+- [ ] Complete451 final SDK gate after correcting one stale recovery_raw expectation: full native run39passed/1failed because that assertion still expected MIME quoted-pair escaping while verified browser serialization uses%22. Updated assertion queued with remaining SDK live/Wasm checks; no implementation change. Evidence /tmp/abla-one-recovery-multipart-evidence/sdk-checks.log.
+
 - [ ] Audit the live `.file()` MIME contract: OneRequest.file documents using OneFile.mime unless a Content-Type header is already set, but its builder retains only the handle and oneLiveExecute reads bytes without restoring the MIME. Add an actual handler-header control for default MIME and an explicit override before fixing across backends. No MIME behavior change is included in451.
 
 ## ablac bugs seen (worked around, not confirmed fixed)

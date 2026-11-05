@@ -63,7 +63,7 @@ fun main: int {
     multi.bytes.set(file.handle,data);multi.done=true
     val ready=oneRecoveryRawRequest(multi)
     expect(ready!=null && ready.parts.size==4 && ready.parts[0].value=="first" && ready.parts[1].value==data && ready.parts[2].value==data && ready.parts[3].value=="last","duplicate multipart field names preserve exact order and repeated binary content")
-    expectEqual(oneLivePartQuoted(file.name),"a\\\"b.txt","multipart filename quotes are escaped")
+    expectEqual(oneLivePartQuoted(file.name),"a%22b.txt","multipart filename quotes use browser-compatible encoding")
     oneRecoveryRawRelease(multi)
     val injection=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","/multi").multipart([oneFilePart("bad\r\nX: injected",file)])),0)
     expect(injection.status==400 && !injection.reserved,"multipart header injection refuses before reading shared storage")
