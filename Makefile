@@ -3,7 +3,7 @@ ABLAC ?= $(abspath ../ablac/build/ablac)
 NIX := nix-shell ../ablac/shell.nix --run
 TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab tests/remote/client.ab tests/remote/routes.ab)
 
-.PHONY: test-recovery test-remote papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-thin ui-thin ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
+.PHONY: test-recovery-raw test-recovery test-remote papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-thin ui-thin ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
 
 # Unit, backend and integration tests (host only).
 test:
@@ -25,6 +25,13 @@ test-recovery:
 	mkdir -p build
 	$(NIX) '$(ABLAC) build tests/ui/recovery_live.ab -o build/recovery-live --fast'
 	timeout --signal=TERM --kill-after=10s 180s node tests/ui/web_live_recovery.mjs
+	timeout --signal=TERM --kill-after=10s 240s node tests/ui/web_live_raw_recovery.mjs
+
+# Focused raw file/materialization proof, including a real sixty-second deadline.
+test-recovery-raw:
+	mkdir -p build
+	$(NIX) '$(ABLAC) build tests/ui/recovery_live.ab -o build/recovery-live --fast'
+	timeout --signal=TERM --kill-after=10s 240s node tests/ui/web_live_raw_recovery.mjs
 
 # Server-rendered gallery pages and their icons.
 gallery-web:

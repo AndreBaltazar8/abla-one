@@ -152,6 +152,11 @@ fun proofCompletion(row: Json, payload: string): Json {
 // File jobs in this stand-in are tiny local fixtures. Production callbacks
 // enqueue off-path S3 jobs and deliver their completion through the same inbox.
 fun proofRead(id: string, owner: string, epoch: int, request: int, handle: string, offset: int, count: int): int {
+    if(request<0 && proofDirectory().child("raw-slow").exists())return 202
+    if(request<0 && offset>=8388608 && proofDirectory().child("raw-mid-hold").exists()){
+        proofDirectory().child("raw-mid-marker").writeText(jsonStringify(jsonObject(["session","owner","request","offset"],[jsonString(id),jsonString(owner),jsonInteger(request),jsonInteger(offset)])))
+        return 202
+    }
     if (proofDirectory().child("hold-reads").exists()) return 202
     if (!oneRecoveryIdentifier(id) || !oneRecoveryIdentifier(handle)) return 403
     val lock = proofDirectory().child("store.lock").fileLock()

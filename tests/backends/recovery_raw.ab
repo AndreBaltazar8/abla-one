@@ -1,0 +1,82 @@
+import "abla/test"
+import "../../src/backends/web_live.ab"
+fun rawTestPayload(id: int, bytes: string): string = jsonStringify(jsonObject(["requestId","status","body","bodyBase64","error"],[jsonInteger(id),jsonInteger(200),jsonString(""),jsonString(base64Encode(bytes)),jsonString("")]))
+fun main: int {
+    val file=OneFile("shared-handle","a\"b.txt",4,"application/octet-stream")
+    val item=OneLiveRequest(7,oneRequest("POST","/raw").file(file),"operation","session",3)
+    val raw=oneRecoveryRawBegin(item,100)
+    expect(raw.reserved && raw.deadline==15100,"raw assembly reserves bounded process capacity and honors request deadline")
+    raw.reading=-100;raw.length=262144
+    val data="ab${byteEncode(0)}c"
+    expect(!oneRecoveryRawAccept(raw,rawTestPayload(-101,data)) && raw.total==0,"an out-of-order chunk ID cannot change assembly")
+    expect(oneRecoveryRawAccept(raw,rawTestPayload(-100,data)) && raw.done && raw.total==4,"binary bytes and a short EOF chunk are retained exactly")
+    expect(!oneRecoveryRawAccept(raw,rawTestPayload(-100,data)) && raw.total==4,"duplicate chunk completion cannot append bytes again")
+    val materialized=oneRecoveryRawRequest(raw)
+    expect(materialized!=null && materialized.body==data && materialized.bodyFile=="","raw file request becomes byte-exact volatile body")
+    expect(raw.item.id==7 && raw.item.operation=="operation" && raw.item.epoch==3,"request identity and original operation context remain unchanged")
+    oneRecoveryRawRelease(raw)
+    expect(oneRecoveryRequestReserved==0 && raw.bytes.keys().size==0,"release clears buffer and process reservation exactly once")
+    oneRecoveryRawRelease(raw)
+    expect(oneRecoveryRequestReserved==0,"double release cannot underflow process budget")
+    val empty=oneRecoveryRawBegin(item,0)
+    empty.reading=-200;empty.length=262144
+    expect(oneRecoveryRawAccept(empty,rawTestPayload(-200,"")) && empty.done && empty.total==0,"empty shared files terminate without a false read loop")
+    oneRecoveryRawRelease(empty)
+    val bad=oneRecoveryRawBegin(item,0)
+    bad.reading=-300;bad.length=3
+    expect(oneRecoveryRawAccept(bad,rawTestPayload(-300,"four")) && bad.status==502 && bad.total==0,"oversized chunk refuses before retaining any bytes")
+    oneRecoveryRawRelease(bad)
+    val malformed=oneRecoveryRawBegin(item,0)
+    malformed.reading=-301;malformed.length=3
+    val invalid="{\"requestId\":-301,\"status\":200,\"bodyBase64\":\"!!!\"}"
+    expect(oneRecoveryRawAccept(malformed,invalid) && malformed.status==502,"malformed base64 cannot masquerade as empty EOF")
+    oneRecoveryRawRelease(malformed)
+    val multi=oneRecoveryRawBegin(OneLiveRequest(8,oneRequest("POST","/multi").multipart([oneTextPart("same","first"),oneFilePart("same",file),oneFilePart("same",file),oneTextPart("same","last")]),"op","session",3),0)
+    expect(multi.handles.size==1,"repeated file handles share one bounded materialization")
+    multi.bytes.set(file.handle,data);multi.done=true
+    val ready=oneRecoveryRawRequest(multi)
+    expect(ready!=null && ready.parts.size==4 && ready.parts[0].value=="first" && ready.parts[1].value==data && ready.parts[2].value==data && ready.parts[3].value=="last","duplicate multipart field names preserve exact order and repeated binary content")
+    expectEqual(oneLivePartQuoted(file.name),"a\\\"b.txt","multipart filename quotes are escaped")
+    oneRecoveryRawRelease(multi)
+    val injection=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","/multi").multipart([oneFilePart("bad\r\nX: injected",file)])),0)
+    expect(injection.status==400 && !injection.reserved,"multipart header injection refuses before reading shared storage")
+    val parts: array<OnePart> = []
+    var n=0
+    while(n<33){parts.append(oneFilePart("file",file));n=n+1}
+    val tooMany=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","/multi").multipart(parts)),0)
+    expect(tooMany.status==413 && !tooMany.reserved,"part-count limit refuses before allocation")
+    val external=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","https://foreign.invalid/raw").file(file)),0)
+    expect(external.status==501 && !external.reserved,"external destinations never cause shared file reads")
+    val full: array<OneRecoveryRawRequest> = []
+    n=0
+    while(n<4){full.append(oneRecoveryRawBegin(item,0));n=n+1}
+    val overflow=oneRecoveryRawBegin(item,0)
+    expect(overflow.status==429 && !overflow.reserved && oneRecoveryRequestReserved==67108864,"process-wide reservations bound four concurrent assemblies")
+    for(active in full)oneRecoveryRawRelease(active)
+    expectEqual(oneRecoveryRequestReserved,0,"all bounded concurrent reservations are returned")
+    val slow=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","/raw").file(file).timeout(120000)),500)
+    expect(slow.deadline==60500 && !oneRecoveryRawExpired(slow,60499),"slow materialization has an exact sixty-second ceiling")
+    expect(oneRecoveryRawExpired(slow,60500) && slow.status==504 && slow.done,"deadline aborts before a late chunk or handler dispatch")
+    oneRecoveryRawRelease(slow)
+    val drainState=OneRecoveryState("session","proof","owner",oneLiveNoRecovery(),epoch=3,version=5)
+    expect(oneRecoveryRawIdentity(drainState,item) && !oneRecoveryRawIdentity(drainState,OneLiveRequest(7,item.request,"operation","foreign",3)) && !oneRecoveryRawIdentity(drainState,OneLiveRequest(7,item.request,"operation","session",2)),"materialization admission refuses a foreign session or stale owner epoch")
+    drainState.durablePayload="{\"old\":true}"
+    drainState.batch.changed(true)
+    drainState.consumed.append("ordinary-app-inbox")
+    val draining=oneRecoveryRawBegin(item,0)
+    draining.consumed.append("internal-chunk")
+    drainState.rawRequest=draining
+    val write=oneRecoveryRawDrain(drainState,4)
+    expect(write!=null && write.drain && write.payload==drainState.durablePayload && write.frontier==4 && write.generation==0,"consumption-only CAS retains exact durable payload and old frontier/generation")
+    expect(write!=null && write.consumed.size==1 && write.consumed[0]=="internal-chunk" && write.patch=="" && write.outbox.size==0 && !write.cookies && !write.active,"drain contains only internal inbox IDs and no patch/cookie/effect acknowledgement")
+    expect(drainState.consumed.size==1 && drainState.batch.pending && !drainState.batch.acknowledged(),"ordinary app completion and pending action remain unconsumed/unacknowledged")
+    draining.done=true
+    expect(oneRecoveryRawExpired(draining,15000) && draining.status==504,"deadline still applies while completed bytes await their final drain CAS")
+    oneRecoveryRawRelease(draining)
+    var large="x"
+    n=0
+    while(n<24){large=large+large;n=n+1}
+    val oversized=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","/multi").multipart([oneTextPart("text",large),oneFilePart("file",file)])),0)
+    expect(oversized.status==413 && !oversized.reserved,"assembled byte budget refuses oversized inline multipart text before file IO")
+    testsPassed()
+}

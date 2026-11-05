@@ -1,0 +1,126 @@
+import "web_session.ab"
+import "abla/crypto"
+
+// Only volatile materialization state: never part of the checkpoint codec.
+val oneRecoveryRequestLimit = 16777216
+val oneRecoveryRequestProcessLimit = 67108864
+var oneRecoveryRequestReserved = 0
+class OneRecoveryRawRequest(
+    val item: OneLiveRequest, val handles: array<string>, val deadline: int,
+    val bytes: Map<string,string> = Map(), val completed: Map<int,string> = Map(), val consumed: array<string> = [],
+    var at: int = 0, var offset: int = 0, var reading: int = 0,
+    var length: int = 0, var admitted: bool = false, var retryAt: int = 0,
+    var total: int = 0, var status: int = 200, var done: bool = false,
+    var reserved: bool = false, var drainedAt: int = 0
+)
+fun oneRecoveryRaw(request: OneRequest): bool {
+    if(request.bodyFile!="")return true
+    for(part in request.parts)if(part.file!="")return true
+    false
+}
+fun oneRecoveryRawTimeout(request: OneRequest): int = if(request.timeoutMs<=0)15000 else if(request.timeoutMs>60000)60000 else request.timeoutMs
+fun oneRecoveryPartMetadata(value: string, limit: int): bool {
+    if(value.size>limit)return false
+    for(b in value)if(b<32 || b==127)return false
+    true
+}
+fun oneRecoveryRawMetadata(request: OneRequest): int {
+    if(request.parts.size>32)return 413
+    var size=request.body.size
+    if(request.bodyBase64.size>22369624)return 413
+    if(request.bodyBase64!="")size=base64Decode(request.bodyBase64).size
+    for(part in request.parts){
+        if(!oneRecoveryPartMetadata(part.name,256) || !oneRecoveryPartMetadata(part.filename,256) || !oneRecoveryPartMetadata(part.contentType,256))return 400
+        if(part.file.size>256)return 400
+        if(part.base64!="" && base64Encode(base64Decode(part.base64))!=part.base64)return 400
+        if(part.value.size>oneRecoveryRequestLimit || part.base64.size>22369624)return 413
+        size=size+part.value.size+(if(part.base64!="")base64Decode(part.base64).size else 0)+1024
+        if(size>oneRecoveryRequestLimit)return 413
+    }
+    if(size>oneRecoveryRequestLimit)413 else 200
+}
+fun oneRecoveryRawBegin(item: OneLiveRequest, now: int): OneRecoveryRawRequest {
+    val handles: array<string> = []
+    if(item.request.bodyFile!="")handles.append(item.request.bodyFile)
+    for(part in item.request.parts)if(part.file!=""){
+        var seen=false
+        for(handle in handles)if(handle==part.file)seen=true
+        if(!seen)handles.append(part.file)
+    }
+    val raw=OneRecoveryRawRequest(item,handles,now+oneRecoveryRawTimeout(item.request),drainedAt=now)
+    raw.status=oneRecoveryRawMetadata(item.request)
+    for(handle in handles)if(handle.size==0 || handle.size>256)raw.status=400
+    val url=item.request.url
+    if(!(url.startsWith("/") || url.startsWith("./")))raw.status=501
+    if(raw.status==200 && oneRecoveryRequestReserved>oneRecoveryRequestProcessLimit-oneRecoveryRequestLimit)raw.status=429
+    if(raw.status!=200){raw.done=true;return raw}
+    oneRecoveryRequestReserved=oneRecoveryRequestReserved+oneRecoveryRequestLimit
+    raw.reserved=true
+    raw
+}
+fun oneRecoveryRawRelease(raw: OneRecoveryRawRequest): void {
+    if(raw.reserved){oneRecoveryRequestReserved=oneRecoveryRequestReserved-oneRecoveryRequestLimit;raw.reserved=false}
+    raw.bytes.clear()
+    raw.completed.clear()
+    return
+}
+fun oneRecoveryRawExpired(raw: OneRecoveryRawRequest, now: int): bool {
+    if(raw.status==200 && now>=raw.deadline){raw.done=true;raw.status=504;return true}
+    false
+}
+fun oneRecoveryRawReadId(): int {
+    // Fresh per attempt (including a new owner epoch). A consumed job cannot
+    // recreate its deleted inbox row, so replay must not reuse its ID.
+    val random=secureRandomBytes(6).bytes
+    var value=0
+    for(b in random)value=value*256+b
+    -(value+1)
+}
+fun oneRecoveryRawAccept(raw: OneRecoveryRawRequest, payload: string): bool {
+    val parsed=jsonParse(payload)
+    val value=parsed.value
+    if(!parsed.succeeded || !value.isObject() || !value.get("requestId").isNumber() || !value.get("requestId").asNumber().integer || !value.get("requestId").intAvailable() || value.getInt("requestId")!=raw.reading)return false
+    raw.completed.set(raw.reading,hexEncode(sha256(payload)))
+    if(!value.get("status").isNumber() || !value.get("status").asNumber().integer || !value.get("status").intAvailable()){raw.done=true;raw.status=502;return true}
+    if(value.getInt("status")!=200){raw.done=true;raw.status=if(value.getInt("status")>=400 && value.getInt("status")<=599)value.getInt("status")else 502;return true}
+    val encoded=value.get("bodyBase64")
+    if(!encoded.isString() || encoded.asString().size>349528){raw.done=true;raw.status=502;return true}
+    val bytes=base64Decode(encoded.asString())
+    if(base64Encode(bytes)!=encoded.asString() || bytes.size>raw.length){raw.done=true;raw.status=502;return true}
+    if(raw.total>oneRecoveryRequestLimit-bytes.size){raw.done=true;raw.status=413;return true}
+    val handle=raw.handles[raw.at]
+    raw.bytes.set(handle,(raw.bytes.get(handle)??"")+bytes)
+    raw.total=raw.total+bytes.size
+    raw.offset=raw.offset+bytes.size
+    if(bytes.size<raw.length){raw.at=raw.at+1;raw.offset=0;if(raw.at==raw.handles.size)raw.done=true}
+    raw.reading=0;raw.admitted=false
+    true
+}
+fun oneRecoveryRawRequest(raw: OneRecoveryRawRequest): OneRequest? {
+    if(!raw.done || raw.status!=200)return null
+    val request=raw.item.request
+    if(request.bodyFile!="")return request.copy(raw.bytes.get(request.bodyFile)??"","","",[])
+    val parts: array<OnePart> = []
+    var size=0
+    for(part in request.parts){
+        val bytes=if(part.file!="")raw.bytes.get(part.file)??"" else if(part.base64!="")base64Decode(part.base64)else part.value
+        if(bytes.size>oneRecoveryRequestLimit-size-1024)return null
+        size=size+bytes.size+1024
+        parts.append(OnePart(part.name,bytes,"","",part.filename,part.contentType))
+    }
+    request.copy("","","",parts)
+}
+fun oneLivePartQuoted(value: string): string {
+    var out=""
+    for(b in value){if(b==34 || b==92)out=out+"\\";out=out+byteEncode(b)}
+    out
+}
+fun oneRecoveryRawDrain(state: OneRecoveryState, frontier: int): OneRecoveryWrite? {
+    val raw=state.rawRequest
+    if(raw==null || raw.consumed.size==0 || state.durablePayload=="")return null
+    val consumed: array<string> = []
+    for(id in raw.consumed)consumed.append(id)
+    OneRecoveryWrite(state.batch.durable,frontier,state.durablePayload,"",[],false,consumed,state.committedActivity,false,true)
+}
+
+fun oneRecoveryRawIdentity(state: OneRecoveryState,item: OneLiveRequest): bool = item.session==state.id && item.epoch>0 && item.epoch==state.epoch

@@ -306,7 +306,10 @@ fun OneLiveServer.closeSlot(slot: int): void {
 fun OneLiveServer.endSession(index: int): void {
     val id = sessions[index].id
     val ending = oneRecoverySessions.get(id)
-    if (ending != null) ending.ending = true
+    if (ending != null) {
+        ending.ending = true
+        if (ending.rawRequest != null) { oneRecoveryRawRelease(ending.rawRequest); ending.rawRequest = null }
+    }
     val slot = sessions[index].slot
     if (slot >= 0 && slots[slot].descriptor >= 0) {
         queue(slot, webSocketEncodeFrame(webSocketClosePayload(1008, "session ended"), 8))
@@ -750,12 +753,24 @@ fun OneLiveServer.message(slot: int, payload: string): void {
 fun OneLiveServer.pump(index: int): bool {
     if (!recoveryFence(index, false)) return false
     val moved = sessions[index].deliverRoutes()
+    val recovering = oneRecoverySessions.get(sessions[index].id)
+    if (recovering != null && recovering.rawRequest != null) {
+        if (!recoveryRawFinish(index)) return moved
+    }
     var requests = sessions[index].queue.takeRequests()
     while (requests.size > 0) {
         for (item in requests) {
             if (!recoveryFence(index, true)) { sessions[index].queue.request(item); continue }
+            if (recovering != null && recovering.rawRequest != null) { sessions[index].queue.request(item); continue }
+            if (recovering != null && item.epoch > 0 && oneRecoveryRaw(item.request)) {
+                if (!oneRecoveryRawIdentity(recovering,item)) { sessions[index].queue.complete(oneResponsePayload(item.id,409,"","File request unavailable")); continue }
+                recovering.rawRequest = oneRecoveryRawBegin(item, oneLiveNow())
+                recovering.batch.changed(true)
+                continue
+            }
             sessions[index].queue.complete(oneLiveExecute(handler, item, privateRequests, browserContexts.get(sessions[index].id)))
         }
+        if (recovering != null && recovering.rawRequest != null) return moved
         if (!recoveryFence(index, false)) return false
         requests = sessions[index].queue.takeRequests()
     }
@@ -769,6 +784,7 @@ fun OneLiveServer.pump(index: int): bool {
 // Same-origin requests run through the application's handler in process.
 fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest, privateRequests: OneLivePrivateRequests? = null, browser: OneLiveBrowserContext? = null): string {
     val r = item.request
+    for (part in r.parts) if (!oneRecoveryPartMetadata(part.name,part.name.size) || !oneRecoveryPartMetadata(part.filename,part.filename.size) || !oneRecoveryPartMetadata(part.contentType,part.contentType.size)) return oneResponsePayload(item.id,400,"","Invalid multipart metadata")
     if (item.epoch > 0) {
         if (r.bodyFile != "") return oneResponsePayload(item.id,501,"","Recovery sessions must read file bytes before sending a request")
         for (part in r.parts) if (part.file != "") return oneResponsePayload(item.id,501,"","Recovery sessions must read file bytes before sending a request")
@@ -793,7 +809,7 @@ fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest,
     val headers: array<HttpHeader> = []
     for (h in r.headers) {
         val name = oneLowerAscii(h.name)
-        if (!name.startsWith("x-one-live-")) headers.append(HttpHeader(name, h.value))
+        if (!name.startsWith("x-one-live-") && !(r.parts.size>0 && name=="content-type")) headers.append(HttpHeader(name, h.value))
     }
     if (item.operation != "") headers.append(HttpHeader("x-one-live-operation", item.operation))
     if (item.session != "" && item.epoch > 0) {
@@ -818,7 +834,7 @@ fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest,
                 if (bytes == null) return oneResponsePayload(item.id,0,"","unknown file handle")
                 content = bytes
             }
-            out = "$out--$boundary\r\nContent-Disposition: form-data; name=\"${part.name}\"${if (part.filename != "") "; filename=\"${part.filename}\"" else ""}\r\n${if (part.contentType != "") "Content-Type: ${part.contentType}\r\n" else ""}\r\n$content\r\n"
+            out = "$out--$boundary\r\nContent-Disposition: form-data; name=\"${oneLivePartQuoted(part.name)}\"${if (part.filename != "") "; filename=\"${oneLivePartQuoted(part.filename)}\"" else ""}\r\n${if (part.contentType != "") "Content-Type: ${part.contentType}\r\n" else ""}\r\n$content\r\n"
         }
         body = "$out--$boundary--\r\n"
         headers.append(HttpHeader("content-type", "multipart/form-data; boundary=$boundary"))
@@ -930,6 +946,8 @@ fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimer
             browserContexts.remove(session.id)
             oneLiveForget(session.id)
             oneMemoForget(session.id)
+            val persisted = oneRecoverySessions.get(session.id)
+            if (persisted != null && persisted.rawRequest != null) oneRecoveryRawRelease(persisted.rawRequest)
             oneRecoverySessions.remove(session.id)
         }
     }

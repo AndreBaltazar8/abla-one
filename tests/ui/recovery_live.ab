@@ -6,7 +6,7 @@ import "../../src/one_kit.ab"
 // must replace the browser's previous namespace, not mix the two tables.
 fun proofLayout(): Style = if (processEnvironmentOr("ONE_RECOVERY_TEST_CSS_NODE", "") == "a") style().padding(20).gap(12).width(240) else style().padding(20).gap(12)
 
-class RecoveryProof(val services: OneServices, val session: string, var hydrating: int = 0, var draft: string = "", var view: string = "/recovery", var picker: int = 0, var reading: int = 0, var file: OneFile = OneFile("", "", 0, ""), var content: string = "", var mutation: int = 0, var count: int = 0, var awaitingReady: bool = false) : OneApp {
+class RecoveryProof(val services: OneServices, val session: string, var hydrating: int = 0, var draft: string = "", var view: string = "/recovery", var picker: int = 0, var reading: int = 0, var file: OneFile = OneFile("", "", 0, ""), var content: string = "", var mutation: int = 0, var count: int = 0, var awaitingReady: bool = false, var rawRequest: int = 0, var rawStatus: int = 0, var rawCount: int = 0) : OneApp {
     fun render(var ui: Ui): Node = column(proofLayout(), [
         text(if (view == "/recovery/other") "Other view" else "Draft view", style()).keyed("view-title"),
         input(draft, "Draft text", ui.change { value -> draft = value }, style()).keyed("draft-text").set("label", "Draft text"),
@@ -18,13 +18,31 @@ class RecoveryProof(val services: OneServices, val session: string, var hydratin
         text("Picked file: ${file.name}", style()).keyed("picked-file"),
         text("Read bytes: $content", style()).keyed("read-file"),
         button(ui, "Commit once", "", ui.press { mutation = services.send(oneRequest("POST", "/mutation").json(jsonObject([], []))) }, style()),
-        text("Committed mutations: $count", style()).keyed("committed-count")
+        text("Committed mutations: $count", style()).keyed("committed-count"),
+        button(ui,"Send raw file","",ui.press { sendRaw("raw") },style()),
+        button(ui,"Send multipart file","",ui.press { sendRaw("multipart") },style()),
+        button(ui,"Send oversized multipart","",ui.press { sendRaw("oversized") },style()),
+        button(ui,"Send slow file","",ui.press { sendRaw("slow") },style()),
+        text("Raw result: $rawStatus/$rawCount",style()).keyed("raw-result")
     ])
+    fun sendRaw(mode: string): void {
+        rawStatus=0
+        var request=oneRequest("POST","/raw-upload").file(file).header("x-proof-handle",file.handle).header("x-raw-private","raw-header-secret").timeout(120000)
+        if(mode=="multipart")request=request.multipart([oneTextPart("tag","first"),oneFilePart("same",file),oneFilePart("same",file),oneTextPart("tag","last")])
+        if(mode=="oversized"){
+            val parts: array<OnePart> = []
+            var n=0
+            while(n<33){parts.append(oneFilePart("file",file));n=n+1}
+            request=request.multipart(parts)
+        }
+        rawRequest=services.send(request)
+        return
+    }
     fun receive(kind: string, value: string): void {
         if (kind == "route") view = oneRoutePagePath(value)
         else if (kind == "checkpoint") services.effect("live-checkpoint", jsonStringify(jsonObject(
-            ["draft", "view", "picker", "reading", "file", "contentBytes", "mutation", "count"],
-            [jsonString(draft), jsonString(view), jsonInteger(picker), jsonInteger(reading), jsonObject(["handle", "name", "size", "mime"], [jsonString(file.handle), jsonString(file.name), jsonInteger(file.size), jsonString(file.mime)]), jsonInteger(content.size), jsonInteger(mutation), jsonInteger(count)])))
+            ["draft", "view", "picker", "reading", "file", "contentBytes", "mutation", "count", "rawStatus", "rawCount"],
+            [jsonString(draft), jsonString(view), jsonInteger(picker), jsonInteger(reading), jsonObject(["handle", "name", "size", "mime"], [jsonString(file.handle), jsonString(file.name), jsonInteger(file.size), jsonString(file.mime)]), jsonInteger(content.size), jsonInteger(mutation), jsonInteger(count), jsonInteger(rawStatus), jsonInteger(rawCount)])))
         else if (kind == "restore") {
             val saved = jsonParse(value).value
             draft = saved.getString("draft"); view = saved.getString("view")
@@ -32,6 +50,7 @@ class RecoveryProof(val services: OneServices, val session: string, var hydratin
             val picked = saved.get("file")
             file = OneFile(picked.getString("handle"), picked.getString("name"), picked.getInt("size"), picked.getString("mime"))
             content = ""; mutation = saved.getInt("mutation"); count = saved.getInt("count")
+            rawRequest=0;rawStatus=saved.getInt("rawStatus");rawCount=saved.getInt("rawCount")
             if (saved.getInt("contentBytes") > 0 && reading == 0) {
                 val recovery = oneRecoverySessions.get(session)
                 if (recovery != null) {
@@ -46,7 +65,10 @@ class RecoveryProof(val services: OneServices, val session: string, var hydratin
             services.effect("live-restored", "")
         } else if (kind == "result") {
             val response = oneResponse(value)
-            if (hydrating != 0 && response.requestId == hydrating) {
+            if(rawRequest!=0 && response.requestId==rawRequest){
+                rawRequest=0;rawStatus=response.status
+                if(response.status==200)rawCount=jsonParse(response.body).value.getInt("count")
+            } else if (hydrating != 0 && response.requestId == hydrating) {
                 hydrating = 0
                 if (response.status == 200) content = base64Decode(response.bodyBase64)
             } else if (picker != 0 && response.requestId == picker) {
@@ -68,6 +90,7 @@ class RecoveryProof(val services: OneServices, val session: string, var hydratin
 var proofKillAfterMutation = false
 fun proofHandler(request: HttpRequest): HttpResponse {
     if (request.path == "/health") return httpText("ok")
+    if (request.path == "/raw-upload") return proofRawHandler(request)
     if (request.path == "/arm-kill" && proofUser(request) == "alice") { proofKillAfterMutation = true; return httpText("armed") }
     if (request.path == "/arm-effect-kill" && proofUser(request) == "alice") { proofKillAfterEffect = true; return httpText("armed") }
     if (request.path != "/mutation" || request.method != "POST") return httpText("not found", 404)
@@ -117,4 +140,29 @@ fun main: int {
         proofUploadPump(server)
     }
     0
+}
+
+// The fence and effect share the stand-in transaction lock. Test fixtures
+// keep the received bytes outside the session checkpoint for independent JS
+// multipart parsing and binary comparison.
+fun proofRawHandler(request: HttpRequest): HttpResponse {
+    val session=request.header("x-one-live-session")
+    val operation=request.header("x-one-live-operation")
+    if(operation=="" || !oneRecoveryIdentifier(session))return httpText("identity required",403)
+    val lock=proofDirectory().child("store.lock").fileLock()
+    if(!lock.tryHold()){proofRelease(lock);return httpText("unavailable",503)}
+    val row=proofLoad(session)
+    if(!proofOwned(row,row.getString("owner"),oneParseInt(request.header("x-one-live-epoch"),0))){proofRelease(lock);return httpText("fenced",409)}
+    val path=proofDirectory().child("raw-business.json")
+    val parsed=jsonParse(path.readText())
+    val old=if(parsed.succeeded)parsed.value else jsonObject(["count","seen"],[jsonInteger(0),jsonObject([],[])])
+    val repeated=old.get("seen").has(operation)
+    val count=old.getInt("count")+(if(repeated)0 else 1)
+    val next=jsonObject(["count","seen","bodyBase64","contentType","session","operation","handle"],[jsonInteger(count),proofWith(old.get("seen"),operation,jsonBoolean(true)),jsonString(base64Encode(request.body)),jsonString(request.header("content-type")),jsonString(session),jsonString(operation),jsonString(request.header("x-proof-handle"))])
+    val temporary=proofDirectory().child("raw-business.${linuxProcessId()}.next")
+    val ok=temporary.writeText(jsonStringify(next)) && temporary.moveTo(path)
+    proofRelease(lock)
+    if(!ok)return httpText("unavailable",503)
+    if(proofDirectory().child("raw-kill-after-effect").exists() && !repeated){proofDirectory().child("raw-kill-after-effect").remove();exit(19)}
+    HttpResponse(200,[HttpHeader("Content-Type","application/json")],jsonStringify(jsonObject(["count"],[jsonInteger(count)])))
 }

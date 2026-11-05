@@ -1,0 +1,11 @@
+import "abla/test"
+import "../../src/backends/web_live.ab"
+fun main: int {
+    val quoted=oneLiveExecute({request->httpText(request.body)},OneLiveRequest(1,oneRequest("POST","/file").multipart([oneBytesPart("part",base64Encode("abc"),"a\"b.txt","text/plain")])) )
+    expect(oneResponse(quoted).body.contains("filename=\"a\\\"b.txt\""),"quoted filenames remain one escaped disposition parameter")
+    val injected=oneLiveExecute({request->httpText("handler reached")},OneLiveRequest(1,oneRequest("POST","/file").multipart([oneBytesPart("part",base64Encode("abc"),"bad\r\nX: injected","text/plain")])))
+    expect(oneResponse(injected).status==400,"CRLF filename refuses before reaching the handler")
+    val overridden=oneLiveExecute({request->httpText(request.header("content-type"))},OneLiveRequest(1,oneRequest("POST","/file").multipart([oneTextPart("text","value")]).header("Content-Type","application/json")))
+    expect(oneResponse(overridden).body.startsWith("multipart/form-data; boundary="),"platform boundary replaces a stale content-type header")
+    testsPassed()
+}
