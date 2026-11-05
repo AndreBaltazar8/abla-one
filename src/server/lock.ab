@@ -1,5 +1,6 @@
 import "abla/compiler"
 import "abla/fs"
+import "abla/text"
 import "remote.ab"
 
 // server.lock (SPEC §16): what deployed clients may rely on. Each build compares the
@@ -102,7 +103,8 @@ compile fun oneServerLock(path: string): void {
         oneLockClasses(oneRemoteNormal(compiler.resultType(function)), seen, current)
     }
     val file = Path(path)
-    val old = if (file.exists()) oneLockSplit(file.readText(), 10) else []
+    val previous = if (file.exists()) file.readText() else ""
+    val old = oneLockSplit(previous, 10)
     val problems: array<string> = []
     val merged: array<string> = []
     for (line in old) {
@@ -137,9 +139,9 @@ compile fun oneServerLock(path: string): void {
     }
     for (line in current) if (!line.startsWith("route ") || oneLockFind(merged, line) == "") merged.append(line)
     var text = ""
-    for (line in merged) text = "$text$line\n"
-    var previous = ""
-    for (line in old) previous = "$previous$line\n"
+    // Discovery and valid old-lock order may differ between build paths.
+    // Sort complete records; parameter and class-field declaration order stays intact.
+    for (line in sortedStrings(merged)) text = "$text$line\n"
     if (text != previous) compiler.writeFile(path, text)
     return
 }

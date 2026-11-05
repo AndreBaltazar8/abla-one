@@ -853,6 +853,9 @@ stable by default, and removing one is deliberate:
   shapes. Adding a route or a field passes and is recorded; an old client that doesn't
   send a new field gets it empty (null, 0, ""). Changing or removing anything recorded
   fails the server build, naming what changed.
+  Records are serialized in byte order, one per LF-terminated line, so build and
+  discovery order do not change the file. Parameter and class-field order within
+  a record remains as declared.
 - To remove or replace a route, mark it `@retired("reason")`: it stays recorded, and
   answers with a clear "update the app" response that `$remote` passes to the app.
   The entry can be dropped once no supported client calls it.
