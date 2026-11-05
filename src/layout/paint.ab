@@ -198,6 +198,8 @@ fun onePlaceCaret(var frame: OneFrame, box: OneBox, rows: OneInputRows): void {
     var caretX = rows.left
     var caretY = hit.y + box.h / 2
     if (value != "" && !hit.multiline) caretX = rows.left + rows.width
+    // An empty field of several lines starts on its first, where the placeholder does.
+    else if (hit.multiline && value == "") caretY = rows.top + oneLineHeight(r) / 2
     else if (value != "") {
         // The word wrapper drops the spaces at the end, so those are added back.
         var end = value.size
