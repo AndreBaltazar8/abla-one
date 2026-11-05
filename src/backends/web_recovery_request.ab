@@ -84,16 +84,6 @@ fun oneRecoveryRawExpired(var raw: OneRecoveryRawRequest, now: int): bool {
     if(raw.status==200 && now>=raw.deadline){raw.done=true;raw.status=504;return true}
     false
 }
-fun oneRecoveryRawReadId(): int {
-    // Fresh per attempt (including a new owner epoch). A consumed job cannot
-    // recreate its deleted inbox row, so replay must not reuse its ID.
-    val random=secureRandomBytes(7).bytes
-    if(random.size!=7)return 0
-    var value=0
-    var at=0
-    for(b in random){value=if(at==0)b%16 else value*256+b;at=at+1}
-    -(oneRecoveryRawIdBase+value)
-}
 fun oneRecoveryRawAccept(var raw: OneRecoveryRawRequest, payload: string): bool {
     val parsed=jsonParse(payload)
     val value=parsed.value

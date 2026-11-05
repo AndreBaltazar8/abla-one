@@ -217,6 +217,18 @@ fun oneLiveScriptString(value: string): string {
 
 fun oneLiveSessionId(): string = hexEncode(secureRandomBytes(16).bytes)
 
+// Native shared-store jobs use fresh IDs; keep OS entropy out of the Wasm session codec.
+fun oneRecoveryRawReadId(): int {
+    // Fresh per attempt (including a new owner epoch). A consumed job cannot
+    // recreate its deleted inbox row, so replay must not reuse its ID.
+    val random=secureRandomBytes(7).bytes
+    if(random.size!=7)return 0
+    var value=0
+    var at=0
+    for(b in random){value=if(at==0)b%16 else value*256+b;at=at+1}
+    -(oneRecoveryRawIdBase+value)
+}
+
 fun OneLiveServer.findSession(id: string): int {
     var i = 0
     while (i < sessions.size) {

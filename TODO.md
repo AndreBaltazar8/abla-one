@@ -16,7 +16,8 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Bugs seen
 
-- [ ] Complete451 final SDK gate after correcting one stale recovery_raw expectation: full native run39passed/1failed because that assertion still expected MIME quoted-pair escaping while verified browser serialization uses%22. Updated assertion queued with remaining SDK live/Wasm checks; no implementation change. Evidence /tmp/abla-one-recovery-multipart-evidence/sdk-checks.log.
+- [ ] Finish451 Wasm portability gate: SDK native40/40 and live UI pass, but gallery-client caught8 semantic errors because the new raw-read ID generator called native secureRandomBytes from a shared session module. Keep the unchanged generator in native web_live.ab; rerun the raw native checks and complete client-mode gallery/services. Evidence /tmp/abla-one-recovery-multipart-evidence/sdk-checks-v2.log.
+
 
 - [ ] Audit the live `.file()` MIME contract: OneRequest.file documents using OneFile.mime unless a Content-Type header is already set, but its builder retains only the handle and oneLiveExecute reads bytes without restoring the MIME. Add an actual handler-header control for default MIME and an explicit override before fixing across backends. No MIME behavior change is included in451.
 
