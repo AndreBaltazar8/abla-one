@@ -95,6 +95,9 @@ class OneDesktopState(
     var routeEpoch: int = 0,
     // An Alt key is down: abla-graphics reports keys, not modifiers.
     var alt: bool = false,
+    // A Control key is down, and the field a paste asked the clipboard for.
+    var control: bool = false,
+    var pasteKey: string = "",
     var dragAcross: bool = false
 )
 
@@ -267,6 +270,19 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                 }
             } else if (event.kind == windowEventKey && (event.key() == keyLeftAlt || event.key() == keyRightAlt)) {
                 state.alt = event.keyPressed()
+            } else if (event.kind == windowEventKey && (event.key() == keyLeftControl || event.key() == keyRightControl)) {
+                state.control = event.keyPressed()
+            } else if (event.kind == windowEventKey && event.keyPressed() && state.control && event.key() == keyV && state.focusKey != "") {
+                // Ctrl+V: the text comes later, as a clipboard event, for the field focused now.
+                if (window.requestClipboard()) state.pasteKey = state.focusKey
+            } else if (event.kind == windowEventClipboard && state.pasteKey != "") {
+                val i = oneDesktopInput(frame, state.pasteKey)
+                state.pasteKey = ""
+                if (i >= 0 && event.clipboardTextAvailable() && event.clipboardText() != "") {
+                    oneDesktopDeliver(app, theme, state, frame.hits[i].event, "${frame.hits[i].value}${event.clipboardText()}")
+                    frame = oneDesktopFrame(app, theme, state)
+                    state.dirty = true
+                }
             } else if (event.kind == windowEventKey && event.keyPressed() && state.alt && (event.key() == keyLeft || event.key() == keyRight)) {
                 // Alt+Left and Alt+Right, as in a browser.
                 if (event.key() == keyLeft) state.routes.back("") else state.routes.forward()
@@ -310,7 +326,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     oneScrollTo(state.scroll, frame.hits[s], oneParseInt(frame.hits[s].value, 0) - event.scrollY() * 48)
                     state.dirty = true
                 }
-            } else if (event.kind == windowEventText && state.focusKey != "") {
+            } else if (event.kind == windowEventText && state.focusKey != "" && !state.control) {
                 val i = oneDesktopInput(frame, state.focusKey)
                 if (i >= 0) {
                     oneDesktopDeliver(app, theme, state, frame.hits[i].event, "${frame.hits[i].value}${oneUtf8(event.codepoint())}")

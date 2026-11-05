@@ -99,7 +99,7 @@ fun oneWebBaseCss(): string =
     ".k-link{color:inherit;text-decoration:none}\n" +
     ":where(.one) :where(h1,h2,h3,h4,p,ul,li,strong,small,em){font:inherit;list-style:none}\n" +
     ".k-row{display:flex;flex-direction:row;align-items:center}\n" +
-    ".k-stack{display:grid}.k-stack>*{grid-area:1/1}\n" +
+    ".k-stack{display:grid;grid-template-columns:minmax(0,1fr)}.k-stack>*{grid-area:1/1}\n" +
     ".k-scroll,.k-feed{overflow-y:auto;min-height:0}\n" +
     ".k-scrollRow{display:flex;flex-direction:row;align-items:center;overflow-x:auto;min-width:0}.k-scrollRow>*{flex:none}\n" +
     ".k-text,.k-rich{display:block;overflow-wrap:anywhere}\n" +
@@ -365,7 +365,7 @@ fun oneWebDeclarations(node: Node, r: Resolved, state: string, parentKind: strin
         val decl = if (prop == "border" || prop == "borderTop" || prop == "borderBottom" || prop == "borderLeft" || prop == "borderRight")
             "${if (prop == "border") "border" else if (prop == "borderTop") "border-top" else if (prop == "borderBottom") "border-bottom" else if (prop == "borderLeft") "border-left" else "border-right"}:${v}px solid $color"
             else if (prop == "align" && node.kind == "stack") "place-items:${oneFlexValue(v)}"
-            else oneWebDeclaration(node.kind, prop, v, parentRow)
+            else oneWebDeclaration(node.kind, prop, v, parentRow, parentKind == "stack")
         if (decl != "") out.append(decl)
     }
     out
@@ -373,7 +373,7 @@ fun oneWebDeclarations(node: Node, r: Resolved, state: string, parentKind: strin
 
 fun oneLower(side: string): string = if (side == "Top") "top" else if (side == "Right") "right" else if (side == "Bottom") "bottom" else "left"
 
-fun oneWebDeclaration(kind: string, prop: string, v: string, parentRow: bool): string {
+fun oneWebDeclaration(kind: string, prop: string, v: string, parentRow: bool, parentStack: bool = false): string {
     when (prop) {
         "gap" -> "gap:${v}px"
         "padding" -> "padding:${v}px"
@@ -384,8 +384,9 @@ fun oneWebDeclaration(kind: string, prop: string, v: string, parentRow: bool): s
         "align" -> "align-items:${oneFlexValue(v)}"
         "justify" -> "justify-content:${oneFlexValue(v)}"
         "alignSelf" -> "align-self:${oneFlexValue(v)}"
-        "width" -> if (v == "fill") (if (parentRow) "flex:1 1 0" else "align-self:stretch") else if (v == "hug") "" else "width:${v}px;flex-shrink:0"
-        "height" -> if (v == "fill") (if (parentRow) "align-self:stretch" else "flex:1 1 0;min-height:0") else if (v == "hug") "" else "height:${v}px;flex-shrink:0"
+        // A stack is a grid of one cell: filling it is stretching in that cell, whatever the stack aligns.
+        "width" -> if (v == "fill") (if (parentRow) "flex:1 1 0" else if (parentStack) "justify-self:stretch" else "align-self:stretch") else if (v == "hug") "" else "width:${v}px;flex-shrink:0"
+        "height" -> if (v == "fill") (if (parentRow) "align-self:stretch" else if (parentStack) "align-self:stretch;min-height:0" else "flex:1 1 0;min-height:0") else if (v == "hug") "" else "height:${v}px;flex-shrink:0"
         "minWidth" -> "min-width:${v}px"
         "maxWidth" -> "max-width:${v}px;width:100%"
         "minHeight" -> "min-height:${v}px"

@@ -141,10 +141,19 @@ fun onePaintText(box: OneBox, x: int, y: int, pl: int, pr: int, pt: int, var fra
     return
 }
 
+// A dot for each character of a secure field's value.
+fun oneMasked(value: string): string {
+    var dots = ""
+    for (b in value) if (b < 128 || b >= 192) dots = "$dots•"
+    dots
+}
+
 @noinline
 fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneFrame, path: string): void {
     val r = box.r
-    val value = box.node.attr("value")
+    // What's typed stays in the hit, for editing; only what's drawn is masked.
+    val typed = box.node.attr("value")
+    val value = if (box.node.attr("secure") == "true") oneMasked(typed) else typed
     val placeholder = box.node.attr("placeholder")
     val size = r.int("size", 16)
     val lh = oneLineHeight(r)
@@ -174,7 +183,7 @@ fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneF
         line = line + 1
     }
     if (over > 0) oneAddRect(frame, "unclip", x + pl, y, inner, box.h, 0, "")
-    oneAddHit(frame, "input", x, y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), path, value, placeholder, multiline)
+    oneAddHit(frame, "input", x, y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), path, typed, placeholder, multiline)
     if (oneCaretPlace.size > 0) oneCaretPlace[0](frame, box, OneInputRows(lines, first, top, left, width, pr))
     return
 }

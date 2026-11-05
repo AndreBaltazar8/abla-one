@@ -218,6 +218,21 @@ fun testFeedFollows(): void {
 }
 
 // A row scrolled halfway under a header takes no press there: the header's button does.
+// A secure field draws a dot a character, and keeps what was typed for editing.
+fun testSecure(): void {
+    val theme = oneDefaultTheme()
+    var ui = oneUi("t", theme)
+    val tree = column(style().fill(), [input("sk_é1", "Key", ui.change { value -> }, style().width(180)).set("secure", "true")])
+    val frame = onePaintFrame(oneLayout(tree, theme, "desktop", 200, 100, Map()), 200, 100)
+    var drawn = ""
+    for (paint in frame.paints) if (paint.op == "text") drawn = "$drawn${paint.text}"
+    expectEqual(drawn, "•••••", "a dot a character")
+    var kept = ""
+    for (hit in frame.hits) if (hit.kind == "input") kept = hit.value
+    expectEqual(kept, "sk_é1", "the field keeps the text")
+    return
+}
+
 fun testScrolledUnder(): void {
     val theme = oneDefaultTheme()
     var ui = oneUi("t", theme)
@@ -264,6 +279,7 @@ fun testStackFill(): void {
 fun main: int {
     testStackFill()
     testScrolledUnder()
+    testSecure()
     testFeedFollows()
     testCaret()
     testFieldShowsItsEnd()
