@@ -22,9 +22,7 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Bugs seen
 
-- [ ] Finish451 ownership/nullable corrections: first unpublished prototype compile stopped with171 semantic errors, second with161 (no parser/IR errors). The documented alias rules require mutations through an owned field path, not a local nullable alias; pending storage now uses a single-element owner array and fresh request records. Corrected compile is queued before runtime/publish claims. Evidence /tmp/abla-one-recovery-multipart-evidence/check.log.
 
-- [ ] Finish verification of multipart metadata fixes: unchanged071 protocol3 checks/2 failures confirms unescaped quotes and CRLF filename corruption; boundary override assertion already passes old code (header dedup is cleanup, not a reproduced override failure). Current branch rejects control bytes/escapes quoted parameters; positive control queued. A picked newline corrupts a part header, not the outer HTTP request headers.
 
 - [ ] Audit the live `.file()` MIME contract: OneRequest.file documents using OneFile.mime unless a Content-Type header is already set, but its builder retains only the handle and oneLiveExecute reads bytes without restoring the MIME. Add an actual handler-header control for default MIME and an explicit override before fixing across backends. No MIME behavior change is included in451.
 
