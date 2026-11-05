@@ -26,6 +26,10 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 - [ ] Audit the live `.file()` MIME contract: OneRequest.file documents using OneFile.mime unless a Content-Type header is already set, but its builder retains only the handle and oneLiveExecute reads bytes without restoring the MIME. Add an actual handler-header control for default MIME and an explicit override before fixing across backends. No MIME behavior change is included in451.
 
+## Remote contract lock
+
+- [ ] Make server.lock declaration order canonical (sorted). NovaKind make app and runner builds currently order new routes differently on the same source; owner46 recorded it in NovaKind16109b9e. Assigned36 after451. Preserve parameter/field order and wire signatures; prove old build-path divergence and sorted equality, publish One and bump the NovaKind pin with focused/full checks.
+
 ## ablac bugs seen (worked around, not confirmed fixed)
 
 - ablac0.2.35 rejects the function-valued class default `val participates: (HttpRequest)->bool = oneRecoveryAllPages()` with repeated `constructor.argument:OneLiveRecoveryStore`; requiring and passing the policy explicitly compiles. Original case is in commit7f51fb3, fixed at the call sites in9358303.
