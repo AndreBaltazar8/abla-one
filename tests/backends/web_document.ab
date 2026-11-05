@@ -50,6 +50,19 @@ fun main: int {
     expect(has(html, "<button type=\"button\""), "pressable is a button")
     expect(has(html, "data-one-press=\"1\""), "press event id")
     expect(has(html, "aria-label=\"Abrir conversa\""), "accessible label")
+    for(event in [0,7]){
+        val off=oneWebRender(pressable(event,style(),[text("Unavailable",style())]).set("enabled","false"),t,"/icons").html
+        expect(has(off," disabled"),"disabled pressable $event has native HTML disabled semantics")
+        expect(has(off," aria-disabled=\"true\""),"disabled pressable $event retains its accessibility state")
+        expect(has(off,"data-one-press=\"$event\""),"disabled pressable $event retains its event identity")
+    }
+    for(explicit in [false,true]){
+        val on=pressable(7,style(),[text("Available",style())])
+        val active=oneWebRender(if(explicit)on.set("enabled","true")else on,t,"/icons").html
+        expect(!has(active," disabled"),"enabled or unannotated pressable $explicit is not disabled")
+        expect(!has(active,"aria-disabled"),"enabled or unannotated pressable $explicit has no disabled accessibility state")
+        expect(has(active,"data-one-press=\"7\""),"enabled or unannotated pressable $explicit retains its event")
+    }
     expect(has(html, "data-one-change=\"1000001\""), "change event id")
     expect(has(html, "type=\"email\""), "email keyboard")
     expect(has(oneWebRender(input("1,5", "Valor", 3, style()).set("keyboard", "decimal"), t, "/icons").html, "inputmode=\"decimal\""), "decimal keyboard")

@@ -203,7 +203,7 @@ fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string,
         index = index + 1
     }
     val common = "class=\"$classes\" data-one=\"$key\""
-    val disabled = if (node.attr("enabled") == "false") " aria-disabled=\"true\"" else ""
+    val disabled = if (node.attr("enabled") == "false") " disabled aria-disabled=\"true\"" else ""
     val selected = (if (node.attr("selected") == "true") " aria-selected=\"true\"" else "") +
         (if (node.attr("item") != "") " data-one-item=\"${node.attr("item")}\"" else "") +
         (if (node.attr("id") != "") " id=\"${oneHtmlEscape(node.attr("id"))}\"" else "") +
