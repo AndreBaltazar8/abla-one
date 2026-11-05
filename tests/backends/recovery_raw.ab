@@ -55,6 +55,11 @@ fun main: int {
     while(n<33){parts.append(oneFilePart("file",file));n=n+1}
     val tooMany=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","/multi").multipart(parts)),0)
     expect(tooMany.status==413 && !tooMany.reserved,"part-count limit refuses before allocation")
+    var headerRequest=oneRequest("POST","/raw").file(file)
+    n=0
+    while(n<129){headerRequest=headerRequest.header("x-test-$n","value");n=n+1}
+    val excessiveHeaders=oneRecoveryRawBegin(OneLiveRequest(1,headerRequest),0)
+    expect(excessiveHeaders.status==413 && !excessiveHeaders.reserved,"header-count limit refuses before snapshot allocation or shared reads")
     val external=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","https://foreign.invalid/raw").file(file)),0)
     expect(external.status==501 && !external.reserved,"external destinations never cause shared file reads")
     val full: array<OneRecoveryRawRequest> = []

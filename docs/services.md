@@ -46,7 +46,8 @@ back to another session's node-local cache. `readFile` remains available when an
 application wants to stream or transform chunks itself.
 
 Recovery requests have a 16 MiB assembled-body budget, at most 32 multipart parts,
-and metadata fields of at most 256 bytes. Reads are at most 256 KiB. One assembly
+and part metadata fields of at most 256 bytes. Headers are limited to 128,
+64 KiB combined, with 256-byte names and 16 KiB values. Reads are at most 256 KiB. One assembly
 runs per session; the process reserves at most 64 MiB of assembly payload across
 sessions. This is a payload/concurrency bound, not an RSS limit: string copying,
 encoding and application state have their own overhead. Invalid metadata returns

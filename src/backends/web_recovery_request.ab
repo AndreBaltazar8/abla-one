@@ -25,7 +25,13 @@ fun oneRecoveryPartMetadata(value: string, limit: int): bool {
     true
 }
 fun oneRecoveryRawMetadata(request: OneRequest): int {
-    if(request.parts.size>32)return 413
+    if(request.parts.size>32 || request.headers.size>128)return 413
+    var headerBytes=0
+    for(header in request.headers){
+        if(!oneRecoveryPartMetadata(header.name,256) || !oneRecoveryPartMetadata(header.value,16384))return 400
+        headerBytes=headerBytes+header.name.size+header.value.size
+        if(headerBytes>65536)return 413
+    }
     var size=request.body.size
     if(request.bodyBase64.size>22369624)return 413
     if(request.bodyBase64!="")size=base64Decode(request.bodyBase64).size
@@ -40,6 +46,8 @@ fun oneRecoveryRawMetadata(request: OneRequest): int {
     if(size>oneRecoveryRequestLimit)413 else 200
 }
 fun oneRecoveryRawBegin(original: OneLiveRequest, now: int): OneRecoveryRawRequest {
+    val status=oneRecoveryRawMetadata(original.request)
+    if(status!=200)return OneRecoveryRawRequest(original,[],now+oneRecoveryRawTimeout(original.request),status=status,done=true)
     val item=OneLiveRequest(original.id,oneLiveRequestSnapshot(original.request),original.operation,original.session,original.epoch)
     val handles: array<string> = []
     if(item.request.bodyFile!="")handles.append(item.request.bodyFile)

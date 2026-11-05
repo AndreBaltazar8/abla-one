@@ -284,6 +284,10 @@ class OneLiveServices(val session: string) : OneServices {
         val q = oneLiveQueueList[oneLiveQueueIndex(session)]
         val operation = q.requestContexts.get(id) ?? ""
         val recovery = oneRecoverySessions.get(session)
+        if(recovery!=null && oneRecoveryRaw(request)){
+            val status=oneRecoveryRawMetadata(request)
+            if(status!=200)return complete(id,status,"","File request unavailable")
+        }
         val captured=if(recovery!=null && oneRecoveryRaw(request))oneLiveRequestSnapshot(request)else request
         q.request(OneLiveRequest(id, captured, operation, session, if (recovery != null) recovery.epoch else 0))
         id
