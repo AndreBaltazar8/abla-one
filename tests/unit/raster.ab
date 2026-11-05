@@ -61,6 +61,15 @@ fun main: int {
     s3.popClip()
     expectEqual(pixel(s3, 10, 10), 0, "inside the clip")
     expectEqual(pixel(s3, 30, 10), 16777215, "clipped out")
+    // A pill scrolled half out past the left side: what shows is its right half, whole.
+    var s4 = oneSurface(40, 40, 16777215)
+    var pill = onePath()
+    oneRoundRectPath(-30.0, 10.0, 50.0, 20.0, 10.0, pill)
+    oneFill(s4, pill, 0, 255)
+    expectEqual(pixel(s4, 0, 20), 0, "the pill fills the first column")
+    expectEqual(pixel(s4, 5, 11), 0, "and its top row")
+    expectEqual(pixel(s4, 5, 9), 16777215, "nothing above it")
+    expectEqual(pixel(s4, 35, 20), 16777215, "nothing past its end")
 
     // A glyph with a hole: "o" covers its ring, not its centre.
     var g = oneSurface(60, 60, 16777215)
