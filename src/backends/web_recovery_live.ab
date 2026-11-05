@@ -93,7 +93,7 @@ fun OneLiveServer.recoveryForgetLocal(id: string, currentSlot: int): void {
     oneLiveForget(id)
     oneMemoForget(id)
     val persisted = oneRecoverySessions.get(id)
-    if (persisted != null && persisted.rawRequest != null) oneRecoveryRawRelease(persisted.rawRequest)
+    if (persisted != null) oneRecoveryRawDrop(persisted)
     oneRecoverySessions.remove(id)
     return
 }
@@ -201,7 +201,7 @@ fun OneLiveServer.recoveryFence(index: int, immediate: bool): bool {
     // A new SSR app hydrates before it is registered durably.
     if (state == null || state.epoch == 0) return true
     if (state.status == 409 || state.status == 403 || state.status == 404) {
-        if (state.rawRequest != null) { oneRecoveryRawRelease(state.rawRequest); state.rawRequest = null }
+        oneRecoveryRawDrop(state)
         return false
     }
     val now = oneLiveNow()
@@ -224,7 +224,8 @@ fun OneLiveServer.recoveryFence(index: int, immediate: bool): bool {
 fun OneLiveServer.recoverySettle(index: int): void {
     val state = oneRecoverySessions.get(sessions[index].id)
     if (state == null || sessions[index].slot < 0 || !recoveryFence(index, false)) return
-    if (state.rawRequest != null) oneRecoveryRawExpired(state.rawRequest,oneLiveNow())
+    var expiring = state.rawRequest
+    if (expiring != null) oneRecoveryRawExpired(expiring,oneLiveNow())
     if (state.prepared != null) { recoveryFinishWrite(index); return }
     if (state.rawRequest != null) { recoveryRawWork(index); return }
     for (id in state.files.keys()) {
@@ -434,7 +435,7 @@ fun OneLiveServer.recoveryPending(): void {
         if (ending == null || !ending.ending || ending.owner != recoveryOwner || now < ending.endRetryAt) continue
         val status = ending.store.end(id, ending.owner, ending.epoch)
         if (status == 200 || status == 403 || status == 404 || status == 409 || status == 410) {
-            if (ending.rawRequest != null) oneRecoveryRawRelease(ending.rawRequest)
+            oneRecoveryRawDrop(ending)
             oneRecoverySessions.remove(id)
         }
         else ending.endRetryAt = now + (if (status == 202) 10 else 1000)
@@ -474,8 +475,9 @@ fun OneLiveServer.recoveryPending(): void {
 // acknowledgement frontier. In particular, ordinary app inbox IDs stay put.
 fun OneLiveServer.recoveryRawWork(index: int): void {
     val state=oneRecoverySessions.get(sessions[index].id)
-    if(state==null || state.rawRequest==null)return
-    val raw=state.rawRequest
+    if(state==null)return
+    var raw=state.rawRequest
+    if(raw==null)return
     oneRecoveryRawExpired(raw,oneLiveNow())
     if(raw.consumed.size>0 && (raw.done || (raw.consumed.size>=32 && oneLiveNow()-raw.drainedAt>=1000))){
         if(state.durablePayload==""){raw.status=503;raw.done=true;return}
@@ -511,6 +513,7 @@ fun OneLiveServer.recoveryRawWork(index: int): void {
         if(seen)continue
         if(raw.consumed.size>=64)return
         if(item.id.size==0 || item.id.size>128 || item.payload.size>524288){raw.done=true;raw.status=502;return}
+        if(oneRecoveryConsumed(state,item.id)){raw.done=true;raw.status=502;return}
         val previous=oneResponse(item.payload)
         val digest=raw.completed.get(previous.requestId)
         if(previous.valid && digest!=null && digest==hexEncode(sha256(item.payload))){raw.consumed.append(item.id);continue}
@@ -524,16 +527,17 @@ fun OneLiveServer.recoveryRawWork(index: int): void {
 }
 fun OneLiveServer.recoveryRawFinish(index: int): bool {
     val state=oneRecoverySessions.get(sessions[index].id)
-    if(state==null || state.rawRequest==null)return true
-    val raw=state.rawRequest
+    if(state==null)return true
+    var raw=state.rawRequest
+    if(raw==null)return true
     if(!raw.done || raw.consumed.size>0 || state.prepared!=null)return false
     if(!recoveryFence(index,true))return false
     val materialized=oneRecoveryRawRequest(raw)
     val status=if(raw.status!=200)raw.status else if(materialized==null)413 else 200
     val item=raw.item
-    state.rawRequest=null
     val response=if(status!=200 || materialized==null)oneResponsePayload(item.id,status,"","File request unavailable")else oneLiveExecute(handler,OneLiveRequest(item.id,materialized,item.operation,item.session,item.epoch),privateRequests,browserContexts.get(item.session))
     oneRecoveryRawRelease(raw)
+    state.rawRequest=null
     sessions[index].queue.complete(response)
     state.batch.changed(true)
     true

@@ -68,13 +68,13 @@ fun oneRecoveryRawBegin(original: OneLiveRequest, now: int): OneRecoveryRawReque
     raw.reserved=true
     raw
 }
-fun oneRecoveryRawRelease(raw: OneRecoveryRawRequest): void {
+fun oneRecoveryRawRelease(var raw: OneRecoveryRawRequest): void {
     if(raw.reserved){oneRecoveryRequestReserved=oneRecoveryRequestReserved-oneRecoveryRequestLimit;raw.reserved=false}
     raw.bytes.clear()
     raw.completed.clear()
     return
 }
-fun oneRecoveryRawExpired(raw: OneRecoveryRawRequest, now: int): bool {
+fun oneRecoveryRawExpired(var raw: OneRecoveryRawRequest, now: int): bool {
     if(raw.status==200 && now>=raw.deadline){raw.done=true;raw.status=504;return true}
     false
 }
@@ -88,7 +88,7 @@ fun oneRecoveryRawReadId(): int {
     for(b in random){value=if(at==0)b%16 else value*256+b;at=at+1}
     -(oneRecoveryRawIdBase+value)
 }
-fun oneRecoveryRawAccept(raw: OneRecoveryRawRequest, payload: string): bool {
+fun oneRecoveryRawAccept(var raw: OneRecoveryRawRequest, payload: string): bool {
     val parsed=jsonParse(payload)
     val value=parsed.value
     if(!parsed.succeeded || !value.isObject() || !value.get("requestId").isNumber() || !value.get("requestId").asNumber().integer || !value.get("requestId").intAvailable() || value.getInt("requestId")!=raw.reading)return false
@@ -145,4 +145,11 @@ fun oneLiveRequestSnapshot(request: OneRequest): OneRequest {
     val parts: array<OnePart> = []
     for(part in request.parts)parts.append(part)
     OneRequest(request.method,request.url,headers,request.body,request.bodyBase64,request.bodyFile,parts,request.timeoutMs,request.binaryResponse,request.saveResponse)
+}
+
+fun oneRecoveryRawDrop(var state: OneRecoveryState): void {
+    var raw=state.rawRequest
+    if(raw!=null)oneRecoveryRawRelease(raw)
+    state.rawRequest=null
+    return
 }

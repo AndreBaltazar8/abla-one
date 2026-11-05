@@ -5,6 +5,7 @@ class RawDropApp : OneApp {
     fun render(var ui: Ui): Node = text("drop",style())
     fun receive(kind: string,value: string): void {return}
 }
+fun rawDropFactory(request: HttpRequest,id: string): OneApp = RawDropApp()
 fun rawTestPayload(id: int, bytes: string): string = jsonStringify(jsonObject(["requestId","status","body","bodyBase64","error"],[jsonInteger(id),jsonInteger(200),jsonString(""),jsonString(base64Encode(bytes)),jsonString("")]))
 fun main: int {
     val hydration=OneRecoveryState("namespace","proof","owner",oneLiveNoRecovery(),epoch=1)
@@ -103,7 +104,7 @@ fun main: int {
     while(n<24){large=large+large;n=n+1}
     val oversized=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","/multi").multipart([oneTextPart("text",large),oneFilePart("file",file)])),0)
     expect(oversized.status==413 && !oversized.reserved,"assembled byte budget refuses oversized inline multipart text before file IO")
-    val server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),{request->httpText("ok")},{request->false},{request,id->RawDropApp()},oneDefaultTheme(),OneLiveOptions("raw test","en","#fff","/icons","src/backends/web/host.js",""))
+    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),{request->httpText("ok")},{request->false},rawDropFactory,oneDefaultTheme(),OneLiveOptions("raw test","en","#fff","/icons","src/backends/web/host.js",""))
     val dropping=OneRecoveryState("raw-drop","proof",server.recoveryOwner,oneLiveNoRecovery(),epoch=1)
     dropping.rawRequest=oneRecoveryRawBegin(item,0)
     oneRecoverySessions.set("raw-drop",dropping)

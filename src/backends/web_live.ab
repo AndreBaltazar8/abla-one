@@ -135,7 +135,7 @@ resource class OneLiveServer(
     fun drop(): void {
         for (session in sessions) {
             val state = oneRecoverySessions.get(session.id)
-            if (state != null && state.owner == recoveryOwner && state.rawRequest != null) { oneRecoveryRawRelease(state.rawRequest); state.rawRequest = null }
+            if (state != null && state.owner == recoveryOwner) oneRecoveryRawDrop(state)
         }
         for (slot in slots) if (slot.descriptor >= 0) linuxTcpCloseDescriptor(slot.descriptor)
         poller.close()
@@ -312,7 +312,7 @@ fun OneLiveServer.endSession(index: int): void {
     val ending = oneRecoverySessions.get(id)
     if (ending != null) {
         ending.ending = true
-        if (ending.rawRequest != null) { oneRecoveryRawRelease(ending.rawRequest); ending.rawRequest = null }
+        oneRecoveryRawDrop(ending)
     }
     val slot = sessions[index].slot
     if (slot >= 0 && slots[slot].descriptor >= 0) {
@@ -951,7 +951,7 @@ fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimer
             oneLiveForget(session.id)
             oneMemoForget(session.id)
             val persisted = oneRecoverySessions.get(session.id)
-            if (persisted != null && persisted.rawRequest != null) oneRecoveryRawRelease(persisted.rawRequest)
+            if (persisted != null) oneRecoveryRawDrop(persisted)
             oneRecoverySessions.remove(session.id)
         }
     }
