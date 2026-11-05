@@ -22,6 +22,8 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Bugs seen
 
+- [ ] Finish451 browser multipart quoting compatibility: real Node FormData rejected RFC-style quoted-pair filename escaping (`a\\\"b.bin`). HTML multipart serialization uses `%22`; an independent captured-body parser control preserves the original quoted filename and duplicate order. Serializer/protocol correction queued before runtime acceptance. Evidence /tmp/abla-one-recovery-multipart-evidence/raw-proof-v4.log.
+
 - [ ] Finish451 late internal completion consumption: real duplicate/out-of-order browser control left a final chunk inbox row after the raw result was durable because an ignored negative-ID completion did not schedule a normal checkpoint. Mark newly consumed inbox IDs dirty even when no app callback runs; corrected replay proof pending. Evidence /tmp/abla-one-recovery-multipart-evidence/raw-proof-v3.log.
 
 

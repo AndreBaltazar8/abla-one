@@ -133,7 +133,7 @@ fun oneRecoveryRawRequest(raw: OneRecoveryRawRequest): OneRequest? {
 }
 fun oneLivePartQuoted(value: string): string {
     var out=""
-    for(b in value){if(b==34 || b==92)out=out+"\\";out=out+byteEncode(b)}
+    for(b in value)out=out+(if(b==34)"%22" else byteEncode(b))
     out
 }
 fun oneRecoveryRawDrain(state: OneRecoveryState, frontier: int): OneRecoveryWrite? {

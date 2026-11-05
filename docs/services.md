@@ -58,7 +58,7 @@ English/Portuguese file-action-in-progress error. New file jobs and chooser
 effects created during assembly wait for the raw result checkpoint to commit;
 consumption-only drains never release them. This prevents a new chooser from
 retargeting replay or a result callback from deleting replay bytes too early.
-Multipart disposition quotes/backslashes are escaped, control bytes are refused,
+Multipart disposition quotes use `%22`, matching [HTML multipart serialization](https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#multipart-form-data); control bytes are refused,
 and the generated boundary replaces a stale `Content-Type` header.
 
 Materialization uses the request timeout (15 seconds by default), capped at 60

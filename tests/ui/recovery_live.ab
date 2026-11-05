@@ -30,7 +30,7 @@ class RecoveryProof(val services: OneServices, val session: string, var hydratin
     fun sendRaw(mode: string): void {
         rawStatus=0;rawError="";rawDelete=mode=="delete"
         var request=oneRequest("POST","/raw-upload").file(file).header("x-proof-handle",file.handle).header("x-raw-private","raw-header-secret").timeout(120000)
-        if(mode=="multipart")request=request.multipart([oneTextPart("tag","first"),oneFilePart("same",file),oneFilePart("same",file),oneTextPart("tag","last")])
+        if(mode=="multipart")request=request.multipart([oneTextPart("tag","first"),oneFilePart("same",file),oneFilePart("same",file),oneTextPart("tag","last"),oneTextPart("a\"field","quoted-key"),oneTextPart("slash\\field","slash-key")])
         if(mode=="oversized"){
             val parts: array<OnePart> = []
             var n=0

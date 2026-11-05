@@ -153,6 +153,7 @@ try {
     const stored=business();
     const form=await new Response(Buffer.from(stored.bodyBase64,'base64'),{headers:{'content-type':stored.contentType}}).formData();
     check(JSON.stringify(form.getAll('tag'))===JSON.stringify(['first','last']),'independent multipart parser preserves duplicate text-part order');
+    check(form.get('a"field')==='quoted-key' && form.get('slash\\field')==='slash-key','quoted field names and literal backslashes round-trip through an independent parser');
     const files=form.getAll('same');
     check(files.length===2 && files.every(file=>file.name==='a"b.bin') && Buffer.from(await files[0].arrayBuffer()).equals(small) && Buffer.from(await files[1].arrayBuffer()).equals(small),'duplicate file parts preserve quoted filenames and exact binary bytes');
     const prior=business().count;
