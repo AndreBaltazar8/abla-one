@@ -135,10 +135,15 @@ try {
     check(documents===1,'raw assembly recovery keeps the same browser document');
     check(!row().payload.includes('raw-header-secret') && !row().payload.includes('/raw-upload') && !row().payload.includes('raw-secret-not-a-checkpoint') && !Object.hasOwn(checkpoint(),'rawRequest'),'checkpoints contain no raw request, private header or assembled bytes');
     await start('b');
-    const small=Buffer.from('multipart\0binary ação');
+    const small=Buffer.alloc(300*1024,0x62);Buffer.from('multipart\0binary ação').copy(small);
     await picked('a"b.bin',small);
+    await wait(()=>row().inbox.length===0,'prior inbox is drained');
+    fs.writeFileSync(path.join(directory,'raw-duplicates'),'1');
     await page.getByRole('button',{name:'Send multipart file',exact:true}).click();
     await result(200,2);
+    await wait(()=>row().inbox.length===0,'duplicate chunk rows are consumed without app delivery');
+    fs.unlinkSync(path.join(directory,'raw-duplicates'));
+    check(business().count===2,'duplicate and out-of-order chunk completions preserve one multipart effect');
     const stored=business();
     const form=await new Response(Buffer.from(stored.bodyBase64,'base64'),{headers:{'content-type':stored.contentType}}).formData();
     check(JSON.stringify(form.getAll('tag'))===JSON.stringify(['first','last']),'independent multipart parser preserves duplicate text-part order');

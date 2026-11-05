@@ -137,6 +137,7 @@ fun proofInbox(id: string, owner: string, epoch: int, requests: array<int>): One
         var include = requests.size == 0
         val response = oneResponse(item.getString("payload"))
         for (request in requests) if (request == response.requestId) include = true
+        if (proofDirectory().child("raw-duplicates").exists() && response.requestId <= -4503599627370496) include = true
         if (include) items.append(OneRecoveryCompletion(item.getString("id"), item.getString("payload")))
     }
     proofRelease(lock)
@@ -169,7 +170,9 @@ fun proofRead(id: string, owner: string, epoch: int, request: int, handle: strin
     val start = if (offset > data.size) data.size else offset
     val end = if (start + count > data.size) data.size else start + count
     val payload = jsonStringify(jsonObject(["requestId", "status", "body", "bodyBase64", "error"], [jsonInteger(request), jsonInteger(200), jsonString(""), jsonString(base64Encode(data.slice(start, end))), jsonString("")]))
-    val ok = proofWrite(id, proofCompletion(row, payload))
+    var completed=proofCompletion(row,payload)
+    if(request<= -4503599627370496 && proofDirectory().child("raw-duplicates").exists())completed=proofCompletion(completed,payload)
+    val ok = proofWrite(id,completed)
     proofRelease(lock)
     if (ok) 200 else 503
 }
