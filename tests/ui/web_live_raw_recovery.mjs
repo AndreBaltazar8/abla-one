@@ -93,6 +93,8 @@ try {
   await context.addCookies([{name:'test-user',value:'alice',url:base}]);
   const page=await context.newPage();
   let documents=0;
+  page.on("websocket",ws=>{ws.on("close",()=>trace.push({type:"ws-close",at:Date.now()}));ws.on("socketerror",error=>trace.push({type:"ws-error",error:String(error)}));});
+  page.on("pageerror",error=>trace.push({type:"page-error",error:String(error)}));
   page.on('request',request=>{if(request.isNavigationRequest()&&request.frame()===page.mainFrame())documents++;});
   await page.goto(`${base}/recovery`);
   await page.waitForSelector('html[data-one-ready]');
@@ -164,6 +166,15 @@ try {
     await page.getByRole('button',{name:'Send oversized multipart',exact:true}).click();
     await result(413,prior+1);
     check(business().count===prior+1,'part-count refusal never reaches the business handler');
+    const busyChooser=page.waitForEvent('filechooser');
+    await page.getByRole('button',{name:'Pick file',exact:true}).click();
+    const pendingChooser=await busyChooser;
+    await page.getByRole('button',{name:'Send raw file',exact:true}).click();
+    await result(409,prior+1);
+    await page.getByText('Another file action is in progress. Wait for it to finish and try again.',{exact:true}).waitFor();
+    check(business().count===prior+1,'an unsettled chooser refuses raw dispatch with an explicit409 notice');
+    await pendingChooser.setFiles([]);
+    await wait(()=>checkpoint().pickers.length===0,'cancelled chooser settles');
     fs.writeFileSync(path.join(directory,'raw-slow'),'1');
     const slowAt=Date.now();
     await page.getByRole('button',{name:'Send slow file',exact:true}).click();
@@ -172,10 +183,27 @@ try {
     fs.unlinkSync(path.join(directory,'raw-slow'));
     check(elapsed>=59000 && elapsed<70000 && business().count===prior+1,'a real waiting client hits the sixty-second materialization deadline without an HTTP effect');
     check(documents===1,'deadline refusal keeps the existing document usable');
+    fs.writeFileSync(path.join(directory,'raw-hold-result'),'1');
+    const handle=checkpoint().app.file.handle;
+    await page.getByRole('button',{name:'Send raw and delete',exact:true}).click();
+    await wait(()=>fs.existsSync(path.join(directory,'raw-result-held')),'result CAS is deliberately pending');
+    check(fs.existsSync(path.join(directory,boot.s+'-'+handle+'.blob'))&&!fs.existsSync(path.join(directory,'raw-delete-admitted')),'success callback deletion waits while the result checkpoint is pending');
+    let chooserPublished=false;
+    page.once('filechooser',()=>{chooserPublished=true;});
+    const afterResultChooser=page.waitForEvent('filechooser');
+    await page.getByRole('button',{name:'Pick file',exact:true}).click();
+    await pause(300);
+    check(!chooserPublished,'a new chooser effect stays behind the raw result checkpoint');
+    fs.unlinkSync(path.join(directory,'raw-hold-result'));
+    const releasedChooser=await afterResultChooser;
+    await releasedChooser.setFiles([]);
+    await result(200,prior+2);
+    await wait(()=>fs.existsSync(path.join(directory,'raw-delete-admitted')),'deletion admitted after durable result');
+    check(checkpoint().app.rawCount===prior+2,'result is durable before deletion is admitted');
   }
   console.log(`PASS raw recovery: ${proofs} checks`);
 } finally {
-  fs.writeFileSync(path.join(directory,'transport.json'),JSON.stringify(trace));
+  fs.writeFileSync(path.join(directory,'transport.json'),JSON.stringify({trace,requests}));
   if (browser) await browser.close();
   for (const socket of sockets) socket.destroy();
   await new Promise(resolve => proxy.close(resolve));

@@ -26,7 +26,9 @@ fun proofWrite(id: string, row: Json): bool {
     temporary.writeText(jsonStringify(row)) && temporary.setPermissions(384) && temporary.moveTo(proofRow(id))
 }
 fun proofRelease(lock: FileLock): void { lock.release(); linuxSyscall1(3, lock.descriptor); return }
-fun proofLoad(id: string): Json = jsonParse(proofRow(id).readText()).value
+// Explicit bound for trusted synthetic rows containing up to64 base64 chunks.
+val proofJsonLimits = JsonLimits(33554432,64,100000,25165824,10000,true)
+fun proofLoad(id: string): Json = jsonParse(proofRow(id).readText(),proofJsonLimits).value
 fun proofAllowed(request: HttpRequest, row: Json, proof: string): bool = row.isObject() &&
     row.getString("user") == proofUser(request) && proofUser(request) != "" &&
     row.getString("proof") == proof && !row.get("revoked").asBoolean() && row.getInt("expires") > proofNow()
@@ -81,6 +83,10 @@ fun proofAttach(request: HttpRequest, id: string, proof: string, owner: string):
 val proofPendingSaves: Map<string, int> = Map()
 var proofKillAfterEffect = false
 fun proofSave(id: string, owner: string, epoch: int, version: int, payload: string, active: bool, consumed: array<string>): OneRecoveryResult {
+    if(proofDirectory().child("raw-hold-result").exists() && jsonParse(payload).value.get("app").getInt("rawStatus")==200){
+        proofDirectory().child("raw-result-held").writeText("1")
+        return OneRecoveryResult(202)
+    }
     val delay = oneParseInt(processEnvironmentOr("ONE_RECOVERY_TEST_ASYNC_MS", "0"), 0)
     if (delay > 0) {
         val key = "$id/$owner/$epoch/$version"
@@ -190,6 +196,7 @@ fun proofDelete(id: string, owner: string, epoch: int, request: int, handle: str
     if (!proofOwned(row, owner, epoch)) { proofRelease(lock); return 409 }
     val files: array<Json> = []
     for (file in row.get("files").values) if (file.getString("handle") != handle) files.append(file)
+    proofDirectory().child("raw-delete-admitted").writeText("1")
     proofDirectory().child("$id-$handle.blob").remove()
     val ok = proofWrite(id, proofCompletion(proofWith(row, "files", jsonArray(files)), oneResponsePayload(request, 204, "", "")))
     proofRelease(lock)

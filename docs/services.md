@@ -53,6 +53,11 @@ runs per session; the process reserves at most 64 MiB of assembly payload across
 sessions. This is a payload/concurrency bound, not an RSS limit: string copying,
 encoding and application state have their own overhead. Invalid metadata returns
 400, size/part excess 413, and process-capacity refusal 429 before HTTP dispatch.
+An unsettled picker, read or delete refuses raw admission with409 and an
+English/Portuguese file-action-in-progress error. New file jobs and chooser
+effects created during assembly wait for the raw result checkpoint to commit;
+consumption-only drains never release them. This prevents a new chooser from
+retargeting replay or a result callback from deleting replay bytes too early.
 Multipart disposition quotes/backslashes are escaped, control bytes are refused,
 and the generated boundary replaces a stale `Content-Type` header.
 

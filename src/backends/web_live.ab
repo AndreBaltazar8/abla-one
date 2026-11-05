@@ -761,6 +761,8 @@ fun OneLiveServer.pump(index: int): bool {
     if (recovering != null && recovering.rawRequests.size > 0) {
         if (!recoveryRawFinish(index)) return moved
     }
+    // A prior result CAS can publish picker effects; finish it before a new raw span.
+    if (recovering != null && recovering.prepared != null && oneRecoveryRawQueued(sessions[index].queue)) return moved
     var requests = sessions[index].queue.takeRequests()
     while (requests.size > 0) {
         for (item in requests) {
@@ -768,6 +770,8 @@ fun OneLiveServer.pump(index: int): bool {
             if (recovering != null && recovering.rawRequests.size > 0) { sessions[index].queue.request(item); continue }
             if (recovering != null && item.epoch > 0 && oneRecoveryRaw(item.request)) {
                 if (!oneRecoveryRawIdentity(recovering,item)) { sessions[index].queue.complete(oneResponsePayload(item.id,409,"","File request unavailable")); continue }
+                if (oneRecoveryRawBusy(recovering)) { sessions[index].queue.complete(oneResponsePayload(item.id,409,"",oneRecoveryRawBusyMessage(if(sessions[index].lang!="")sessions[index].lang else options.lang))); continue }
+                recovering.rawResultPending = true
                 recovering.rawRequests.append(oneRecoveryRawBegin(item, oneLiveNow()))
                 recovering.batch.changed(true)
                 continue

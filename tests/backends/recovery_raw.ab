@@ -124,5 +124,13 @@ fun main: int {
     server.drop()
     expect(oneRecoveryRequestReserved==0 && dropping.rawRequests.size==0,"stopping a server releases its assemblies without leaking process reservations")
     oneRecoverySessions.remove("raw-drop");oneLiveForget("raw-drop")
+    val busy=OneRecoveryState("busy","proof","owner",oneLiveNoRecovery())
+    expect(!oneRecoveryRawBusy(busy),"settled file state admits raw requests")
+    busy.pickers.set(1,"file")
+    expect(oneRecoveryRawBusy(busy),"pending chooser refuses raw admission")
+    busy.pickers.clear()
+    busy.files.set(2,OneRecoveryFileJob(2,"handle",0,1,false))
+    expect(oneRecoveryRawBusy(busy),"pending read or delete refuses raw admission")
+    expect(oneRecoveryRawBusyMessage("pt-PT").contains("ação de ficheiro") && oneRecoveryRawBusyMessage("en").contains("Another file action"),"busy refusal explains the file action in Portuguese and English")
     testsPassed()
 }

@@ -15,6 +15,8 @@ class OneRecoveryRawRequest(
     var total: int = 0, var budget: int = 0, var status: int = 200, var done: bool = false,
     var reserved: bool = false, var drainedAt: int = 0
 )
+fun oneRecoveryRawBusy(state: OneRecoveryState): bool = state.files.keys().size>0 || state.pickers.keys().size>0
+fun oneRecoveryRawBusyMessage(lang: string): string = if(lang.startsWith("pt")) "Está em curso outra ação de ficheiro. Aguarde que termine e tente novamente." else "Another file action is in progress. Wait for it to finish and try again."
 fun oneRecoveryRaw(request: OneRequest): bool {
     if(request.bodyFile!="")return true
     for(part in request.parts)if(part.file!="")return true

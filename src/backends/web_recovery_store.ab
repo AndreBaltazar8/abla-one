@@ -89,7 +89,9 @@ class OneRecoveryState(
     var endRetryAt: int = 0,
     var durablePayload: string = "",
     // At most one: mutate through its owned field path, never a nullable alias.
-    val rawRequests: array<OneRecoveryRawRequest> = []
+    val rawRequests: array<OneRecoveryRawRequest> = [],
+    // File effects created during assembly wait for its normal result CAS.
+    var rawResultPending: bool = false
 )
 
 class OneRecoveryHttp(val owner: string, val ticket: int, val request: HttpRequest, var stage: string, var session: string, val started: int)

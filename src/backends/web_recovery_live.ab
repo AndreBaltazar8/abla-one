@@ -227,6 +227,7 @@ fun OneLiveServer.recoverySettle(index: int): void {
     if (state.rawRequests.size > 0) oneRecoveryRawExpired(state.rawRequests[0],oneLiveNow())
     if (state.prepared != null) { recoveryFinishWrite(index); return }
     if (state.rawRequests.size > 0) { recoveryRawWork(index); return }
+    if (!state.rawResultPending) {
     for (id in state.files.keys()) {
         val job = state.files.get(id)
         if (job == null || job.admitted || job.retryAt > oneLiveNow() || (!state.ready && !state.hydrationFiles.has(id))) continue
@@ -269,6 +270,7 @@ fun OneLiveServer.recoverySettle(index: int): void {
             var rounds = 0
             while (rounds < 8 && pump(index)) rounds = rounds + 1
         }
+    }
     }
     // Hydration may complete inside pump above; until then no render, ack or
     // checkpoint may authorize old controls or persist a partial app state.
@@ -363,6 +365,7 @@ fun OneLiveServer.recoveryFinishWrite(index: int): void {
         return
     }
     state.durablePayload = prepared.payload
+    state.rawResultPending = false
     val remaining: array<string> = []
     for (id in state.consumed) {
         var included = false
