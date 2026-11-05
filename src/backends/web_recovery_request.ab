@@ -39,7 +39,8 @@ fun oneRecoveryRawMetadata(request: OneRequest): int {
     }
     if(size>oneRecoveryRequestLimit)413 else 200
 }
-fun oneRecoveryRawBegin(item: OneLiveRequest, now: int): OneRecoveryRawRequest {
+fun oneRecoveryRawBegin(original: OneLiveRequest, now: int): OneRecoveryRawRequest {
+    val item=OneLiveRequest(original.id,oneLiveRequestSnapshot(original.request),original.operation,original.session,original.epoch)
     val handles: array<string> = []
     if(item.request.bodyFile!="")handles.append(item.request.bodyFile)
     for(part in item.request.parts)if(part.file!=""){
@@ -124,3 +125,13 @@ fun oneRecoveryRawDrain(state: OneRecoveryState, frontier: int): OneRecoveryWrit
 }
 
 fun oneRecoveryRawIdentity(state: OneRecoveryState,item: OneLiveRequest): bool = item.session==state.id && item.epoch>0 && item.epoch==state.epoch
+
+// Arrays supplied to multipart/header builders are mutable even though the
+// request fields are val. A pending assembly must not observe later edits.
+fun oneLiveRequestSnapshot(request: OneRequest): OneRequest {
+    val headers: array<OneHeader> = []
+    for(header in request.headers)headers.append(header)
+    val parts: array<OnePart> = []
+    for(part in request.parts)parts.append(part)
+    OneRequest(request.method,request.url,headers,request.body,request.bodyBase64,request.bodyFile,parts,request.timeoutMs,request.binaryResponse,request.saveResponse)
+}

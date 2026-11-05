@@ -133,6 +133,10 @@ resource class OneLiveServer(
     val browserContexts: Map<string, OneLiveBrowserContext> = Map()
 ) {
     fun drop(): void {
+        for (session in sessions) {
+            val state = oneRecoverySessions.get(session.id)
+            if (state != null && state.owner == recoveryOwner && state.rawRequest != null) { oneRecoveryRawRelease(state.rawRequest); state.rawRequest = null }
+        }
         for (slot in slots) if (slot.descriptor >= 0) linuxTcpCloseDescriptor(slot.descriptor)
         poller.close()
         listener.close()

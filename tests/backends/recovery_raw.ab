@@ -1,5 +1,10 @@
 import "abla/test"
 import "../../src/backends/web_live.ab"
+import "../../src/one_kit.ab"
+class RawDropApp : OneApp {
+    fun render(var ui: Ui): Node = text("drop",style())
+    fun receive(kind: string,value: string): void {return}
+}
 fun rawTestPayload(id: int, bytes: string): string = jsonStringify(jsonObject(["requestId","status","body","bodyBase64","error"],[jsonInteger(id),jsonInteger(200),jsonString(""),jsonString(base64Encode(bytes)),jsonString("")]))
 fun main: int {
     val file=OneFile("shared-handle","a\"b.txt",4,"application/octet-stream")
@@ -40,6 +45,11 @@ fun main: int {
     oneRecoveryRawRelease(multi)
     val injection=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","/multi").multipart([oneFilePart("bad\r\nX: injected",file)])),0)
     expect(injection.status==400 && !injection.reserved,"multipart header injection refuses before reading shared storage")
+    val mutable: array<OnePart> = [oneFilePart("original",file)]
+    val captured=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","/multi").multipart(mutable)),0)
+    mutable.append(oneTextPart("later","changed"))
+    expect(captured.item.request.parts.size==1 && captured.item.request.parts[0].name=="original","pending materialization snapshots mutable request-builder arrays")
+    oneRecoveryRawRelease(captured)
     val parts: array<OnePart> = []
     var n=0
     while(n<33){parts.append(oneFilePart("file",file));n=n+1}
@@ -78,5 +88,13 @@ fun main: int {
     while(n<24){large=large+large;n=n+1}
     val oversized=oneRecoveryRawBegin(OneLiveRequest(1,oneRequest("POST","/multi").multipart([oneTextPart("text",large),oneFilePart("file",file)])),0)
     expect(oversized.status==413 && !oversized.reserved,"assembled byte budget refuses oversized inline multipart text before file IO")
+    val server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),{request->httpText("ok")},{request->false},{request,id->RawDropApp()},oneDefaultTheme(),OneLiveOptions("raw test","en","#fff","/icons","src/backends/web/host.js",""))
+    val dropping=OneRecoveryState("raw-drop","proof",server.recoveryOwner,oneLiveNoRecovery(),epoch=1)
+    dropping.rawRequest=oneRecoveryRawBegin(item,0)
+    oneRecoverySessions.set("raw-drop",dropping)
+    server.sessions.append(oneSession("raw-drop",RawDropApp(),oneLiveQueueList[oneLiveQueueIndex("raw-drop")]))
+    server.drop()
+    expect(oneRecoveryRequestReserved==0 && dropping.rawRequest==null,"stopping a server releases its assemblies without leaking process reservations")
+    oneRecoverySessions.remove("raw-drop");oneLiveForget("raw-drop")
     testsPassed()
 }
