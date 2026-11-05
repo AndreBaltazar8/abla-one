@@ -124,6 +124,63 @@ fun oneWrap(text: string, size: int, weight: string, width: int, maxLines: int):
     lines
 }
 
+// Breaks a field's text into rows no wider than `width`, as where each row starts and ends
+// in `text`, so a caret and a selection can be placed on them. Nothing is dropped: spaces
+// stay at the end of the row they follow, and a newline ends its row without being on it.
+// One pass, adding up each character's width.
+fun oneWrapSpans(text: string, size: int, weight: string, width: int, var starts: array<int>, var ends: array<int>): void {
+    starts.clear()
+    ends.clear()
+    val advances = oneAdvances(weight)
+    val room = width * 1000
+    var start = 0
+    var used = 0
+    // Where the row may break, after its last space, and how wide it is up to there.
+    var gap = -1
+    var gapUsed = 0
+    var i = 0
+    while (i < text.size) {
+        val b = text[i]
+        if (b == 10) {
+            starts.append(start)
+            ends.append(i)
+            start = i + 1
+            used = 0
+            gap = -1
+            i = i + 1
+        } else {
+            val code = oneCodeAt(text, i)
+            val found = advances.get(code)
+            val advance = (if (found != null) found else if (code > 0x2000) 1000 else 560) * size
+            // A row ended at its last space can leave a word that still doesn't fit: then again.
+            while (b != 32 && used + advance > room && i > start) {
+                if (gap > start) {
+                    starts.append(start)
+                    ends.append(gap)
+                    start = gap
+                    used = used - gapUsed
+                } else {
+                    // A word longer than the row is split where it reaches the side.
+                    starts.append(start)
+                    ends.append(i)
+                    start = i
+                    used = 0
+                }
+                gap = -1
+            }
+            used = used + advance
+            if (b == 32) {
+                gap = i + 1
+                gapUsed = used
+            }
+            i = i + oneCodeLength(b)
+        }
+    }
+    starts.append(start)
+    ends.append(text.size)
+    return
+}
+
 fun oneEllipsize(line: string, size: int, weight: string, width: int): string {
     var kept = line
     while (kept.size > 0 && oneTextWidth("$kept…", size, weight) > width) {

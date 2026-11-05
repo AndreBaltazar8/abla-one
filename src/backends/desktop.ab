@@ -3,13 +3,16 @@ import "abla/http/tls"
 import "abla/json"
 import "abla/process/time"
 import "../../../abla-graphics/src/graphics.ab"
+import "../layout/edit.ab"
 import "../raster/raster.ab"
 import "web_live.ab"
 
 // The `desktop` target (SPEC §10, M3): Linux windows through abla-graphics.
 // Each change is laid out (one-layout), painted and rasterized (one-raster),
 // then presented. Input goes through the frame's hit regions; a focused text
-// field takes typed text, Backspace and Enter. Services use the same session
+// field is edited as text is anywhere (src/layout/edit.ab): a caret placed with the pointer or
+// the arrows, Home and End, selections with Shift or a drag, words with Control or a double
+// click, and Ctrl+A, C, X and V. Services use the same session
 // queue as live web sessions (`oneLiveServices(session)`), with absolute
 // http(s) URLs sent over the network. Routes are the queue's, a stack here; a window
 // has no back button of its own, so going back is the app's (`services.back`).
@@ -98,7 +101,13 @@ class OneDesktopState(
     // A Control key is down, and the field a paste asked the clipboard for.
     var control: bool = false,
     var pasteKey: string = "",
-    var dragAcross: bool = false
+    var dragAcross: bool = false,
+    var shift: bool = false,
+    // The pointer went down on the focused field and is selecting while it moves.
+    var selecting: bool = false,
+    // When the last press on a field was, and how many came quickly one after another.
+    var clickAt: int = 0,
+    var clicks: int = 0
 )
 
 // One frame: render, lay out, paint. Visible feed rows are delivered first.
@@ -144,6 +153,39 @@ fun oneDesktopHitAtKey(frame: OneFrame, key: string): int {
         i = i - 1
     }
     -1
+}
+
+// Gives the focused field its changed text, if it changed. The caller lays out again after
+// one, as the next key builds on it.
+fun oneDesktopEdit(var app: OneApp, theme: Theme, var state: OneDesktopState, event: int, old: string, edited: OneEdited): bool {
+    state.dirty = true
+    if (edited.value == old) return false
+    oneDesktopDeliver(app, theme, state, event, edited.value)
+    true
+}
+
+// What a key does to the field being edited, or "" for nothing. Enter makes a new line in a
+// field of several, unless it sends: then Shift+Enter does.
+fun oneDesktopEditAction(key: int, multiline: bool, submits: bool, shift: bool): string {
+    if (key == keyLeft) return "left"
+    if (key == keyRight) return "right"
+    if (key == keyUp) return "up"
+    if (key == keyDown) return "down"
+    if (key == keyHome) return "home"
+    if (key == keyEnd) return "end"
+    if (key == keyBackspace) return "backspace"
+    if (key == keyDelete) return "delete"
+    if ((key == keyEnter || key == keyKpEnter) && multiline && (!submits || shift)) return "newline"
+    ""
+}
+
+fun oneDesktopEditing(state: OneDesktopState): bool = state.focusKey != "" && oneEditKey() == state.focusKey
+
+fun oneDesktopBlur(var state: OneDesktopState): void {
+    state.focusKey = ""
+    state.selecting = false
+    oneEditStop()
+    return
 }
 
 // The press that closes the open popover on top (onePaintPopovers), or -1.
@@ -211,7 +253,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
         WindowConfig(title = options.title, width = options.width, height = options.height, resizable = true)
     )
     if (!window.valid()) return 1
-    oneUseCaret()
+    oneUseEditing()
     val icons = OneIconSource({ name -> linuxReadFile("${options.iconDir}/$name.svg", 65536) })
     oneLiveQueueList[oneLiveQueueIndex(session)].routes.start("/")
     var state = OneDesktopState(options.width, options.height, 0, 0, 0, 0, false, "", 0, "", true, Map(), Map(), oneLiveQueueList[oneLiveQueueIndex(session)].routes)
@@ -252,7 +294,10 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
             } else if (event.kind == windowEventPointerMoved) {
                 state.pointerX = event.pointerX()
                 state.pointerY = event.pointerY()
-                if (state.dragKey != "") {
+                if (state.selecting && oneDesktopEditing(state)) {
+                    oneEditPointer(state.pointerX, state.pointerY, true, 1)
+                    state.dirty = true
+                } else if (state.dragKey != "") {
                     val dy = if (state.dragAcross) state.downX - state.pointerX else state.downY - state.pointerY
                     if (dy > 6 || dy < -6) state.dragging = true
                     if (state.dragging) {
@@ -272,16 +317,29 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                 state.alt = event.keyPressed()
             } else if (event.kind == windowEventKey && (event.key() == keyLeftControl || event.key() == keyRightControl)) {
                 state.control = event.keyPressed()
-            } else if (event.kind == windowEventKey && event.keyPressed() && state.control && event.key() == keyV && state.focusKey != "") {
+            } else if (event.kind == windowEventKey && (event.key() == keyLeftShift || event.key() == keyRightShift)) {
+                state.shift = event.keyPressed()
+            } else if (event.kind == windowEventKey && event.keyPressed() && state.control && oneDesktopEditing(state) && (event.key() == keyA || event.key() == keyC || event.key() == keyX)) {
+                val i = oneDesktopInput(frame, state.focusKey)
+                if (event.key() == keyA) oneEditAction("all", false, false)
+                else if (i >= 0) {
+                    // A hidden field gives nothing to copy, and so cuts nothing.
+                    val copied = oneEditCopy()
+                    if (copied != "" && window.setClipboard(copied) && event.key() == keyX) {
+                        if (oneDesktopEdit(app, theme, state, frame.hits[i].event, frame.hits[i].value, oneEditType(""))) frame = oneDesktopFrame(app, theme, state)
+                    }
+                }
+                state.dirty = true
+            } else if (event.kind == windowEventKey && event.keyPressed() && state.control && event.key() == keyV && oneDesktopEditing(state)) {
                 // Ctrl+V: the text comes later, as a clipboard event, for the field focused now.
                 if (window.requestClipboard()) state.pasteKey = state.focusKey
             } else if (event.kind == windowEventClipboard && state.pasteKey != "") {
                 val i = oneDesktopInput(frame, state.pasteKey)
                 state.pasteKey = ""
-                if (i >= 0 && event.clipboardTextAvailable() && event.clipboardText() != "") {
-                    oneDesktopDeliver(app, theme, state, frame.hits[i].event, "${frame.hits[i].value}${event.clipboardText()}")
-                    frame = oneDesktopFrame(app, theme, state)
-                    state.dirty = true
+                if (i >= 0 && oneDesktopEditing(state) && event.clipboardTextAvailable() && event.clipboardText() != "") {
+                    // A field of one line takes what's pasted as one.
+                    val text = if (frame.hits[i].multiline) event.clipboardText() else event.clipboardText().replace("\n", " ")
+                    if (oneDesktopEdit(app, theme, state, frame.hits[i].event, frame.hits[i].value, oneEditType(text))) frame = oneDesktopFrame(app, theme, state)
                 }
             } else if (event.kind == windowEventKey && event.keyPressed() && state.alt && (event.key() == keyLeft || event.key() == keyRight)) {
                 // Alt+Left and Alt+Right, as in a browser.
@@ -291,7 +349,24 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                 oneDesktopDeliver(app, theme, state, frame.hits[oneDesktopDismiss(frame)].event, "")
                 state.dirty = true
             } else if (event.kind == windowEventPointerButton && event.pointerButton() == pointerButtonLeft) {
-                if (event.pointerButtonPressed()) {
+                val field = oneDesktopHit(frame, state.pointerX, state.pointerY, "input")
+                if (event.pointerButtonPressed() && field >= 0) {
+                    // On a field: focus, then the caret under the pointer, or a word or all of it
+                    // on a second or third click.
+                    val key = frame.hits[field].key
+                    val now = oneLiveNow()
+                    state.clicks = if (key == state.focusKey && now - state.clickAt < 400 && state.clicks < 3) state.clicks + 1 else 1
+                    state.clickAt = now
+                    if (!oneDesktopEditing(state) || key != state.focusKey) {
+                        state.focusKey = key
+                        oneEditStart(key, frame.hits[field].value)
+                        frame = oneDesktopFrame(app, theme, state)
+                    }
+                    oneEditPointer(state.pointerX, state.pointerY, state.shift, state.clicks)
+                    state.selecting = true
+                    state.dragKey = ""
+                    state.dirty = true
+                } else if (event.pointerButtonPressed()) {
                     state.downX = state.pointerX
                     state.downY = state.pointerY
                     state.dragging = false
@@ -300,15 +375,13 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     val s = if (across >= 0) across else oneDesktopHit(frame, state.pointerX, state.pointerY, "scroll")
                     state.dragKey = if (s >= 0) frame.hits[s].key else ""
                     state.dragFrom = if (s >= 0) oneParseInt(frame.hits[s].value, 0) else 0
+                } else if (state.selecting) {
+                    state.selecting = false
                 } else {
-                    if (!state.dragging) {
+                    if (!state.dragging && field < 0) {
                         val p = oneDesktopHit(frame, state.pointerX, state.pointerY, "press")
-                        val i = oneDesktopHit(frame, state.pointerX, state.pointerY, "input")
-                        if (i >= 0) state.focusKey = frame.hits[i].key
-                        else {
-                            state.focusKey = ""
-                            if (p >= 0) oneDesktopDeliver(app, theme, state, frame.hits[p].event, "")
-                        }
+                        oneDesktopBlur(state)
+                        if (p >= 0) oneDesktopDeliver(app, theme, state, frame.hits[p].event, "")
                         state.dirty = true
                     }
                     state.dragKey = ""
@@ -326,28 +399,20 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     oneScrollTo(state.scroll, frame.hits[s], oneParseInt(frame.hits[s].value, 0) - event.scrollY() * 48)
                     state.dirty = true
                 }
-            } else if (event.kind == windowEventText && state.focusKey != "" && !state.control) {
+            } else if (event.kind == windowEventText && oneDesktopEditing(state) && !state.control) {
                 val i = oneDesktopInput(frame, state.focusKey)
-                if (i >= 0) {
-                    oneDesktopDeliver(app, theme, state, frame.hits[i].event, "${frame.hits[i].value}${oneUtf8(event.codepoint())}")
-                    // The next key may already be queued, and builds on this text.
-                    frame = oneDesktopFrame(app, theme, state)
-                    state.dirty = true
-                }
-            } else if (event.kind == windowEventKey && event.keyPressed() && state.focusKey != "") {
+                // The next key may already be queued, and builds on this text.
+                if (i >= 0 && oneDesktopEdit(app, theme, state, frame.hits[i].event, frame.hits[i].value, oneEditType(oneUtf8(event.codepoint())))) frame = oneDesktopFrame(app, theme, state)
+            } else if (event.kind == windowEventKey && event.keyPressed() && oneDesktopEditing(state)) {
                 val i = oneDesktopInput(frame, state.focusKey)
-                if (i >= 0 && event.key() == keyBackspace && frame.hits[i].value != "") {
-                    var value = frame.hits[i].value
-                    var end = value.size - 1
-                    while (end > 0 && value[end] >= 128 && value[end] < 192) end = end - 1
-                    oneDesktopDeliver(app, theme, state, frame.hits[i].event, value.slice(0, end))
-                    frame = oneDesktopFrame(app, theme, state)
-                    state.dirty = true
-                } else if (i >= 0 && event.key() == keyEnter && frame.hits[i].submit > 0) {
+                val action = if (i >= 0) oneDesktopEditAction(event.key(), frame.hits[i].multiline, frame.hits[i].submit > 0, state.shift) else ""
+                if (action != "") {
+                    if (oneDesktopEdit(app, theme, state, frame.hits[i].event, frame.hits[i].value, oneEditAction(action, state.shift, state.control))) frame = oneDesktopFrame(app, theme, state)
+                } else if (i >= 0 && (event.key() == keyEnter || event.key() == keyKpEnter) && frame.hits[i].submit > 0) {
                     oneDesktopDeliver(app, theme, state, frame.hits[i].submit, "")
                     state.dirty = true
                 } else if (event.key() == keyEscape) {
-                    state.focusKey = ""
+                    oneDesktopBlur(state)
                     state.dirty = true
                 }
             }

@@ -116,6 +116,15 @@ fun oneAddText(var frame: OneFrame, x: int, y: int, w: int, lh: int, color: stri
 class OneInputRows(val lines: array<string>, val first: int, val top: int, val left: int, val width: int, val pr: int)
 val oneCaretPlace: array<(var: OneFrame, OneBox, OneInputRows) -> void> = []
 
+// The field being edited in a window (src/layout/edit.ab): its caret, the start of a selection
+// (`anchor`, the caret when nothing is selected), both byte offsets on character boundaries in
+// `value`, the text they're for. `slide` (one line) and `first` (several) keep the caret in view.
+class OneEdit(val key: string, val value: string, val caret: int, val anchor: int, val slide: int, val first: int)
+val oneEditing: array<OneEdit> = []
+// Draws the field in `oneEditing`, when what draws one asks for it (`oneUseEditing`).
+class OneEditField(val x: int, val y: int, val pl: int, val pr: int, val key: string, val typed: string, val secure: bool)
+val oneEditPaint: array<(var: OneFrame, OneBox, OneEditField) -> void> = []
+
 @noinline
 fun oneAddHit(var frame: OneFrame, kind: string, x: int, y: int, w: int, h: int, event: int, submit: int, key: string, value: string, placeholder: string, multiline: bool): void {
     frame.hits.append(OneHit(kind, x, y, w, h, event, submit, key, value, placeholder, multiline))
@@ -148,11 +157,29 @@ fun oneMasked(value: string): string {
     dots
 }
 
+// A field's rows as they're edited (oneWrapSpans), so they stay put when it takes focus.
+fun oneSpanLines(value: string, size: int, weight: string, width: int): array<string> {
+    val starts: array<int> = []
+    val ends: array<int> = []
+    oneWrapSpans(value, size, weight, width, starts, ends)
+    val lines: array<string> = []
+    var row = 0
+    while (row < starts.size) {
+        lines.append(value.slice(starts[row], ends[row]))
+        row = row + 1
+    }
+    lines
+}
+
 @noinline
 fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneFrame, path: string): void {
     val r = box.r
     // What's typed stays in the hit, for editing; only what's drawn is masked.
     val typed = box.node.attr("value")
+    if (oneEditPaint.size > 0 && oneEditing.size > 0 && oneEditing[0].key == path) {
+        oneEditPaint[0](frame, box, OneEditField(x, y, pl, pr, path, typed, box.node.attr("secure") == "true"))
+        return
+    }
     val value = if (box.node.attr("secure") == "true") oneMasked(typed) else typed
     val placeholder = box.node.attr("placeholder")
     val size = r.int("size", 16)
@@ -167,7 +194,9 @@ fun onePaintInput(box: OneBox, x: int, y: int, pl: int, pr: int, var frame: OneF
     // the rows that fit: a value's last ones, as new text arrives at the end.
     val slides = value != "" && !multiline
     val most = if (multiline) r.int("maxLines", 5) else 1
-    val lines = if (slides) [oneInputTail(value, size, weight, inner - oneCaretWidth)] else oneWrap(if (value == "") placeholder else value, size, weight, inner, if (value == "") most else 0)
+    val lines = if (slides) [oneInputTail(value, size, weight, inner - oneCaretWidth)]
+        else if (value != "") oneSpanLines(value, size, weight, inner)
+        else oneWrap(placeholder, size, weight, inner, most)
     val first = if (lines.size > most) lines.size - most else 0
     // Centred, but a field taller than its rows starts them at the top, as far down as it
     // is in from the side.
@@ -201,10 +230,8 @@ fun onePlaceCaret(var frame: OneFrame, box: OneBox, rows: OneInputRows): void {
     // An empty field of several lines starts on its first, where the placeholder does.
     else if (hit.multiline && value == "") caretY = rows.top + oneLineHeight(r) / 2
     else if (value != "") {
-        // The word wrapper drops the spaces at the end, so those are added back.
-        var end = value.size
-        while (end > 0 && value[end - 1] == 32) end = end - 1
-        caretX = rows.left + oneTextWidth(rows.lines[rows.lines.size - 1], size, weight) + oneTextWidth(value.slice(end, value.size), size, weight)
+        // The rows keep their spaces (oneSpanLines), so the last one ends where the text does.
+        caretX = rows.left + oneTextWidth(rows.lines[rows.lines.size - 1], size, weight)
         caretY = rows.top + (rows.lines.size - rows.first - 1) * oneLineHeight(r) + oneLineHeight(r) / 2
     }
     val rightmost = hit.x + box.w - rows.pr - oneCaretWidth

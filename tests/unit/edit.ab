@@ -1,0 +1,288 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/layout/edit.ab"
+
+// A field 300 wide, 16 padding: its text starts at x 16 and has 268 px.
+fun editFrame(value: string, multiline: bool, secure: bool): OneFrame {
+    var field = input(value, "Type", 1, style().padding(16).height(if (multiline) 160 else 56).set("maxLines", "3"))
+    if (multiline) field = field.set("multiline", "true")
+    if (secure) field = field.set("secure", "true")
+    onePaintFrame(oneLayout(column(style().fill(), [field]), oneDefaultTheme(), "desktop", 300, 200, Map()), 300, 200)
+}
+
+fun editHit(frame: OneFrame): OneHit {
+    var found = 0
+    var index = 0
+    while (index < frame.hits.size) {
+        if (frame.hits[index].kind == "input") found = index
+        index = index + 1
+    }
+    frame.hits[found]
+}
+
+fun editTexts(frame: OneFrame): array<OnePaint> {
+    val texts: array<OnePaint> = []
+    for (p in frame.paints) if (p.op == "text") texts.append(p)
+    texts
+}
+
+fun editRects(frame: OneFrame): array<OnePaint> {
+    val rects: array<OnePaint> = []
+    for (p in frame.paints) if (p.op == "rect" && p.color == "#B4D5FE") rects.append(p)
+    rects
+}
+
+// Starts editing the field with `value`, drawn once so the caret has its rows.
+fun editOn(value: string, multiline: bool, secure: bool): OneFrame {
+    oneUseEditing()
+    oneEditStop()
+    oneEditStart(editHit(editFrame(value, multiline, secure)).key, value)
+    editFrame(value, multiline, secure)
+}
+
+fun caret(): int = oneEditing[0].caret
+// Widths as the field draws them.
+fun w(text: string): int = oneTextWidth(text, oneEditViews[0].size, oneEditViews[0].weight)
+fun anchor(): int = oneEditing[0].anchor
+
+fun spans(text: string, width: int): array<int> {
+    val starts: array<int> = []
+    val ends: array<int> = []
+    oneWrapSpans(text, 16, "", width, starts, ends)
+    val both: array<int> = []
+    var i = 0
+    while (i < starts.size) {
+        both.append(starts[i])
+        both.append(ends[i])
+        i = i + 1
+    }
+    both
+}
+
+fun testSpans(): void {
+    expectEqual(spans("", 100).size, 2, "empty text: one empty row")
+    expectEqual(spans("ab cd", 1000)[1], 5, "fits: one row, all of it")
+    val wrapped = spans("aaaa bbbb", oneTextWidth("aaaa bb", 16, ""))
+    expectEqual(wrapped.size, 4, "wraps into two rows")
+    expectEqual(wrapped[1], 5, "the space stays at the end of the first row")
+    expectEqual(wrapped[2], 5, "the next row starts after it")
+    val lines = spans("ab\ncd", 1000)
+    expectEqual(lines[1], 2, "a newline ends its row")
+    expectEqual(lines[2], 3, "and isn't on either")
+    val long = spans("aaaaaaaaaaaaaaaaaaaa", oneTextWidth("aaaaa", 16, ""))
+    expectEqual(long.size, 8, "a long word is split where it reaches the side")
+    expectEqual(long[1], 5, "five to a row")
+    val double = spans("a  b", 1000)
+    expectEqual(double[1], 4, "spaces kept as typed")
+    // Every byte is on a row or is a newline between two.
+    val mixed = "Olá, isto é um texto\ncom várias linhas e palavras compridíssimas"
+    val all = spans(mixed, 90)
+    var covered = 0
+    var i = 0
+    while (i < all.size) {
+        covered = covered + all[i + 1] - all[i]
+        i = i + 2
+    }
+    expectEqual(covered, mixed.size - 1, "nothing dropped")
+    var fits = true
+    i = 0
+    while (i < all.size) {
+        var end = all[i + 1]
+        while (end > all[i] && mixed[end - 1] == 32) end = end - 1
+        if (oneTextWidth(mixed.slice(all[i], end), 16, "") > 90) fits = false
+        i = i + 2
+    }
+    expect(fits, "each row fits, but for the spaces it ends with")
+    return
+}
+
+fun testSteps(): void {
+    val text = "aé😀b"
+    expectEqual(oneCharAfter(text, 1), 3, "é is two bytes")
+    expectEqual(oneCharAfter(text, 3), 7, "the emoji four")
+    expectEqual(oneCharBefore(text, 7), 3, "and back")
+    expectEqual(oneCharBefore(text, 0), 0, "nothing before the start")
+    expectEqual(oneCharAfter(text, text.size), text.size, "nothing after the end")
+    expectEqual(oneCharStart(text, 5), 3, "inside a character is its start")
+    val words = "one, two  three"
+    expectEqual(oneWordBefore(words, words.size), 10, "back to the last word's start")
+    expectEqual(oneWordBefore(words, 10), 5, "then past the spaces to the one before")
+    expectEqual(oneWordAfter(words, 0), 3, "to the first word's end")
+    expectEqual(oneWordAfter(words, 3), 8, "then past the comma to the next one's")
+    val word = oneWordAt(words, 6)
+    expectEqual(words.slice(word.anchor, word.caret), "two", "a double click takes the word")
+    val gap = oneWordAt(words, 8)
+    expectEqual(words.slice(gap.anchor, gap.caret), "  ", "or the spaces")
+    val accents = oneWordAt("café com", 2)
+    expectEqual(accents.caret, 5, "letters with accents are in words")
+    return
+}
+
+fun testChanges(): void {
+    val typed = oneEditInsert("abcd", 2, 2, "X")
+    expectEqual(typed.value, "abXcd", "typing goes in at the caret")
+    expectEqual(typed.caret, 3, "the caret after it")
+    expectEqual(oneEditInsert("abcd", 3, 1, "X").value, "aXd", "replacing the selection")
+    expectEqual(oneEditInsert("abcd", 1, 3, "").value, "ad", "either way round")
+    expectEqual(oneEditErase("abcd", 2, 2, 1).value, "acd", "backspace")
+    expectEqual(oneEditErase("abcd", 2, 2, 3).value, "abd", "delete")
+    expectEqual(oneEditErase("abcd", 3, 1, 0).value, "ad", "either takes the selection")
+    expectEqual(oneEditSelected("abcd", 3, 1), "bc", "what's selected")
+    return
+}
+
+fun testKeys(): void {
+    editOn("hello world", false, false)
+    expectEqual(caret(), 11, "focus puts the caret at the end")
+    oneEditAction("left", false, false)
+    oneEditAction("left", false, false)
+    expectEqual(caret(), 9, "left")
+    expectEqual(oneEditType("X").value, "hello worXld", "typing at the caret")
+    oneEditAction("left", false, true)
+    expectEqual(caret(), 6, "Ctrl+Left: the word's start")
+    oneEditAction("end", true, false)
+    expectEqual(oneEditCopy(), "worXld", "Shift+End selects to the end")
+    oneEditAction("left", false, false)
+    expectEqual(caret(), 6, "left with a selection goes to its start")
+    expectEqual(anchor(), 6, "and ends it")
+    oneEditAction("home", false, false)
+    expectEqual(caret(), 0, "Home")
+    oneEditAction("right", true, true)
+    expectEqual(oneEditCopy(), "hello", "Ctrl+Shift+Right selects a word")
+    expectEqual(oneEditAction("backspace", false, false).value, " worXld", "backspace takes the selection")
+    oneEditAction("end", false, false)
+    expectEqual(oneEditAction("backspace", false, true).value, " ", "Ctrl+Backspace a word")
+    oneEditAction("all", false, false)
+    expectEqual(oneEditType("new").value, "new", "Ctrl+A then typing replaces it all")
+    oneEditAction("home", false, false)
+    expectEqual(oneEditAction("delete", false, false).value, "ew", "delete")
+    return
+}
+
+fun testDrawn(): void {
+    var frame = editOn("hello world", false, false)
+    val hit = editHit(frame)
+    expectEqual(hit.caretX, hit.x + 16 + w("hello world"), "the caret after the text")
+    oneEditAction("home", false, false)
+    oneEditAction("right", true, true)
+    frame = editFrame("hello world", false, false)
+    expectEqual(editHit(frame).caretX, hit.x + 16 + w("hello"), "drawn where it is")
+    val rects = editRects(frame)
+    expectEqual(rects.size, 1, "a selection is drawn")
+    expectEqual(rects[0].x, hit.x + 16, "from its start")
+    expectEqual(rects[0].w, w("hello"), "as wide as what's selected")
+    // The pointer: a press between "hel" and "lo" puts the caret there.
+    val view = oneEditViews[0]
+    oneEditPointer(hit.x + 16 + w("hel") + 1, hit.y + 20, false, 1)
+    expectEqual(caret(), 3, "the caret goes under the pointer")
+    oneEditPointer(hit.x + 16 + w("hello wo"), hit.y + 20, true, 1)
+    expectEqual(oneEditCopy(), "lo wo", "dragging selects")
+    oneEditPointer(hit.x + 16 + 2, hit.y + 20, false, 2)
+    expectEqual(oneEditCopy(), "hello", "a double click selects the word")
+    oneEditPointer(hit.x + 16 + 2, hit.y + 20, false, 3)
+    expectEqual(oneEditCopy(), "hello world", "a third, everything")
+    oneEditPointer(hit.x + 280, hit.y + 20, false, 1)
+    expectEqual(caret(), 11, "past the end: the end")
+    expectEqual(view.top < hit.y + 20, true, "the view is where the text is")
+    // The app changing the text itself (a send that empties it) puts the caret at its end.
+    frame = editFrame("", false, false)
+    expectEqual(caret(), 0, "emptied: the caret at the start")
+    expectEqual(editTexts(frame)[0].text, "Type", "and the placeholder shows")
+    return
+}
+
+fun testSlides(): void {
+    val long = "the quick brown fox jumps over the lazy dog and keeps on running far away"
+    var frame = editOn(long, false, false)
+    val hit = editHit(frame)
+    expectEqual(hit.caretX <= hit.x + 300 - 16, true, "at the end, the caret is inside")
+    expect(editTexts(frame)[0].x < hit.x + 16, "the text slid left")
+    oneEditAction("home", false, false)
+    frame = editFrame(long, false, false)
+    expectEqual(editTexts(frame)[0].x, hit.x + 16, "Home slides it back")
+    expectEqual(editHit(frame).caretX, hit.x + 16, "the caret at the start")
+    oneEditAction("right", false, false)
+    frame = editFrame(long, false, false)
+    expectEqual(editTexts(frame)[0].x, hit.x + 16, "a step right doesn't slide it")
+    oneEditAction("end", false, false)
+    frame = editFrame(long, false, false)
+    oneEditAction("left", false, false)
+    frame = editFrame(long, false, false)
+    expect(editTexts(frame)[0].x < hit.x + 16, "a step left from the end keeps it slid")
+    var clipped = 0
+    for (p in frame.paints) if (p.op == "clip" && p.x == hit.x + 16) clipped = clipped + 1
+    expectEqual(clipped, 1, "clipped to the field")
+    return
+}
+
+fun testRows(): void {
+    // Three rows of about 12 characters each, in a field showing three.
+    val text = "first row is here and goes on, second row is here and goes on, third one is here too"
+    var frame = editOn(text, true, false)
+    val view = oneEditViews[0]
+    expect(view.starts.size >= 3, "it wraps")
+    val hit = editHit(frame)
+    val rows = view.starts.size
+    expectEqual(hit.caretY, view.top + (rows - 1 - view.first) * view.lh + view.lh / 2, "the caret on the last row")
+    oneEditAction("up", false, false)
+    expectEqual(oneEditRow(view.starts, caret()), rows - 2, "Up: the row above")
+    oneEditAction("home", false, false)
+    expectEqual(caret(), view.starts[rows - 2], "Home: that row's start")
+    oneEditAction("end", false, false)
+    expect(caret() < view.starts[rows - 1], "End: that row's end, still on it")
+    oneEditAction("home", false, true)
+    expectEqual(caret(), 0, "Ctrl+Home: the start")
+    oneEditAction("up", false, false)
+    expectEqual(caret(), 0, "Up on the first row: the start")
+    oneEditAction("down", false, false)
+    expectEqual(oneEditRow(view.starts, caret()), 1, "Down")
+    oneEditAction("down", true, false)
+    oneEditAction("down", true, false)
+    oneEditAction("down", true, false)
+    expectEqual(caret(), text.size, "Down on the last row: the end")
+    frame = editFrame(text, true, false)
+    expect(editRects(frame).size >= 2, "a selection over rows is drawn on each")
+    // A new line where the caret is.
+    oneEditAction("home", false, true)
+    expectEqual(oneEditAction("newline", false, false).value, "\n$text", "Enter in a field of several lines")
+    // Scrolled: more rows than shown keeps the caret's in view.
+    val many = "one\ntwo\nthree\nfour\nfive\nsix"
+    frame = editOn(many, true, false)
+    expectEqual(editTexts(frame)[0].text, "four", "at the end, the last rows")
+    oneEditAction("home", false, true)
+    frame = editFrame(many, true, false)
+    expectEqual(editTexts(frame)[0].text, "one", "at the start, the first")
+    oneEditAction("down", false, false)
+    oneEditAction("down", false, false)
+    oneEditAction("down", false, false)
+    frame = editFrame(many, true, false)
+    expectEqual(editTexts(frame)[0].text, "two", "moving down scrolls a row at a time")
+    return
+}
+
+fun testSecure(): void {
+    var frame = editOn("s3cret", false, true)
+    expectEqual(editTexts(frame)[0].text, "••••••", "drawn as dots")
+    oneEditAction("all", false, false)
+    expectEqual(oneEditCopy(), "", "a hidden field gives nothing to copy")
+    oneEditAction("left", false, false)
+    oneEditAction("right", false, false)
+    frame = editFrame("s3cret", false, true)
+    val hit = editHit(frame)
+    expectEqual(hit.caretX, hit.x + 16 + w("•"), "the caret after the first dot")
+    expectEqual(oneEditType("x").value, "sx3cret", "typing in the middle")
+    oneEditStop()
+    return
+}
+
+fun main: int {
+    testSpans()
+    testSteps()
+    testChanges()
+    testKeys()
+    testDrawn()
+    testSlides()
+    testRows()
+    testSecure()
+    testsPassed()
+}

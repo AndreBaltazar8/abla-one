@@ -1,0 +1,354 @@
+import "layout.ab"
+import "paint.ab"
+
+// Editing a field in a window: a caret anywhere in the text, a selection, and what keys and
+// the pointer do to them. Offsets are bytes on character boundaries. The text operations
+// don't draw; onePaintEditing draws the field in `oneEditing` and leaves a OneEditView of
+// where its rows went, for the pointer and for Up, Down, Home and End. Only what draws a
+// caret links any of it (`oneUseEditing`).
+
+class OneEdited(val value: string, val caret: int, val anchor: int)
+
+// Where the field being edited was drawn: its rows as spans of `value`, the ones shown from
+// `first`, and how far a single line slid left to keep the caret in view.
+class OneEditView(
+    val key: string,
+    val value: string,
+    val secure: bool,
+    val starts: array<int>,
+    val ends: array<int>,
+    val first: int,
+    val top: int,
+    val left: int,
+    val lh: int,
+    val size: int,
+    val weight: string,
+    val slide: int
+)
+val oneEditViews: array<OneEditView> = []
+
+fun oneUseEditing(): void {
+    oneUseCaret()
+    if (oneEditPaint.size == 0) oneEditPaint.append(onePaintEditing)
+    return
+}
+
+// Starts editing a field, the caret at the end of its text.
+fun oneEditStart(key: string, value: string): void {
+    oneEditing.clear()
+    oneEditViews.clear()
+    // The view slides and scrolls to the end, as before anything was moved.
+    oneEditing.append(OneEdit(key, value, value.size, value.size, 1073741824, 1073741824))
+    return
+}
+
+fun oneEditStop(): void {
+    oneEditing.clear()
+    oneEditViews.clear()
+    return
+}
+
+fun oneEditKey(): string = if (oneEditing.size > 0) oneEditing[0].key else ""
+
+// The steps a caret takes.
+
+fun oneCharBefore(text: string, at: int): int {
+    if (at <= 0) return 0
+    var i = if (at > text.size) text.size - 1 else at - 1
+    while (i > 0 && text[i] >= 128 && text[i] < 192) i = i - 1
+    i
+}
+
+fun oneCharAfter(text: string, at: int): int {
+    if (at >= text.size) return text.size
+    val next = at + oneCodeLength(text[at])
+    if (next > text.size) text.size else next
+}
+
+// `at` moved back onto the start of a character, inside the text.
+fun oneCharStart(text: string, at: int): int {
+    if (at <= 0) return 0
+    if (at >= text.size) return text.size
+    var i = at
+    while (i > 0 && text[i] >= 128 && text[i] < 192) i = i - 1
+    i
+}
+
+// Letters, digits, _ and anything not ASCII make words; the rest is between them.
+fun oneWordByte(b: int): bool = b >= 128 || (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95
+
+// The start of the word before `at`, past what's between.
+fun oneWordBefore(text: string, at: int): int {
+    var i = oneCharStart(text, at)
+    while (i > 0 && !oneWordByte(text[oneCharBefore(text, i)])) i = oneCharBefore(text, i)
+    while (i > 0 && oneWordByte(text[oneCharBefore(text, i)])) i = oneCharBefore(text, i)
+    i
+}
+
+// The end of the word after `at`, past what's between.
+fun oneWordAfter(text: string, at: int): int {
+    var i = oneCharStart(text, at)
+    while (i < text.size && !oneWordByte(text[i])) i = oneCharAfter(text, i)
+    while (i < text.size && oneWordByte(text[i])) i = oneCharAfter(text, i)
+    i
+}
+
+// The word at `at`, or the run of spaces and marks there, as a selection: what a double click takes.
+fun oneWordAt(text: string, at: int): OneEdited {
+    if (text.size == 0) return OneEdited(text, 0, 0)
+    val inside = if (at >= text.size) oneCharBefore(text, text.size) else oneCharStart(text, at)
+    val word = oneWordByte(text[inside])
+    var start = inside
+    while (start > 0 && oneWordByte(text[oneCharBefore(text, start)]) == word && text[oneCharBefore(text, start)] != 10) start = oneCharBefore(text, start)
+    var end = inside
+    while (end < text.size && oneWordByte(text[end]) == word && text[end] != 10) end = oneCharAfter(text, end)
+    if (end == start) end = oneCharAfter(text, start)
+    OneEdited(text, end, start)
+}
+
+// What a change does to the text: what's typed replaces the selection, the caret after it.
+
+fun oneEditInsert(value: string, caret: int, anchor: int, text: string): OneEdited {
+    val low = if (caret < anchor) caret else anchor
+    val high = if (caret < anchor) anchor else caret
+    val at = low + text.size
+    OneEdited("${value.slice(0, low)}$text${value.slice(high, value.size)}", at, at)
+}
+
+// Backspace and Delete: the selection, or what's between the caret and `to`.
+fun oneEditErase(value: string, caret: int, anchor: int, to: int): OneEdited {
+    if (caret != anchor) return oneEditInsert(value, caret, anchor, "")
+    val low = if (caret < to) caret else to
+    val high = if (caret < to) to else caret
+    OneEdited("${value.slice(0, low)}${value.slice(high, value.size)}", low, low)
+}
+
+fun oneEditSelected(value: string, caret: int, anchor: int): string =
+    if (caret < anchor) value.slice(caret, anchor) else value.slice(anchor, caret)
+
+// Where things are on the rows.
+
+// The width of value[from, to) in 1/1000 px, as drawn: a hidden field's are dots.
+fun oneSpanMilli(value: string, from: int, to: int, secure: bool, size: int, weight: string): int {
+    if (to <= from) return 0
+    if (!secure) return oneTextMilli(value.slice(from, to), size, weight)
+    var count = 0
+    var i = from
+    while (i < to) {
+        if (value[i] < 128 || value[i] >= 192) count = count + 1
+        i = i + 1
+    }
+    count * oneTextMilli("•", size, weight)
+}
+
+fun oneSpanWidth(view: OneEditView, from: int, to: int): int =
+    (oneSpanMilli(view.value, from, to, view.secure, view.size, view.weight) + 999) / 1000
+
+// The row `at` is on. A caret where a row wraps is at the start of the next one.
+fun oneEditRow(starts: array<int>, at: int): int {
+    var row = starts.size - 1
+    while (row > 0 && at < starts[row]) row = row - 1
+    row
+}
+
+// The last place for a caret on a row. A row that wraps ends before what it wrapped at, as a
+// caret after it would be on the next row.
+fun oneEditRowEnd(view: OneEditView, row: int): int {
+    val end = view.ends[row]
+    if (row + 1 < view.starts.size && view.starts[row + 1] == end && end > view.starts[row]) return oneCharBefore(view.value, end)
+    end
+}
+
+// The place on a row nearest `x`, in pixels from where the row's text starts. One pass.
+fun oneEditOffsetIn(view: OneEditView, row: int, x: int): int {
+    val last = oneEditRowEnd(view, row)
+    val target = x * 1000
+    var at = view.starts[row]
+    var milli = 0
+    while (at < last) {
+        val next = oneCharAfter(view.value, at)
+        val w = oneSpanMilli(view.value, at, next, view.secure, view.size, view.weight)
+        if (milli + w / 2 > target) return at
+        milli = milli + w
+        at = next
+    }
+    last
+}
+
+// The place under the pointer. Above or below the rows shown, it's the row past them.
+fun oneEditOffsetAt(view: OneEditView, px: int, py: int): int {
+    val dy = py - view.top
+    var row = view.first + (if (dy < 0) -1 else dy / view.lh)
+    if (row < 0) row = 0
+    if (row >= view.starts.size) row = view.starts.size - 1
+    oneEditOffsetIn(view, row, px - view.left + view.slide)
+}
+
+// Up and Down: the place on the row `rows` away, under the caret, or the text's start or end.
+fun oneEditVertical(view: OneEditView, at: int, rows: int): int {
+    val row = oneEditRow(view.starts, at)
+    val target = row + rows
+    if (target < 0) return 0
+    if (target >= view.starts.size) return view.value.size
+    oneEditOffsetIn(view, target, oneSpanWidth(view, view.starts[row], at))
+}
+
+// What keys and the pointer do to the field in `oneEditing`. The result is its text, changed
+// or not, for the window to deliver when it changed.
+
+fun oneEditView(): OneEditView? {
+    if (oneEditing.size == 0 || oneEditViews.size == 0 || oneEditViews[0].key != oneEditing[0].key || oneEditViews[0].value != oneEditing[0].value) return null
+    oneEditViews[0]
+}
+
+fun oneEditSet(edited: OneEdited): OneEdited {
+    val e = oneEditing[0]
+    oneEditing[0] = OneEdit(e.key, edited.value, edited.caret, edited.anchor, e.slide, e.first)
+    edited
+}
+
+// Typing and pasting.
+fun oneEditType(text: string): OneEdited {
+    val e = oneEditing[0]
+    oneEditSet(oneEditInsert(e.value, e.caret, e.anchor, text))
+}
+
+// What Ctrl+C takes: the selection, unless the field hides what's in it.
+fun oneEditCopy(): string {
+    if (oneEditing.size == 0) return ""
+    val e = oneEditing[0]
+    val view = oneEditView()
+    if (view != null && view.secure) return ""
+    oneEditSelected(e.value, e.caret, e.anchor)
+}
+
+// A key on the field: left, right, up, down, home, end, all, backspace, delete or newline.
+// `extend` (Shift) moves the caret keeping the selection's start; `word` (Control) goes a
+// word at a time, or with Home and End to the text's start and end.
+fun oneEditAction(action: string, extend: bool, word: bool): OneEdited {
+    val e = oneEditing[0]
+    val value = e.value
+    val caret = e.caret
+    val low = if (caret < e.anchor) caret else e.anchor
+    val high = if (caret < e.anchor) e.anchor else caret
+    if (action == "backspace") return oneEditSet(oneEditErase(value, caret, e.anchor, if (word) oneWordBefore(value, caret) else oneCharBefore(value, caret)))
+    if (action == "delete") return oneEditSet(oneEditErase(value, caret, e.anchor, if (word) oneWordAfter(value, caret) else oneCharAfter(value, caret)))
+    if (action == "newline") return oneEditType("\n")
+    if (action == "all") return oneEditSet(OneEdited(value, value.size, 0))
+    val view = oneEditView()
+    var to = caret
+    if (action == "left") to = if (!extend && caret != e.anchor) low else if (word) oneWordBefore(value, caret) else oneCharBefore(value, caret)
+    else if (action == "right") to = if (!extend && caret != e.anchor) high else if (word) oneWordAfter(value, caret) else oneCharAfter(value, caret)
+    else if (action == "home") to = if (word || view == null) 0 else view.starts[oneEditRow(view.starts, caret)]
+    else if (action == "end") to = if (word || view == null) value.size else oneEditRowEnd(view, oneEditRow(view.starts, caret))
+    else if (action == "up") to = if (view == null) 0 else oneEditVertical(view, caret, -1)
+    else if (action == "down") to = if (view == null) value.size else oneEditVertical(view, caret, 1)
+    oneEditSet(OneEdited(value, to, if (extend) e.anchor else to))
+}
+
+// A press on the field: the caret goes under the pointer, or with `extend` the selection
+// grows to it. `clicks` 2 selects the word there, 3 the whole text.
+fun oneEditPointer(px: int, py: int, extend: bool, clicks: int): void {
+    val view = oneEditView()
+    if (view == null) return
+    val e = oneEditing[0]
+    val at = oneEditOffsetAt(view, px, py)
+    if (clicks >= 3) oneEditSet(OneEdited(e.value, e.value.size, 0))
+    else if (clicks == 2) oneEditSet(oneWordAt(e.value, at))
+    else oneEditSet(OneEdited(e.value, at, if (extend) e.anchor else at))
+    return
+}
+
+// Drawing it.
+
+fun onePaintEditing(var frame: OneFrame, box: OneBox, f: OneEditField): void {
+    val r = box.r
+    val size = r.int("size", 16)
+    val lh = oneLineHeight(r)
+    val weight = r.get("weight")
+    val inner = box.w - f.pl - f.pr
+    val multiline = box.node.attr("multiline") == "true"
+    val most = if (multiline) r.int("maxLines", 5) else 1
+    val typed = f.typed
+    val edit = oneEditing[0]
+    // Text the app changed itself, such as a message box emptied on send, has the caret at its end.
+    val same = edit.value == typed
+    val caret = if (same) oneCharStart(typed, edit.caret) else typed.size
+    val anchor = if (same) oneCharStart(typed, edit.anchor) else caret
+    val starts: array<int> = []
+    val ends: array<int> = []
+    if (multiline) oneWrapSpans(typed, size, weight, inner, starts, ends)
+    else {
+        starts.append(0)
+        ends.append(typed.size)
+    }
+    val rows = starts.size
+    val caretRow = oneEditRow(starts, caret)
+    // The rows shown move as little as keeps the caret's in view.
+    var first = edit.first
+    if (first > rows - most) first = rows - most
+    if (first < 0) first = 0
+    if (caretRow < first) first = caretRow
+    if (caretRow >= first + most) first = caretRow - most + 1
+    val placeholder = box.node.attr("placeholder")
+    val hint = if (typed == "") oneWrap(placeholder, size, weight, inner, most) else []
+    val shown = if (typed == "") hint.size else if (rows - first < most) rows - first else most
+    val centred = (box.h - lh * shown) / 2
+    val top = f.y + (if (multiline && centred > f.pl) f.pl else centred)
+    val view = OneEditView(f.key, typed, f.secure, starts, ends, first, top, f.x + f.pl, lh, size, weight, 0)
+    // One line slides as little as keeps the caret in view, with room for the caret itself.
+    var slide = 0
+    if (!multiline) {
+        val room = inner - oneCaretWidth
+        val total = oneSpanWidth(view, 0, typed.size)
+        val at = oneSpanWidth(view, 0, caret)
+        slide = edit.slide
+        if (slide > total - room) slide = total - room
+        if (at < slide) slide = at
+        if (at > slide + room) slide = at - room
+        if (slide < 0) slide = 0
+    }
+    val placed = OneEditView(f.key, typed, f.secure, starts, ends, first, top, f.x + f.pl, lh, size, weight, slide)
+    val left = f.x + f.pl - slide
+    oneAddRect(frame, "clip", f.x + f.pl, f.y, inner, box.h, 0, "")
+    val low = if (caret < anchor) caret else anchor
+    val high = if (caret < anchor) anchor else caret
+    val selection = r.get("selectionColor")
+    val color = r.get("color")
+    val ink = if (color != "") color else "#111111"
+    var row = first
+    while (row < first + shown && typed != "") {
+        val ry = top + (row - first) * lh
+        val from = if (low > starts[row]) low else starts[row]
+        val to = if (high < ends[row]) high else ends[row]
+        // A selection going on past the row's end shows a little past it, for the break.
+        val past = high > ends[row] && row + 1 < rows
+        if (from < to || (past && from <= ends[row] && low <= ends[row])) {
+            val x0 = left + oneSpanWidth(placed, starts[row], from)
+            val x1 = left + oneSpanWidth(placed, starts[row], to) + (if (past) size / 3 else 0)
+            oneAddRect(frame, "rect", x0, ry, x1 - x0, lh, 0, if (selection != "") selection else "#B4D5FE")
+        }
+        val text = typed.slice(starts[row], ends[row])
+        oneAddText(frame, left, ry, oneSpanWidth(placed, starts[row], ends[row]), lh, ink, if (f.secure) oneMasked(text) else text, size, weight)
+        row = row + 1
+    }
+    if (typed == "") {
+        val hintColor = r.get("placeholderColor")
+        var line = 0
+        while (line < hint.size) {
+            oneAddText(frame, f.x + f.pl, top + line * lh, inner, lh, if (hintColor != "") hintColor else "#888888", hint[line], size, weight)
+            line = line + 1
+        }
+    }
+    oneAddRect(frame, "unclip", f.x + f.pl, f.y, inner, box.h, 0, "")
+    oneAddHit(frame, "input", f.x, f.y, box.w, box.h, oneParseInt(box.node.attr("onChange"), 0), oneParseInt(box.node.attr("onSubmit"), 0), f.key, typed, placeholder, multiline)
+    val hit = frame.hits[frame.hits.size - 1]
+    val caretX = left + oneSpanWidth(placed, starts[caretRow], caret)
+    val rightmost = f.x + box.w - f.pr - oneCaretWidth
+    val caretY = top + (caretRow - first) * lh + lh / 2
+    frame.hits[frame.hits.size - 1] = OneHit(hit.kind, hit.x, hit.y, hit.w, hit.h, hit.event, hit.submit, hit.key, typed, placeholder, multiline, if (caretX > rightmost) rightmost else caretX, caretY)
+    oneEditing[0] = OneEdit(edit.key, typed, caret, anchor, slide, first)
+    oneEditViews.clear()
+    oneEditViews.append(placed)
+    return
+}
