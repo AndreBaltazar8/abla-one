@@ -51,7 +51,7 @@ fun oneRecoveryRawMetadata(request: OneRequest): int {
 }
 fun oneRecoveryRawBegin(original: OneLiveRequest, now: int): OneRecoveryRawRequest {
     val status=oneRecoveryRawMetadata(original.request)
-    if(status!=200)return OneRecoveryRawRequest(original,[],now+oneRecoveryRawTimeout(original.request),status=status,done=true)
+    if(status!=200)return OneRecoveryRawRequest(OneLiveRequest(original.id,oneRequest(original.request.method,original.request.url),original.operation,original.session,original.epoch),[],now+oneRecoveryRawTimeout(original.request),status=status,done=true)
     val item=OneLiveRequest(original.id,oneLiveRequestSnapshot(original.request),original.operation,original.session,original.epoch)
     val handles: array<string> = []
     if(item.request.bodyFile!="")handles.append(item.request.bodyFile)
@@ -116,7 +116,9 @@ fun oneRecoveryRawAccept(var raw: OneRecoveryRawRequest, payload: string): bool 
 fun oneRecoveryRawRequest(raw: OneRecoveryRawRequest): OneRequest? {
     if(!raw.done || raw.status!=200)return null
     val request=raw.item.request
-    if(request.bodyFile!="")return request.copy(raw.bytes.get(request.bodyFile)??"","","",[])
+    val headers: array<OneHeader> = []
+    for(header in request.headers)headers.append(OneHeader(header.name,header.value))
+    if(request.bodyFile!="")return OneRequest(request.method,request.url,headers,raw.bytes.get(request.bodyFile)??"","","",[],request.timeoutMs,request.binaryResponse,request.saveResponse)
     val parts: array<OnePart> = []
     var size=oneRecoveryPartOverhead
     for(part in request.parts){
@@ -125,7 +127,7 @@ fun oneRecoveryRawRequest(raw: OneRecoveryRawRequest): OneRequest? {
         size=size+bytes.size+oneRecoveryPartOverhead
         parts.append(OnePart(part.name,bytes,"","",part.filename,part.contentType))
     }
-    request.copy("","","",parts)
+    OneRequest(request.method,request.url,headers,"","","",parts,request.timeoutMs,request.binaryResponse,request.saveResponse)
 }
 fun oneLivePartQuoted(value: string): string {
     var out=""
@@ -133,8 +135,9 @@ fun oneLivePartQuoted(value: string): string {
     out
 }
 fun oneRecoveryRawDrain(state: OneRecoveryState, frontier: int): OneRecoveryWrite? {
-    val raw=state.rawRequest
-    if(raw==null || raw.consumed.size==0 || state.durablePayload=="")return null
+    if(state.rawRequests.size==0 || state.durablePayload=="")return null
+    val raw=state.rawRequests[0]
+    if(raw.consumed.size==0)return null
     val consumed: array<string> = []
     for(id in raw.consumed)consumed.append(id)
     OneRecoveryWrite(state.batch.durable,frontier,state.durablePayload,"",[],false,consumed,state.committedActivity,false,true)
@@ -146,16 +149,16 @@ fun oneRecoveryRawIdentity(state: OneRecoveryState,item: OneLiveRequest): bool =
 // request fields are val. A pending assembly must not observe later edits.
 fun oneLiveRequestSnapshot(request: OneRequest): OneRequest {
     val headers: array<OneHeader> = []
-    for(header in request.headers)headers.append(header)
+    for(header in request.headers)headers.append(OneHeader(header.name,header.value))
     val parts: array<OnePart> = []
-    for(part in request.parts)parts.append(part)
+    for(part in request.parts)parts.append(OnePart(part.name,part.value,part.base64,part.file,part.filename,part.contentType))
     OneRequest(request.method,request.url,headers,request.body,request.bodyBase64,request.bodyFile,parts,request.timeoutMs,request.binaryResponse,request.saveResponse)
 }
 
 fun oneRecoveryRawDrop(var state: OneRecoveryState): void {
-    var raw=state.rawRequest
-    if(raw!=null)oneRecoveryRawRelease(raw)
-    state.rawRequest=null
+    var at=0
+    while(at<state.rawRequests.size){oneRecoveryRawRelease(state.rawRequests[at]);at=at+1}
+    state.rawRequests.clear()
     return
 }
 

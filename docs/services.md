@@ -45,7 +45,8 @@ file-backed multipart parts from the adapter's shared file store. It never falls
 back to another session's node-local cache. `readFile` remains available when an
 application wants to stream or transform chunks itself.
 
-Recovery requests have a 16 MiB assembled-body budget, at most 32 multipart parts,
+Recovery requests have a 16 MiB assembled-body budget (including conservative
+multipart framing allowance), at most 32 multipart parts,
 and part metadata fields of at most 256 bytes. Headers are limited to 128,
 64 KiB combined, with 256-byte names and 16 KiB values. Reads are at most 256 KiB. One assembly
 runs per session; the process reserves at most 64 MiB of assembly payload across

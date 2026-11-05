@@ -82,13 +82,14 @@ class OneRecoveryState(
     var activitySerial: int = 0,
     var committedActivity: int = -1,
     var initialPayload: string = "",
-    var durablePayload: string = "",
-    var rawRequest: OneRecoveryRawRequest? = null,
     var pendingPage: bool = false,
     var inboxPending: bool = false,
     val pageCookies: array<string> = [],
     var ending: bool = false,
-    var endRetryAt: int = 0
+    var endRetryAt: int = 0,
+    var durablePayload: string = "",
+    // At most one: mutate through its owned field path, never a nullable alias.
+    val rawRequests: array<OneRecoveryRawRequest> = []
 )
 
 class OneRecoveryHttp(val owner: string, val ticket: int, val request: HttpRequest, var stage: string, var session: string, val started: int)

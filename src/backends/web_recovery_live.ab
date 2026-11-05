@@ -210,8 +210,8 @@ fun OneLiveServer.recoveryFence(index: int, immediate: bool): bool {
     state.checkedAt = now
     state.status = recovery.fence(state.id, recoveryOwner, state.epoch)
     if (state.status == 202) { state.checkedAt = now - oneRecoveryBatchMilliseconds; return false }
-    if (state.status == 409 || state.status == 403 || state.status == 404) {
-        if (state.rawRequest != null) { oneRecoveryRawRelease(state.rawRequest); state.rawRequest = null }
+    if (state.status == 409 || state.status == 403 || state.status == 404 || state.status == 410) {
+        oneRecoveryRawDrop(state)
         val slot = sessions[index].slot
         if (slot >= 0) {
             queue(slot, webSocketEncodeFrame(webSocketClosePayload(1012, "session moved"), 8))
@@ -224,10 +224,9 @@ fun OneLiveServer.recoveryFence(index: int, immediate: bool): bool {
 fun OneLiveServer.recoverySettle(index: int): void {
     val state = oneRecoverySessions.get(sessions[index].id)
     if (state == null || sessions[index].slot < 0 || !recoveryFence(index, false)) return
-    var expiring = state.rawRequest
-    if (expiring != null) oneRecoveryRawExpired(expiring,oneLiveNow())
+    if (state.rawRequests.size > 0) oneRecoveryRawExpired(state.rawRequests[0],oneLiveNow())
     if (state.prepared != null) { recoveryFinishWrite(index); return }
-    if (state.rawRequest != null) { recoveryRawWork(index); return }
+    if (state.rawRequests.size > 0) { recoveryRawWork(index); return }
     for (id in state.files.keys()) {
         val job = state.files.get(id)
         if (job == null || job.admitted || job.retryAt > oneLiveNow() || (!state.ready && !state.hydrationFiles.has(id))) continue
@@ -273,7 +272,7 @@ fun OneLiveServer.recoverySettle(index: int): void {
     }
     // Hydration may complete inside pump above; until then no render, ack or
     // checkpoint may authorize old controls or persist a partial app state.
-    if (!state.ready || state.rawRequest != null) return
+    if (!state.ready || state.rawRequests.size > 0) return
     val force = sessions[index].queue.cookiesChanged || sessions[index].queue.outbox.size > 0 || sessions[index].queue.moves.size > 0
     if (force) state.batch.changed(true)
     else if (sessions[index].changed && !state.batch.pending) state.batch.changed()
@@ -349,17 +348,16 @@ fun OneLiveServer.recoveryFinishWrite(index: int): void {
     }
     state.version = saved.version
     if (prepared.drain) {
-        val raw = state.rawRequest
-        if (raw != null) {
+        if (state.rawRequests.size > 0) {
             val remaining: array<string> = []
-            for (id in raw.consumed) {
+            for (id in state.rawRequests[0].consumed) {
                 var used = false
                 for (included in prepared.consumed) if (id == included) used = true
                 if (!used) remaining.append(id)
             }
-            raw.consumed.clear()
-            for (id in remaining) raw.consumed.append(id)
-            raw.drainedAt = oneLiveNow()
+            state.rawRequests[0].consumed.clear()
+            for (id in remaining) state.rawRequests[0].consumed.append(id)
+            state.rawRequests[0].drainedAt = oneLiveNow()
         }
         state.prepared = null
         return
@@ -475,69 +473,68 @@ fun OneLiveServer.recoveryPending(): void {
 // acknowledgement frontier. In particular, ordinary app inbox IDs stay put.
 fun OneLiveServer.recoveryRawWork(index: int): void {
     val state=oneRecoverySessions.get(sessions[index].id)
-    if(state==null)return
-    var raw=state.rawRequest
-    if(raw==null)return
-    oneRecoveryRawExpired(raw,oneLiveNow())
-    if(raw.consumed.size>0 && (raw.done || (raw.consumed.size>=32 && oneLiveNow()-raw.drainedAt>=1000))){
-        if(state.durablePayload==""){raw.status=503;raw.done=true;return}
+    if(state==null || state.rawRequests.size==0)return
+    oneRecoveryRawExpired(state.rawRequests[0],oneLiveNow())
+    if(state.rawRequests[0].consumed.size>0 && (state.rawRequests[0].done || (state.rawRequests[0].consumed.size>=32 && oneLiveNow()-state.rawRequests[0].drainedAt>=1000))){
+        if(state.durablePayload==""){state.rawRequests[0].status=503;state.rawRequests[0].done=true;return}
         state.prepared=oneRecoveryRawDrain(state,sessions[index].durableFrontier)
         recoveryFinishWrite(index)
         return
     }
-    if(raw.done){if(recoveryRawFinish(index))pump(index);return}
+    if(state.rawRequests[0].done){if(recoveryRawFinish(index))pump(index);return}
     if(!recoveryFence(index,true))return
-    if(raw.reading==0){
+    if(state.rawRequests[0].reading==0){
         var candidate=oneRecoveryRawReadId()
         var attempts=0
         while((state.files.has(candidate) || state.hydrationFiles.has(candidate)) && attempts<8){candidate=oneRecoveryRawReadId();attempts=attempts+1}
-        if(candidate==0 || state.files.has(candidate) || state.hydrationFiles.has(candidate)){raw.done=true;raw.status=503;return}
-        raw.reading=candidate
-        raw.length=if(oneRecoveryRequestLimit-raw.budget<262144)oneRecoveryRequestLimit-raw.budget+1 else 262144
-        raw.admitted=false
+        if(candidate==0 || state.files.has(candidate) || state.hydrationFiles.has(candidate)){state.rawRequests[0].done=true;state.rawRequests[0].status=503;return}
+        state.rawRequests[0].reading=candidate
+        state.rawRequests[0].length=if(oneRecoveryRequestLimit-state.rawRequests[0].budget<262144)oneRecoveryRequestLimit-state.rawRequests[0].budget+1 else 262144
+        state.rawRequests[0].admitted=false
     }
-    if(!raw.admitted && oneLiveNow()>=raw.retryAt){
-        val status=state.store.readFile(state.id,state.owner,state.epoch,raw.reading,raw.handles[raw.at],raw.offset,raw.length)
-        if(status==200)raw.admitted=true
-        else if(status==503)raw.retryAt=oneLiveNow()+1000
-        else if(status!=202){raw.done=true;raw.status=status;return}
+    if(!state.rawRequests[0].admitted && oneLiveNow()>=state.rawRequests[0].retryAt){
+        val status=state.store.readFile(state.id,state.owner,state.epoch,state.rawRequests[0].reading,state.rawRequests[0].handles[state.rawRequests[0].at],state.rawRequests[0].offset,state.rawRequests[0].length)
+        if(status==200)state.rawRequests[0].admitted=true
+        else if(status==503)state.rawRequests[0].retryAt=oneLiveNow()+1000
+        else if(status!=202){state.rawRequests[0].done=true;state.rawRequests[0].status=status;return}
     }
-    if(!raw.admitted)return
-    val inbox=state.store.inbox(state.id,state.owner,state.epoch,[raw.reading])
+    if(!state.rawRequests[0].admitted)return
+    val inbox=state.store.inbox(state.id,state.owner,state.epoch,[state.rawRequests[0].reading])
     if(inbox.status==202)return
-    if(inbox.status!=200){if(inbox.status!=503){raw.done=true;raw.status=inbox.status};return}
-    if(inbox.items.size>64){raw.done=true;raw.status=502;return}
+    if(inbox.status!=200){if(inbox.status!=503){state.rawRequests[0].done=true;state.rawRequests[0].status=inbox.status};return}
+    if(inbox.items.size>64){state.rawRequests[0].done=true;state.rawRequests[0].status=502;return}
     for(item in inbox.items){
         var seen=false
-        for(id in raw.consumed)if(id==item.id)seen=true
+        for(id in state.rawRequests[0].consumed)if(id==item.id)seen=true
         if(seen)continue
-        if(raw.consumed.size>=64)return
-        if(item.id.size==0 || item.id.size>128 || item.payload.size>524288){raw.done=true;raw.status=502;return}
-        if(oneRecoveryConsumed(state,item.id)){raw.done=true;raw.status=502;return}
+        if(state.rawRequests[0].consumed.size>=64)return
+        if(item.id.size==0 || item.id.size>128 || item.payload.size>524288){state.rawRequests[0].done=true;state.rawRequests[0].status=502;return}
+        if(oneRecoveryConsumed(state,item.id)){state.rawRequests[0].done=true;state.rawRequests[0].status=502;return}
         val previous=oneResponse(item.payload)
-        val digest=raw.completed.get(previous.requestId)
-        if(previous.valid && digest!=null && digest==hexEncode(sha256(item.payload))){raw.consumed.append(item.id);continue}
-        if(item.id.size==0 || item.id.size>128 || item.payload.size>524288 || !oneRecoveryRawAccept(raw,item.payload)){raw.done=true;raw.status=502;return}
-        raw.consumed.append(item.id)
+        val digest=state.rawRequests[0].completed.get(previous.requestId)
+        if(previous.valid && digest!=null && digest==hexEncode(sha256(item.payload))){state.rawRequests[0].consumed.append(item.id);continue}
+        if(item.id.size==0 || item.id.size>128 || item.payload.size>524288 || !oneRecoveryRawAccept(state.rawRequests[0],item.payload)){state.rawRequests[0].done=true;state.rawRequests[0].status=502;return}
+        state.rawRequests[0].consumed.append(item.id)
         // A duplicate completion, even under another inbox ID, may never be
         // mistaken for the next chunk or delivered to the application.
-        if(raw.reading==0 || raw.done)return
+        if(state.rawRequests[0].reading==0 || state.rawRequests[0].done)return
     }
     return
 }
 fun OneLiveServer.recoveryRawFinish(index: int): bool {
     val state=oneRecoverySessions.get(sessions[index].id)
-    if(state==null)return true
-    var raw=state.rawRequest
-    if(raw==null)return true
-    if(!raw.done || raw.consumed.size>0 || state.prepared!=null)return false
+    if(state==null || state.rawRequests.size==0)return true
+    if(!state.rawRequests[0].done || state.rawRequests[0].consumed.size>0 || state.prepared!=null)return false
     if(!recoveryFence(index,true))return false
-    val materialized=oneRecoveryRawRequest(raw)
-    val status=if(raw.status!=200)raw.status else if(materialized==null)413 else 200
-    val item=raw.item
-    val response=if(status!=200 || materialized==null)oneResponsePayload(item.id,status,"","File request unavailable")else oneLiveExecute(handler,OneLiveRequest(item.id,materialized,item.operation,item.session,item.epoch),privateRequests,browserContexts.get(item.session))
-    oneRecoveryRawRelease(raw)
-    state.rawRequest=null
+    val materialized=oneRecoveryRawRequest(state.rawRequests[0])
+    val status=if(state.rawRequests[0].status!=200)state.rawRequests[0].status else if(materialized==null)413 else 200
+    val id=state.rawRequests[0].item.id
+    val operation=state.rawRequests[0].item.operation
+    val session=state.rawRequests[0].item.session
+    val epoch=state.rawRequests[0].item.epoch
+    val response=if(status!=200 || materialized==null)oneResponsePayload(id,status,"","File request unavailable")else oneLiveExecute(handler,OneLiveRequest(id,materialized,operation,session,epoch),privateRequests,browserContexts.get(session))
+    oneRecoveryRawRelease(state.rawRequests[0])
+    state.rawRequests.clear()
     sessions[index].queue.complete(response)
     state.batch.changed(true)
     true

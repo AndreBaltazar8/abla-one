@@ -97,7 +97,7 @@ fun main: int {
     drainState.consumed.append("ordinary-app-inbox")
     val draining=oneRecoveryRawBegin(item,0)
     draining.consumed.append("internal-chunk")
-    drainState.rawRequest=draining
+    drainState.rawRequests.append(draining)
     val write=oneRecoveryRawDrain(drainState,4)
     expect(write!=null && write.drain && write.payload==drainState.durablePayload && write.frontier==4 && write.generation==0,"consumption-only CAS retains exact durable payload and old frontier/generation")
     expect(write!=null && write.consumed.size==1 && write.consumed[0]=="internal-chunk" && write.patch=="" && write.outbox.size==0 && !write.cookies && !write.active,"drain contains only internal inbox IDs and no patch/cookie/effect acknowledgement")
@@ -112,12 +112,12 @@ fun main: int {
     expect(oversized.status==413 && !oversized.reserved,"assembled byte budget refuses oversized inline multipart text before file IO")
     var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),{request->httpText("ok")},{request->false},rawDropFactory,oneDefaultTheme(),OneLiveOptions("raw test","en","#fff","/icons","src/backends/web/host.js",""))
     val dropping=OneRecoveryState("raw-drop","proof",server.recoveryOwner,oneLiveNoRecovery(),epoch=1)
-    dropping.rawRequest=oneRecoveryRawBegin(item,0)
+    dropping.rawRequests.append(oneRecoveryRawBegin(item,0))
     oneRecoverySessions.set("raw-drop",dropping)
     server.sessions.append(oneSession("raw-drop",RawDropApp(),oneLiveQueueList[oneLiveQueueIndex("raw-drop")]))
     expect(server.nextTimeout()==10,"pending assembly polls bounded off-path work without a one-second-per-chunk stall")
     server.drop()
-    expect(oneRecoveryRequestReserved==0 && dropping.rawRequest==null,"stopping a server releases its assemblies without leaking process reservations")
+    expect(oneRecoveryRequestReserved==0 && dropping.rawRequests.size==0,"stopping a server releases its assemblies without leaking process reservations")
     oneRecoverySessions.remove("raw-drop");oneLiveForget("raw-drop")
     testsPassed()
 }
