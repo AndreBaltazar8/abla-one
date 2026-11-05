@@ -969,7 +969,7 @@ fun OneLiveServer.nextTimeout(timersReady: (OneLiveSession) -> bool = oneLiveAll
     for (slot in slots) if (slot.awaitingRecovery && slot.recoveryMessage != "") timeout = 10
     for (session in sessions) {
         val recoveryState = oneRecoverySessions.get(session.id)
-        if (recoveryState != null && (recoveryState.prepared != null || recoveryState.inboxPending || recoveryState.status == 202)) {
+        if (recoveryState != null && (recoveryState.rawRequest != null || recoveryState.prepared != null || recoveryState.inboxPending || recoveryState.status == 202)) {
             val pending = if (recoveryState.batch.retryAt > now) recoveryState.batch.retryAt - now else 10
             if (pending < timeout) timeout = pending
         }

@@ -108,6 +108,7 @@ fun main: int {
     dropping.rawRequest=oneRecoveryRawBegin(item,0)
     oneRecoverySessions.set("raw-drop",dropping)
     server.sessions.append(oneSession("raw-drop",RawDropApp(),oneLiveQueueList[oneLiveQueueIndex("raw-drop")]))
+    expect(server.nextTimeout()==10,"pending assembly polls bounded off-path work without a one-second-per-chunk stall")
     server.drop()
     expect(oneRecoveryRequestReserved==0 && dropping.rawRequest==null,"stopping a server releases its assemblies without leaking process reservations")
     oneRecoverySessions.remove("raw-drop");oneLiveForget("raw-drop")
