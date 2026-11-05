@@ -42,6 +42,12 @@ fun main: int {
     bad.reading=-300;bad.length=3
     expect(oneRecoveryRawAccept(bad,rawTestPayload(-300,"four")) && bad.status==502 && bad.total==0,"oversized chunk refuses before retaining any bytes")
     oneRecoveryRawRelease(bad)
+    val excess=oneRecoveryRawBegin(item,0)
+    excess.budget=oneRecoveryRequestLimit;excess.reading=-302;excess.length=1
+    expect(oneRecoveryRawAccept(excess,rawTestPayload(-302,"x")) && excess.status==413 && excess.total==0,"first byte over the assembled budget is refused before retaining it")
+    oneRecoveryRawRelease(excess)
+    val ambiguous=oneRecoveryRawBegin(OneLiveRequest(1,item.request.copy("","",file.handle,[oneTextPart("text","value")])),0)
+    expect(ambiguous.status==400 && !ambiguous.reserved,"conflicting file-body and multipart representations refuse before dispatch")
     val malformed=oneRecoveryRawBegin(item,0)
     malformed.reading=-301;malformed.length=3
     val invalid="{\"requestId\":-301,\"status\":200,\"bodyBase64\":\"!!!\"}"

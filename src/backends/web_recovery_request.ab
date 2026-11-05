@@ -3,6 +3,7 @@ import "abla/crypto"
 
 // Only volatile materialization state: never part of the checkpoint codec.
 val oneRecoveryRawIdBase = 4503599627370496
+val oneRecoveryPartOverhead = 2048
 val oneRecoveryRequestLimit = 16777216
 val oneRecoveryRequestProcessLimit = 67108864
 var oneRecoveryRequestReserved = 0
@@ -11,7 +12,7 @@ class OneRecoveryRawRequest(
     val bytes: Map<string,string> = Map(), val completed: Map<int,string> = Map(), val consumed: array<string> = [],
     var at: int = 0, var offset: int = 0, var reading: int = 0,
     var length: int = 0, var admitted: bool = false, var retryAt: int = 0,
-    var total: int = 0, var status: int = 200, var done: bool = false,
+    var total: int = 0, var budget: int = 0, var status: int = 200, var done: bool = false,
     var reserved: bool = false, var drainedAt: int = 0
 )
 fun oneRecoveryRaw(request: OneRequest): bool {
@@ -27,6 +28,7 @@ fun oneRecoveryPartMetadata(value: string, limit: int): bool {
 }
 fun oneRecoveryRawMetadata(request: OneRequest): int {
     if(request.parts.size>32 || request.headers.size>128)return 413
+    if(request.bodyFile!="" && request.parts.size>0)return 400
     var headerBytes=0
     for(header in request.headers){
         if(!oneRecoveryPartMetadata(header.name,256) || !oneRecoveryPartMetadata(header.value,16384))return 400
@@ -36,12 +38,13 @@ fun oneRecoveryRawMetadata(request: OneRequest): int {
     var size=request.body.size
     if(request.bodyBase64.size>22369624)return 413
     if(request.bodyBase64!="")size=base64Decode(request.bodyBase64).size
+    if(request.parts.size>0)size=size+oneRecoveryPartOverhead
     for(part in request.parts){
         if(!oneRecoveryPartMetadata(part.name,256) || !oneRecoveryPartMetadata(part.filename,256) || !oneRecoveryPartMetadata(part.contentType,256))return 400
         if(part.file.size>256)return 400
         if(part.base64!="" && base64Encode(base64Decode(part.base64))!=part.base64)return 400
         if(part.value.size>oneRecoveryRequestLimit || part.base64.size>22369624)return 413
-        size=size+part.value.size+(if(part.base64!="")base64Decode(part.base64).size else 0)+1024
+        size=size+part.value.size+(if(part.base64!="")base64Decode(part.base64).size else 0)+oneRecoveryPartOverhead
         if(size>oneRecoveryRequestLimit)return 413
     }
     if(size>oneRecoveryRequestLimit)413 else 200
@@ -66,6 +69,7 @@ fun oneRecoveryRawBegin(original: OneLiveRequest, now: int): OneRecoveryRawReque
     if(raw.status!=200){raw.done=true;return raw}
     oneRecoveryRequestReserved=oneRecoveryRequestReserved+oneRecoveryRequestLimit
     raw.reserved=true
+    raw.budget=oneRecoveryRawInlineCost(item.request)
     raw
 }
 fun oneRecoveryRawRelease(var raw: OneRecoveryRawRequest): void {
@@ -99,10 +103,11 @@ fun oneRecoveryRawAccept(var raw: OneRecoveryRawRequest, payload: string): bool 
     if(!encoded.isString() || encoded.asString().size>349528){raw.done=true;raw.status=502;return true}
     val bytes=base64Decode(encoded.asString())
     if(base64Encode(bytes)!=encoded.asString() || bytes.size>raw.length){raw.done=true;raw.status=502;return true}
-    if(raw.total>oneRecoveryRequestLimit-bytes.size){raw.done=true;raw.status=413;return true}
+    if(raw.budget>oneRecoveryRequestLimit-bytes.size){raw.done=true;raw.status=413;return true}
     val handle=raw.handles[raw.at]
     raw.bytes.set(handle,(raw.bytes.get(handle)??"")+bytes)
     raw.total=raw.total+bytes.size
+    raw.budget=raw.budget+bytes.size
     raw.offset=raw.offset+bytes.size
     if(bytes.size<raw.length){raw.at=raw.at+1;raw.offset=0;if(raw.at==raw.handles.size)raw.done=true}
     raw.reading=0;raw.admitted=false
@@ -113,11 +118,11 @@ fun oneRecoveryRawRequest(raw: OneRecoveryRawRequest): OneRequest? {
     val request=raw.item.request
     if(request.bodyFile!="")return request.copy(raw.bytes.get(request.bodyFile)??"","","",[])
     val parts: array<OnePart> = []
-    var size=0
+    var size=oneRecoveryPartOverhead
     for(part in request.parts){
         val bytes=if(part.file!="")raw.bytes.get(part.file)??"" else if(part.base64!="")base64Decode(part.base64)else part.value
-        if(bytes.size>oneRecoveryRequestLimit-size-1024)return null
-        size=size+bytes.size+1024
+        if(bytes.size>oneRecoveryRequestLimit-size-oneRecoveryPartOverhead)return null
+        size=size+bytes.size+oneRecoveryPartOverhead
         parts.append(OnePart(part.name,bytes,"","",part.filename,part.contentType))
     }
     request.copy("","","",parts)
@@ -152,4 +157,11 @@ fun oneRecoveryRawDrop(var state: OneRecoveryState): void {
     if(raw!=null)oneRecoveryRawRelease(raw)
     state.rawRequest=null
     return
+}
+
+fun oneRecoveryRawInlineCost(request: OneRequest): int {
+    var size=if(request.bodyBase64!="")base64Decode(request.bodyBase64).size else request.body.size
+    if(request.parts.size>0)size=size+oneRecoveryPartOverhead
+    for(part in request.parts){size=size+part.value.size+(if(part.base64!="")base64Decode(part.base64).size else 0)+oneRecoveryPartOverhead;if(size>oneRecoveryRequestLimit)return size}
+    size
 }

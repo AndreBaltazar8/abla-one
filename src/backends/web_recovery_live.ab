@@ -200,7 +200,7 @@ fun OneLiveServer.recoveryFence(index: int, immediate: bool): bool {
     val state = oneRecoverySessions.get(sessions[index].id)
     // A new SSR app hydrates before it is registered durably.
     if (state == null || state.epoch == 0) return true
-    if (state.status == 409 || state.status == 403 || state.status == 404) {
+    if (state.status == 409 || state.status == 403 || state.status == 404 || state.status == 410) {
         oneRecoveryRawDrop(state)
         return false
     }
@@ -493,7 +493,7 @@ fun OneLiveServer.recoveryRawWork(index: int): void {
         while((state.files.has(candidate) || state.hydrationFiles.has(candidate)) && attempts<8){candidate=oneRecoveryRawReadId();attempts=attempts+1}
         if(candidate==0 || state.files.has(candidate) || state.hydrationFiles.has(candidate)){raw.done=true;raw.status=503;return}
         raw.reading=candidate
-        raw.length=if(oneRecoveryRequestLimit-raw.total<262144)oneRecoveryRequestLimit-raw.total+1 else 262144
+        raw.length=if(oneRecoveryRequestLimit-raw.budget<262144)oneRecoveryRequestLimit-raw.budget+1 else 262144
         raw.admitted=false
     }
     if(!raw.admitted && oneLiveNow()>=raw.retryAt){
