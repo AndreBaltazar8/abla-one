@@ -139,7 +139,7 @@ try {
     check(Buffer.from(business().bodyBase64,'base64').equals(big),'new node replays and assembles all sixty-five exact binary chunks');
     check(Object.keys(business().seen).length===1 && business().count===1 && row().epoch>baseline.epoch,'node death during assembly produces exactly one fenced business effect on the new owner');
     check(documents===1,'raw assembly recovery keeps the same browser document');
-    check(!row().payload.includes('raw-header-secret') && !row().payload.includes('/raw-upload') && !row().payload.includes('raw-secret-not-a-checkpoint') && !Object.hasOwn(checkpoint(),'rawRequest'),'checkpoints contain no raw request, private header or assembled bytes');
+    check(!row().payload.includes('raw-header-secret') && !row().payload.includes('/raw-upload') && !row().payload.includes('raw-secret-not-a-checkpoint') && !Object.hasOwn(checkpoint(),'rawRequest') && !Object.hasOwn(checkpoint().app,'rawRequest'),'checkpoints contain no raw request, private header or assembled bytes');
     await start('b');
     const small=Buffer.alloc(300*1024,0x62);Buffer.from('multipart\0binary ação').copy(small);
     await picked('a"b.bin',small);

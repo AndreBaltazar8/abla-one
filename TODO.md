@@ -22,6 +22,8 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Bugs seen
 
+- [ ] Finish451 late internal completion consumption: real duplicate/out-of-order browser control left a final chunk inbox row after the raw result was durable because an ignored negative-ID completion did not schedule a normal checkpoint. Mark newly consumed inbox IDs dirty even when no app callback runs; corrected replay proof pending. Evidence /tmp/abla-one-recovery-multipart-evidence/raw-proof-v3.log.
+
 
 
 - [ ] Audit the live `.file()` MIME contract: OneRequest.file documents using OneFile.mime unless a Content-Type header is already set, but its builder retains only the handle and oneLiveExecute reads bytes without restoring the MIME. Add an actual handler-header control for default MIME and an explicit override before fixing across backends. No MIME behavior change is included in451.
