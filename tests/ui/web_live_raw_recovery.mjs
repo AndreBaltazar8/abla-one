@@ -114,21 +114,25 @@ try {
   await picked('large.bin',big);
   const baseline=row();
   const oldFrontier=checkpoint().frontier;
-  if(process.env.ONE_RAW_OLD_CONTROL!=='1')fs.writeFileSync(path.join(directory,'raw-mid-hold'),'1');
+  if(process.env.ONE_RAW_OLD_CONTROL!=='1'){fs.writeFileSync(path.join(directory,'raw-mid-hold'),'1');fs.writeFileSync(path.join(directory,'raw-record-baseline'),'1');}
   await page.getByRole('button',{name:'Send raw file',exact:true}).click();
   if(process.env.ONE_RAW_OLD_CONTROL==='1')await result(200,1,15000);
   else {
     await wait(()=>{
       if(checkpoint().app.rawStatus===501)throw new Error('old raw recovery501 path reached instead of shared materialization');
-      return fs.existsSync(path.join(directory,'raw-mid-marker'));
+      const baselinePath=path.join(directory,'raw-baseline.json');
+      return fs.existsSync(path.join(directory,'raw-mid-marker')) && fs.existsSync(baselinePath) && row().version>JSON.parse(fs.readFileSync(baselinePath,'utf8')).version;
     },'mid-assembly after thirty-two chunks',45000);
     const marker=JSON.parse(fs.readFileSync(path.join(directory,'raw-mid-marker'),'utf8'));
     check(marker.offset===8*1024*1024 && marker.request<0,'internal chunk IDs and ordered offsets stay separate from app requests');
-    check(row().version>baseline.version && row().payload===baseline.payload && checkpoint().frontier===oldFrontier,'consumption-only CAS advances version while retaining exact app payload and unacknowledged frontier');
+    const readBaseline=JSON.parse(fs.readFileSync(path.join(directory,'raw-baseline.json'),'utf8'));
+    check(row().version>readBaseline.version && row().payload===readBaseline.payload && checkpoint().frontier===JSON.parse(readBaseline.payload).frontier,'consumption-only CAS advances version while retaining exact app payload and unacknowledged frontier');
+    check(row().inbox.length===1 && row().inbox[0].id===readBaseline.ordinary,'drain consumes internal chunk IDs while leaving an ordinary app inbox result pending');
     check(business().count===0,'no HTTP effect is dispatched from partial materialization');
     socketNode='a';
     await kill(nodes.get('b'));
     fs.unlinkSync(path.join(directory,'raw-mid-hold'));
+    fs.unlinkSync(path.join(directory,'raw-record-baseline'));
     await result(200,1,60000);
     check(Buffer.from(business().bodyBase64,'base64').equals(big),'new node replays and assembles all sixty-five exact binary chunks');
     check(Object.keys(business().seen).length===1 && business().count===1 && row().epoch>baseline.epoch,'node death during assembly produces exactly one fenced business effect on the new owner');

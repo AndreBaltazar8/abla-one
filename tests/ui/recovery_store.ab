@@ -170,7 +170,13 @@ fun proofRead(id: string, owner: string, epoch: int, request: int, handle: strin
     val start = if (offset > data.size) data.size else offset
     val end = if (start + count > data.size) data.size else start + count
     val payload = jsonStringify(jsonObject(["requestId", "status", "body", "bodyBase64", "error"], [jsonInteger(request), jsonInteger(200), jsonString(""), jsonString(base64Encode(data.slice(start, end))), jsonString("")]))
-    val first=proofCompletion(row,payload)
+    val observe=request<= -4503599627370496 && offset==0 && proofDirectory().child("raw-record-baseline").exists() && !proofDirectory().child("raw-baseline.json").exists()
+    val base=if(observe)proofCompletion(row,oneResponsePayload(1,200,"ordinary inbox sentinel",""))else row
+    if(observe){
+        val sentinel=base.get("inbox").values[base.get("inbox").values.size-1].getString("id")
+        proofDirectory().child("raw-baseline.json").writeText(jsonStringify(jsonObject(["payload","version","owner","epoch","ordinary"],[jsonString(row.getString("payload")),jsonInteger(row.getInt("version")),jsonString(owner),jsonInteger(epoch),jsonString(sentinel)])))
+    }
+    val first=proofCompletion(base,payload)
     val completed=if(request<= -4503599627370496 && proofDirectory().child("raw-duplicates").exists())proofCompletion(first,payload)else first
     val ok = proofWrite(id,completed)
     proofRelease(lock)
