@@ -96,6 +96,8 @@ fun main: int {
     expect(oneRecoveryRawExpired(slow,60500) && slow.status==504 && slow.done,"deadline aborts before a late chunk or handler dispatch")
     oneRecoveryRawRelease(slow)
     val drainState=OneRecoveryState("session","proof","owner",oneLiveNoRecovery(),epoch=3,version=5)
+    expect(!oneRecoveryRawIdentity(drainState,item),"raw file admission waits for completed server-side restoration")
+    drainState.ready=true
     expect(oneRecoveryRawIdentity(drainState,item) && !oneRecoveryRawIdentity(drainState,OneLiveRequest(7,item.request,"operation","foreign",3)) && !oneRecoveryRawIdentity(drainState,OneLiveRequest(7,item.request,"operation","session",2)),"materialization admission refuses a foreign session or stale owner epoch")
     drainState.durablePayload="{\"old\":true}"
     drainState.batch.changed(true)

@@ -145,7 +145,7 @@ fun oneRecoveryRawDrain(state: OneRecoveryState, frontier: int): OneRecoveryWrit
     OneRecoveryWrite(state.batch.durable,frontier,state.durablePayload,"",[],false,consumed,state.committedActivity,false,true)
 }
 
-fun oneRecoveryRawIdentity(state: OneRecoveryState,item: OneLiveRequest): bool = item.session==state.id && item.epoch>0 && item.epoch==state.epoch
+fun oneRecoveryRawIdentity(state: OneRecoveryState,item: OneLiveRequest): bool = state.ready && item.session==state.id && item.epoch>0 && item.epoch==state.epoch
 
 // Arrays supplied to multipart/header builders are mutable even though the
 // request fields are val. A pending assembly must not observe later edits.
