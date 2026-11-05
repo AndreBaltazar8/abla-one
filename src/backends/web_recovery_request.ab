@@ -168,3 +168,8 @@ fun oneRecoveryRawInlineCost(request: OneRequest): int {
     for(part in request.parts){size=size+part.value.size+(if(part.base64!="")base64Decode(part.base64).size else 0)+oneRecoveryPartOverhead;if(size>oneRecoveryRequestLimit)return size}
     size
 }
+
+fun oneRecoveryRawQueued(queue: OneLiveQueue): bool {
+    for(item in queue.requests)if(oneRecoveryRaw(item.request))return true
+    false
+}

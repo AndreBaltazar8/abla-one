@@ -20,6 +20,11 @@ fun main: int {
     expect(distinct,"chunk IDs stay JS-safe and disjoint from trusted hydration IDs")
     val file=OneFile("shared-handle","a\"b.txt",4,"application/octet-stream")
     val item=OneLiveRequest(7,oneRequest("POST","/raw").file(file),"operation","session",3)
+    val queued=oneLiveQueue()
+    queued.request(item)
+    expect(oneRecoveryRawQueued(queued),"a queued raw request holds the barrier even beyond the pump round budget")
+    queued.takeRequests()
+    expect(!oneRecoveryRawQueued(queued),"a drained queue does not invent an assembly barrier")
     val raw=oneRecoveryRawBegin(item,100)
     expect(raw.reserved && raw.deadline==15100,"raw assembly reserves bounded process capacity and honors request deadline")
     raw.reading=-100;raw.length=262144

@@ -170,8 +170,8 @@ fun proofRead(id: string, owner: string, epoch: int, request: int, handle: strin
     val start = if (offset > data.size) data.size else offset
     val end = if (start + count > data.size) data.size else start + count
     val payload = jsonStringify(jsonObject(["requestId", "status", "body", "bodyBase64", "error"], [jsonInteger(request), jsonInteger(200), jsonString(""), jsonString(base64Encode(data.slice(start, end))), jsonString("")]))
-    var completed=proofCompletion(row,payload)
-    if(request<= -4503599627370496 && proofDirectory().child("raw-duplicates").exists())completed=proofCompletion(completed,payload)
+    val first=proofCompletion(row,payload)
+    val completed=if(request<= -4503599627370496 && proofDirectory().child("raw-duplicates").exists())proofCompletion(first,payload)else first
     val ok = proofWrite(id,completed)
     proofRelease(lock)
     if (ok) 200 else 503

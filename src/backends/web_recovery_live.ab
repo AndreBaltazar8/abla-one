@@ -30,7 +30,7 @@ fun OneLiveServer.recoveryCapture(index: int): string? {
     if (state == null) return null
     state.captured = false
     sessions[index].app.receive("checkpoint", "")
-    if (!state.captured) return null
+    if (!state.captured || state.rawRequests.size>0 || oneRecoveryRawQueued(sessions[index].queue)) return null
     val body = oneCheckpoint(sessions[index], state.draft)
     if (body.size > oneRecoveryCheckpointLimit || oneCheckpointRead(body) == null) return null
     body
@@ -272,7 +272,7 @@ fun OneLiveServer.recoverySettle(index: int): void {
     }
     // Hydration may complete inside pump above; until then no render, ack or
     // checkpoint may authorize old controls or persist a partial app state.
-    if (!state.ready || state.rawRequests.size > 0) return
+    if (!state.ready || state.rawRequests.size > 0 || oneRecoveryRawQueued(sessions[index].queue)) return
     val force = sessions[index].queue.cookiesChanged || sessions[index].queue.outbox.size > 0 || sessions[index].queue.moves.size > 0
     if (force) state.batch.changed(true)
     else if (sessions[index].changed && !state.batch.pending) state.batch.changed()
