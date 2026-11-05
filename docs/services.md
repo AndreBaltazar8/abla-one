@@ -66,7 +66,8 @@ seconds per attempt. An incomplete or undrained request completes with 504 at it
 deadline; late shared-store reads cannot invoke its HTTP handler. Storage that is
 unavailable still holds the durable checkpoint/acknowledgement barrier until its
 outcome can be committed. Current owner epoch and session binding are rechecked
-before reads and dispatch; a takeover cannot authorize the previous owner.
+before reads and dispatch; raw admission also waits for server-side restoration
+to be ready. A takeover cannot authorize the previous owner.
 
 The pending HTTP request and assembled bytes stay in memory. No URL, headers,
 credentials, body or multipart envelope is added to a checkpoint. While assembly

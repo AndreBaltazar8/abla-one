@@ -14,25 +14,9 @@
 
 PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not to be touched for now.
 
-## Web session recovery
-
-
-
-- [ ] Support raw `OneRequest.file`/multipart file handles in recovery mode with bounded shared-store chunk materialization and a durable acknowledgement barrier, without serializing raw HTTP requests. Until then recovery sessions return501 for these paths; applications must call `readFile` and send the resulting bytes. NovaKind has no raw bodyFile/multipart callers (lead-approved deferral, 2026-11-03).
-
 ## Bugs seen
 
-- [ ] Finish451 browser multipart quoting compatibility: real Node FormData rejected RFC-style quoted-pair filename escaping (`a\\\"b.bin`). HTML multipart serialization uses `%22`; an independent captured-body parser control preserves the original quoted filename and duplicate order. Serializer/protocol correction queued before runtime acceptance. Evidence /tmp/abla-one-recovery-multipart-evidence/raw-proof-v4.log.
-
-- [ ] Finish451 late internal completion consumption: real duplicate/out-of-order browser control left a final chunk inbox row after the raw result was durable because an ignored negative-ID completion did not schedule a normal checkpoint. Mark newly consumed inbox IDs dirty even when no app callback runs; corrected replay proof pending. Evidence /tmp/abla-one-recovery-multipart-evidence/raw-proof-v3.log.
-
-
-
 - [ ] Audit the live `.file()` MIME contract: OneRequest.file documents using OneFile.mime unless a Content-Type header is already set, but its builder retains only the handle and oneLiveExecute reads bytes without restoring the MIME. Add an actual handler-header control for default MIME and an explicit override before fixing across backends. No MIME behavior change is included in451.
-
-## Remote contract lock
-
-- [ ] Make server.lock declaration order canonical (sorted). NovaKind make app and runner builds currently order new routes differently on the same source; owner46 recorded it in NovaKind16109b9e. Assigned36 after451. Preserve parameter/field order and wire signatures; prove old build-path divergence and sorted equality, publish One and bump the NovaKind pin with focused/full checks.
 
 ## ablac bugs seen (worked around, not confirmed fixed)
 
