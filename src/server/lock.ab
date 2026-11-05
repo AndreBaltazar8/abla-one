@@ -87,6 +87,56 @@ compile fun oneLockFind(lines: array<string>, prefix: string): string {
     ""
 }
 
+compile fun oneLockByteLess(left: string, right: string): bool {
+    var index = 0
+    while (index < left.size && index < right.size) {
+        if (left[index] != right[index]) return left[index] < right[index]
+        index = index + 1
+    }
+    left.size < right.size
+}
+
+// The merge starts with retained routes, then discovered classes: even a
+// canonical previous file is not nearly sorted here. Bound comparison work to
+// O(n log n), sorting whole records without changing fields or parameters.
+compile fun oneServerLockSorted(values: array<string>): array<string> {
+    val current: array<string> = []
+    val scratch: array<string> = []
+    for (value in values) { current.append(value); scratch.append("") }
+    val count = current.size
+    var width = 1
+    while (width < count) {
+        var first = 0
+        while (first < count) {
+            val middle = if (first + width < count) first + width else count
+            val end = if (middle + width < count) middle + width else count
+            var left = first
+            var right = middle
+            var out = first
+            while (out < end) {
+                if (right < end && (left >= middle || oneLockByteLess(current[right], current[left]))) {
+                    scratch[out] = current[right]
+                    right = right + 1
+                } else {
+                    scratch[out] = current[left]
+                    left = left + 1
+                }
+                out = out + 1
+            }
+            first = end
+        }
+        // Copy values back rather than transferring a local array alias across
+        // buffers; the returned array keeps its own unambiguous ownership root.
+        var index = 0
+        while (index < count) {
+            current[index] = scratch[index]
+            index = index + 1
+        }
+        width = width * 2
+    }
+    current
+}
+
 compile fun oneServerLock(path: string): void {
     val current: array<string> = []
     val seen: array<string> = []
@@ -141,7 +191,7 @@ compile fun oneServerLock(path: string): void {
     var text = ""
     // Discovery and valid old-lock order may differ between build paths.
     // Sort complete records; parameter and class-field declaration order stays intact.
-    for (line in sortedStrings(merged)) text = "$text$line\n"
+    for (line in oneServerLockSorted(merged)) text = "$text$line\n"
     if (text != previous) compiler.writeFile(path, text)
     return
 }
