@@ -53,7 +53,7 @@ compile fun oneDslData(tag: string, name: string): bool {
     when (tag) {
         "Icon" -> name == "name"
         "Image" -> name == "src" || name == "authorization" || name == "fallback"
-        "Input" -> name == "value" || name == "placeholder" || name == "keyboard" || name == "multiline" || name == "secure" || name == "maxLength" || name == "onChange" || name == "onSubmit"
+        "Input" -> name == "value" || name == "placeholder" || name == "keyboard" || name == "multiline" || name == "secure" || name == "maxLength" || name == "onChange" || name == "onSubmit" || name == "submitName"
         "Pressable" -> name == "onPress"
         "Spacer" -> name == "amount"
         "Button" -> name == "variant" || name == "onPress"
@@ -222,7 +222,7 @@ compile fun oneDslNodeAttributes(tag: string, node: SyntaxExpression, var a: One
         val name = a.names[i]
         if (name == "key") result = syntaxCall("oneKey", [result, oneDslString(a, i)])
         else if (name == "label" || name == "selected" || name == "enabled" || name == "item" ||
-            (tag == "Input" && (name == "keyboard" || name == "multiline" || name == "secure" || name == "maxLength")) ||
+            (tag == "Input" && (name == "keyboard" || name == "multiline" || name == "secure" || name == "maxLength" || name == "submitName")) ||
             (tag == "Image" && (name == "authorization" || name == "fallback")))
             result = syntaxCall("oneAttrSet", [result, syntaxString(name), oneDslString(a, i)])
         i = i + 1

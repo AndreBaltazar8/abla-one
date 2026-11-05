@@ -143,6 +143,13 @@ rows. Each event carries the revision it was made for. It's dropped when that re
 old, when the place is gone or disabled, or when the control there no longer says the same (its
 kind, text, label, icon, placeholder; a field's value doesn't count): a press lands on what the
 person read or nowhere, so a double press on a button showing a changing amount counts once.
+An input may set a separate confirmation identity with `.submitName("editor/revision/intent")`
+(or `submitName` on the DSL `Input`). A change to this optional identity drops an older
+Enter event without changing ordinary `onChange` translation or the field key. Keep
+`name`, `key` and `sameField` stable while typing; bind `submitName` to the facts Enter
+would confirm. It participates in the screen fence; absent or empty keeps the previous
+behavior. It is metadata, not a visible label.
+
 A render with the same controls keeps its revision, so a screen that re-renders often ages nothing.
 Web sessions render before a press when an earlier event of the same batch may have changed
 the screen.
@@ -226,7 +233,7 @@ component ConversationRow(room: Room, onOpen: () -> void) = $one
 | `image` | raster/vector image, local or remote with auth | src, fallback, label |
 | `pressable` | anything tappable; a container with press/long-press | onPress, onLongPress, enabled |
 | `link` | a container that navigates: an `<a>` on the web, the browser elsewhere; `routeLink(path, event, ...)` is one to the app's own route, a press off the web | href, onPress (optional), route |
-| `input` | single or multi-line text field | value, placeholder, keyboard (`number`, `decimal`, `email`), secure, onChange, onSubmit |
+| `input` | single or multi-line text field | value, placeholder, keyboard (`number`, `decimal`, `email`), secure, onChange, onSubmit, submitName |
 | `toggle` | switch or checkbox | checked, onChange |
 | `spacer`, `divider` | space and rules | size |
 | `popover` | an anchor and, while open, a panel floating at it above the screen (kit: `popover`, below) | side, onDismiss |

@@ -1,3 +1,4 @@
+import "abla/json"
 import "theme.ab"
 import "node.ab"
 import "routes.ab"
@@ -283,6 +284,7 @@ fun oneEventScreen(node: Node, hash: int): int {
     for (name in ["text", "label", "name", "placeholder", "runs", "src", "cells"]) {
         if (node.has(name)) h = oneEventMix(h, node.attr(name))
     }
+    if (node.attr("submitName") != "") h = oneEventMix(h, node.attr("submitName"))
     for (child in node.children) h = oneEventScreen(child, h)
     h
 }
@@ -302,7 +304,8 @@ fun oneCollectEvents(node: Node, place: string, var map: OneEventMap): void {
                 map.byId.set(id, "$place#${item.name}")
                 map.byPlace.set("$place#${item.name}", id)
                 // What's read on a feed changes all the time, and reporting what's in view commits to nothing.
-                map.says.set("$place#${item.name}", if (item.name == "onVisible") "" else oneEventSays(node))
+                map.says.set("$place#${item.name}", if (item.name == "onVisible") "" else if (item.name == "onSubmit" && node.attr("submitName") != "")
+                    "onSubmit:"+jsonStringify(jsonArray([jsonString(oneEventSays(node)),jsonString(node.attr("submitName"))])) else oneEventSays(node))
                 if (item.name == "onChange" && node.has("sameField")) {
                     map.fieldIds.set(node.attr("sameField"), id)
                     map.fieldOf.set(id, node.attr("sameField"))

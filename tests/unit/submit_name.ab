@@ -1,0 +1,37 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+
+fun submission(target: string, value: string, confirmation: string, coupled: bool=false): Node {
+    var ui=oneUi(target,theme())
+    val field=input(value,"New task",ui.change { v -> },style()).keyed("task-title").sameField("task-editor")
+        .set("name",if(coupled)confirmation else "task-title").setInt("onSubmit",ui.press { })
+    if(confirmation=="")field else field.set("submitName",confirmation)
+}
+fun main: int {
+    for(target in ["web-document","android"]){
+        val beforeNode=submission(target,"Quick","editor-a/revision-1")
+        val afterNode=submission(target,"QuickPhone","editor-a/revision-2")
+        val before=oneEventMap(beforeNode);val after=oneEventMap(afterNode)
+        expectEqual(beforeNode.key,afterNode.key,"$target preserves the native field key")
+        expectEqual(oneEventLanding([before,after],1,1,false),0,"$target refuses stale Enter after confirmation facts change")
+        expectEqual(oneEventLanding([before,after],1,oneChangeBase+1,false),oneChangeBase+1,"$target retains queued ordinary typing across confirmation revisions")
+        expectEqual(oneEventLanding([before,after],1,oneChangeBase+1,true),oneChangeBase+1,"$target retains explicit same-field typing across a move")
+        expectEqual(oneEventLanding([before,after],1,1,true),0,"$target does not submit across changed route facts")
+        expect(before.screen!=after.screen,"$target confirmation facts participate in the screen fence")
+        val same=oneEventMap(submission(target,"QuickPhone","editor-a/revision-1"))
+        expectEqual(oneEventLanding([before,same],1,1,false),1,"$target unchanged confirmation remains usable")
+        val plain=oneEventMap(submission(target,"Quick",""))
+        val plainNext=oneEventMap(submission(target,"QuickPhone",""))
+        expectEqual(oneEventLanding([plain,plainNext],1,1,false),1,"$target absent submitName retains historical behavior")
+        val empty=oneEventMap(submission(target,"QuickPhone","").set("submitName",""))
+        expect(plainNext.same(empty) && plainNext.screen==empty.screen,"$target empty submitName behaves as absent")
+        expectEqual(oneEventLanding([before,plainNext],1,1,false),0,"$target removing confirmation identity refuses stale Enter")
+        expectEqual(oneEventLanding([plain,after],1,1,false),0,"$target adding confirmation identity refuses a legacy Enter")
+        val disabled=oneEventMap(afterNode.set("enabled","false"))
+        expectEqual(oneEventLanding([before,disabled],1,oneChangeBase+1,false),0,"$target disabled input remains unavailable")
+        val coupledBefore=oneEventMap(submission(target,"Quick","revision-1",true))
+        val coupledAfter=oneEventMap(submission(target,"QuickPhone","revision-2",true))
+        expectEqual(oneEventLanding([coupledBefore,coupledAfter],1,oneChangeBase+1,false),0,"$target control reproduces typing dropped by revision-dependent input name")
+    }
+    testsPassed()
+}

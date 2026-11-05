@@ -25,6 +25,7 @@ fun main: int {
     val box = input("v", "Placeholder", 1000001, style()).set("keyboard", "email")
     expectEqual(box.attr("placeholder"), "Placeholder", "input placeholder")
     expectEqual(box.attr("keyboard"), "email", "input options")
+    expectEqual(box.submitName("intent-1").attr("submitName"),"intent-1","fluent submit identity is input metadata")
     expectEqual(feed(style(), [], "bottom", 0, 3).attr("anchor"), "bottom", "feed anchor")
     expectEqual(spacer(12).attr("size"), "12", "spacer size")
     testsPassed()

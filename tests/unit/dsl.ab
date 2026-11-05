@@ -24,7 +24,7 @@ class Demo(
           <Pressable onPress={ count += 1; note("press") } paddingX=16 height=48 pressed:background="#000000" label="Add">
             <Text text="label" color=@ink maxLines=1>Count {count} of {people().size}</Text>
           </Pressable>
-          <Input value={query} placeholder="Pesquisar" onChange={ query = value } keyboard="email" grow=1 />
+          <Input value={query} placeholder="Pesquisar" submitName="draft-confirmation" onChange={ query = value } keyboard="email" grow=1 />
           <Button variant="secondary" onPress={ open = !open }>Toggle</Button>
           <If cond={open}>
             <Text>Aberto</Text>
@@ -57,6 +57,7 @@ fun main: int {
     expectEqual(r.get("radius"), "14", "target-scoped attribute")
     expect(!r.has("hover:background"), "web-only state not on android")
     expectEqual(oneResolve(t, "column", root.style, "web-document").get("hover:background"), "#f3f4f5", "target + state scope")
+    expectEqual(root.children[1].attr("submitName"),"draft-confirmation","Input DSL keeps separate submit identity")
     val press = root.children[0]
     expectEqual(press.kind, "pressable", "pressable")
     expectEqual(press.attr("label"), "Add", "label is a node attribute")

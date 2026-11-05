@@ -37,6 +37,8 @@ class Node(val kind: string, val key: string, val style: Style, val attrs: array
     // This field is the same field on every route that shows it under this name: typing raced with
     // a move between them still reaches it, and on the web it keeps the focus (SPEC §9).
     fun sameField(name: string): Node = set("sameField", name)
+    // A separate confirmation identity: changing it fences Enter without changing the input itself.
+    fun submitName(name: string): Node = set("submitName", name)
 }
 
 fun oneNode(kind: string, value: Style, children: array<Node>): Node = Node(kind, "", value, [], children)
