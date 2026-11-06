@@ -17,12 +17,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: AndreBaltazar8/abla-mobile
-          ref: cb4ee962a507c36a9d84380228838dc713908e68
+          ref: 65555622d38f8db8a614b512126db07da0dddc9e
           path: abla-mobile
           persist-credentials: false
       - uses: AndreBaltazar8/setup-abla@13c3fdc74b5961bf2d281b25c47e4b9ace18d11e
         with:
-          version: 0.2.46
+          version: 0.2.47
       - name: Test existing contracts and the iOS encoder
         working-directory: abla-one
         shell: bash

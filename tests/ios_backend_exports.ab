@@ -7,7 +7,7 @@ import "../src/backends/ios.ab"
 
 class IosContractFixture(
     val services: OneServices,
-    var value: string = "", var status: string = "ready",
+    var value: string = "", var ordinaryValue: string = "", var status: string = "ready",
     var ignore: bool = false, var timerDone: bool = false
 ) : OneApp {
     fun render(var ui: Ui): Node {
@@ -16,6 +16,7 @@ class IosContractFixture(
                 if (!ignore) value = next
                 status = "editing"
             }, style()).set("secure", "true").keyed("secure"),
+            input(ordinaryValue, "Public fixture text", ui.change { next -> ordinaryValue = next }, style()).keyed("ordinary"),
             pressable(ui.press {
                 status = if (value == "s3crEt") "accepted_exact" else "refused"
                 value = ""
@@ -23,8 +24,8 @@ class IosContractFixture(
             pressable(ui.press { status = "disabled_button_sent" }, style(), [text("Blocked", style())]).set("enabled", "false").keyed("blocked"),
             pressable(ui.press { ignore = true; value = ""; status = "ignore_mode" }, style(), [text("Ignore echoes", style())]).keyed("ignore"),
             pressable(ui.press { services.navigate("/next") }, style(), [text("New route", style())]).keyed("route"),
-            pressable(ui.press { value = "é"; status = "unicode_nfc" }, style(), [text("Set NFC", style())]).keyed("nfc"),
-            pressable(ui.press { value = "é"; status = "unicode_nfd" }, style(), [text("Set NFD", style())]).keyed("nfd"),
+            pressable(ui.press { value = "é"; ordinaryValue = "é"; status = "unicode_nfc" }, style(), [text("Set NFC", style())]).keyed("nfc"),
+            pressable(ui.press { value = "é"; ordinaryValue = "é"; status = "unicode_nfd" }, style(), [text("Set NFD", style())]).keyed("nfd"),
             text(status, style()).keyed("status"),
             text(if (timerDone) "timer_ready" else "timer_waiting", style()).keyed("timer")
         ]).keyed("root")
