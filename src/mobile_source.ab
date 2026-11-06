@@ -1,0 +1,8 @@
+// Experimental package-ready backend dependency. Callers that also name
+// abla-mobile must use this exact package name, URL and immutable selector.
+// Adopting it in a workspace requires aligning the host/native source pin and
+// generating the application's package lock; no root override exists yet.
+compile fun oneMobileSource(): ImportSource = gitImportSource(
+    "abla-mobile", "https://github.com/AndreBaltazar8/abla-mobile.git", "rev",
+    "65555622d38f8db8a614b512126db07da0dddc9e"
+)

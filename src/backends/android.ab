@@ -1,6 +1,7 @@
 import "abla/json"
-import "../../../abla-mobile/src/mobile.ab"
-import "../../../abla-mobile/src/platform.ab"
+import "../mobile_source.ab"
+import oneMobileSource()
+import importSubpath(oneMobileSource(), "platform")
 import "../one.ab"
 import "android_tree.ab"
 

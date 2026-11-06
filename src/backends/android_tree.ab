@@ -1,5 +1,6 @@
 import "abla/json"
-import "../../../abla-mobile/src/ui.ab"
+import "../mobile_source.ab"
+import importSubpath(oneMobileSource(), "ui")
 import "../one.ab"
 
 // Encoding for the `android` target. Resolved trees are sent to the
