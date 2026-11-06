@@ -5,4 +5,4 @@ entry = "src/one.ab"
 # Development lock seed for optional backends. Keep exactly aligned with
 # src/mobile_source.ab; package subpath consumers discover that provider there.
 [dependencies]
-abla-mobile = { git = "https://github.com/AndreBaltazar8/abla-mobile.git", rev = "3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11" }
+abla-mobile = { git = "https://github.com/AndreBaltazar8/abla-mobile.git", rev = "6d9cfaf574031729d2426565c47bad9c20712a47" }
