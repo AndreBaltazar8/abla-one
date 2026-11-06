@@ -17,7 +17,10 @@ class IosContractFixture(
                 status = "editing"
             }, style()).set("secure", "true").keyed("secure"),
             input(ordinaryValue, "Public fixture text", ui.change { next -> ordinaryValue = next }, style()).keyed("ordinary"),
-            input(multilineValue, "Public multiline fixture", ui.change { next -> multilineValue = next }, style()).set("multiline", "true").keyed("multiline"),
+            input(multilineValue, "Public multiline fixture", ui.change { next ->
+                multilineValue = next
+                if(next == "First\nSecond")status = "multiline_typed"
+            }, style()).set("multiline", "true").keyed("multiline"),
             pressable(ui.press {
                 status = if (value == "s3crEt") "accepted_exact" else "refused"
                 value = ""
