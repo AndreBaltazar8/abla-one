@@ -1,0 +1,29 @@
+import "abla/test"
+import "../../src/one.ab"
+import "../../src/backends/ios_tree.ab"
+
+fun main: int {
+    var t = theme()
+    t.token("brand", "base")
+    t.token("mobile:brand", "mobile")
+    t.token("ios:brand", "ios")
+    val node = column(style().gap(8), [
+        text("Olá", style().background("@brand").on("android", style().set("ripple", "none")).on("ios", style().set("iosOnly", "yes"))),
+        input("", "Secret", 4, style()).set("secure", "true").keyed("credential")
+    ]).keyed("form")
+    val ios = oneIosNode(node, t, "root")
+    val android = oneAndroidNode(node, t, "root")
+    expectEqual(ios.key, "form", "explicit root identity")
+    expectEqual(ios.kind, "one.column", "shared scalar-stream kind")
+    expectEqual(ios.properties.getString("gap"), "8", "layout property retained")
+    expectEqual(ios.children[0].properties.getString("background"), "ios", "iOS token overrides mobile family")
+    expectEqual(android.children[0].properties.getString("background"), "mobile", "Android wrapper retains family behavior")
+    expectEqual(ios.children[0].properties.getString("iosOnly"), "yes", "iOS-scoped property")
+    expect(!ios.children[0].properties.get("ripple").isString(), "Android property excluded on iOS")
+    expect(!android.children[0].properties.get("iosOnly").isString(), "iOS property excluded on Android")
+    expectEqual(ios.children[0].properties.getString("a.text"), "Olá", "copied Unicode text")
+    expectEqual(ios.children[1].key, "credential", "secure editor identity")
+    expectEqual(ios.children[1].properties.getString("a.secure"), "true", "secure trait preserved")
+    expectEqual(ios.children[1].properties.getString("a.onChange"), "4", "event identifier retained")
+    testsPassed()
+}

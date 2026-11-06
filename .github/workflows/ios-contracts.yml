@@ -1,0 +1,42 @@
+name: iOS and mobile backend contracts
+on:
+  push:
+    branches: [feat/ios-host]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mobile-contracts:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: abla-one
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: AndreBaltazar8/abla-mobile
+          ref: e55d749
+          path: abla-mobile
+          persist-credentials: false
+      - uses: AndreBaltazar8/setup-abla@13c3fdc74b5961bf2d281b25c47e4b9ace18d11e
+        with:
+          version: 0.2.46
+      - name: Test existing contracts and the iOS encoder
+        working-directory: abla-one
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/one-ios-evidence"
+          { git rev-parse HEAD; ablac --version; sw_vers; } | tee "$RUNNER_TEMP/one-ios-evidence/versions.txt"
+          ablac test tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab \
+            tests/remote/client.ab tests/remote/routes.ab \
+            2>&1 | tee "$RUNNER_TEMP/one-ios-evidence/contracts.log"
+      - name: Retain exact evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: one-ios-contracts
+          path: ${{ runner.temp }}/one-ios-evidence
+          retention-days: 14

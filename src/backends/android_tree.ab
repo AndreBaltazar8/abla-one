@@ -10,9 +10,14 @@ import "../one.ab"
 // fallback, so a keyed root keeps its key and a new one starts a new screen,
 // with fresh scroll positions and fields.
 
-fun oneAndroidNode(node: Node, outer: Theme, key: string): MobileNode {
+fun oneAndroidNode(node: Node, outer: Theme, key: string): MobileNode =
+    oneMobileNode(node, outer, key, "android")
+
+// One scalar-stream semantic tree is shared by Compose and SwiftUI; only style
+// resolution uses the actual target. Android's public entry remains unchanged.
+fun oneMobileNode(node: Node, outer: Theme, key: string, target: string): MobileNode {
     val theme = if (node.attr("theme") != "") outer.scoped(node.attr("theme")) else outer
-    val resolved = oneResolve(theme, node.kind, node.style, "android")
+    val resolved = oneResolve(theme, node.kind, node.style, target)
     val keys: array<string> = []
     val values: array<Json> = []
     for (name in resolved.props.keys()) {
@@ -26,7 +31,7 @@ fun oneAndroidNode(node: Node, outer: Theme, key: string): MobileNode {
     val children: array<MobileNode> = []
     var index = 0
     for (child in node.children) {
-        children.append(oneAndroidNode(child, theme, if (child.key != "") child.key else "$index"))
+        children.append(oneMobileNode(child, theme, if (child.key != "") child.key else "$index", target))
         index = index + 1
     }
     MobileNode("one.${node.kind}", if (node.key != "") node.key else key, jsonObject(keys, values), children)

@@ -1,0 +1,27 @@
+import "android.ab"
+import "ios_tree.ab"
+
+// Static iOS application entry; export a caller-owned abla_mobile_run wrapper.
+// The mobile-owned C/Swift host supplies protocol v1, with no JNI or dlopen.
+fun oneIosRun(var app: OneApp, theme: Theme, background: string): int =
+    oneMobileRun(app, theme, background, "ios")
+
+// Services use the same copied request/effect protocol. The host reports an
+// explicit unsupported result for capabilities not yet implemented on iOS.
+class OneIosServices() : OneServices {
+    val mobile = OneAndroidServices()
+    fun send(request: OneRequest): int = mobile.send(request)
+    fun secureRead(key: string): int = mobile.secureRead(key)
+    fun secureWrite(key: string, value: Json): int = mobile.secureWrite(key, value)
+    fun secureRemove(key: string): int = mobile.secureRemove(key)
+    fun timer(milliseconds: int): int = mobile.timer(milliseconds)
+    fun pickFiles(mime: array<string>, multiple: bool): int = mobile.pickFiles(mime, multiple)
+    fun readFile(file: OneFile, offset: int, length: int): int = mobile.readFile(file, offset, length)
+    fun deleteFile(file: OneFile): int = mobile.deleteFile(file)
+    fun pickImage(kind: string): int = mobile.pickImage(kind)
+    fun clearImageCache(): void { mobile.clearImageCache(); return }
+    fun effect(kind: string, payload: string): bool = mobile.effect(kind, payload)
+    fun navigate(path: string, replace: bool = false): void { mobile.navigate(path, replace); return }
+    fun back(fallback: string = ""): void { mobile.back(fallback); return }
+    fun forward(): void { mobile.forward(); return }
+}

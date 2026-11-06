@@ -32,6 +32,12 @@ val onePlatformEvent = 2147483647
 // that opens the app reaches it as "openUrl" with the whole URL, then as a route.
 // `background` paints behind the system bars.
 fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
+    oneMobileRun(app, theme, background, "android")
+}
+
+// Both native hosts use the same event maps, route fences, press accounting and
+// completion dispatch. A host does not gain authority by changing a target name.
+fun oneMobileRun(var app: OneApp, theme: Theme, background: string, target: string): int {
     mobileConfigureRuntime(268435456)
     var revision = 0
     var running = true
@@ -41,11 +47,11 @@ fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
     oneAppRoutes.start("/")
     while (running) {
         oneRoutesDrain(app, oneAppRoutes)
-        var ui = oneUi("android", theme)
+        var ui = oneUi(target, theme)
         val root = app.render(ui)
         revision = revision + 1
         fence.rendered(oneAppRoutes, revision)
-        mobilePublishTree(mobileEncodeStyledTree(revision, "", false, oneAndroidNode(oneRouteStamp(root, oneAppRoutes), theme, "root"), false, background))
+        mobilePublishTree(mobileEncodeStyledTree(revision, "", false, oneMobileNode(oneRouteStamp(root, oneAppRoutes), theme, "root", target), false, background))
         recent.append(oneEventMap(root))
         // Keys typed fast all carry the revision the host had: a short window lost the ninth.
         oneEventMapsBound(recent, 64)
@@ -66,7 +72,7 @@ fun oneAndroidRun(var app: OneApp, theme: Theme, background: string): int {
             val age = revision - eventRevision
             val landing = if (age == 0) event else oneEventLanding(recent, age, event, eventRevision < fence.from)
             if (landing > 0) {
-                oneDispatch(app, "android", theme, landing, payload)
+                oneDispatch(app, target, theme, landing, payload)
                 if (event <= oneChangeBase) presses.landed(eventRevision, event)
             } else presses.lost(app, eventRevision, event)
         }
