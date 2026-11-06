@@ -80,6 +80,61 @@ compile fun oneLockRemember(var index: OneLockIndex, key: string): bool {
     index.keys.size != before
 }
 
+compile fun oneLockKnown(index: OneLockIndex, key: string): bool {
+    var node = index.root[0]
+    while (node >= 0) {
+        if (index.keys[node] == key) return true
+        node = if (oneLockByteLess(key, index.keys[node])) index.left[node] else index.right[node]
+    }
+    false
+}
+
+compile fun oneLockIndexBuild(var index: OneLockIndex, order: array<int>, first: int, end: int): int {
+    if (first >= end) return -1
+    val middle = first + (end - first) / 2
+    val node = order[middle]
+    index.left[node] = oneLockIndexBuild(index, order, first, middle)
+    index.right[node] = oneLockIndexBuild(index, order, middle + 1, end)
+    oneLockIndexRefresh(index, node)
+    node
+}
+
+compile fun oneLockIndexOf(values: array<string>): OneLockIndex {
+    val index = OneLockIndex()
+    val order: array<int> = []
+    val scratch: array<int> = []
+    for (value in values) {
+        val added = index.keys.size
+        index.keys.append(value)
+        index.left.append(-1); index.right.append(-1)
+        index.height.append(1); index.first.append(added)
+        order.append(added); scratch.append(0)
+    }
+    var width = 1
+    while (width < order.size) {
+        var first = 0
+        while (first < order.size) {
+            val middle = if (first + width < order.size) first + width else order.size
+            val end = if (middle + width < order.size) middle + width else order.size
+            var left = first
+            var right = middle
+            var out = first
+            while (out < end) {
+                if (right < end && (left >= middle || oneLockByteLess(index.keys[order[right]], index.keys[order[left]]))) {
+                    scratch[out] = order[right]; right = right + 1
+                } else { scratch[out] = order[left]; left = left + 1 }
+                out = out + 1
+            }
+            first = end
+        }
+        var copy = 0
+        while (copy < order.size) { order[copy] = scratch[copy]; copy = copy + 1 }
+        width = width * 2
+    }
+    index.root[0] = oneLockIndexBuild(index, order, 0, order.size)
+    index
+}
+
 compile fun oneLockFindIndexed(index: OneLockIndex, prefix: string): string {
     var node = index.root[0]
     while (node >= 0) {

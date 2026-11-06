@@ -155,10 +155,10 @@ compile fun oneServerLockSorted(values: array<string>): array<string> {
 compile fun oneServerLock(path: string): void {
     val current: array<string> = []
     val seen = OneLockIndex()
-    val retired: array<string> = []
+    val retired = OneLockIndex()
     for (function in compiler.functionsAnnotated("server")) {
         val route = oneRemoteRoute(compiler.functionName(function))
-        if (oneRemoteIsRetired(function)) retired.append(route)
+        if (oneRemoteIsRetired(function)) oneLockRemember(retired, route)
         current.append(oneLockRouteLine(function))
         var index = 0
         while (index < compiler.parameterCount(function)) {
@@ -167,8 +167,7 @@ compile fun oneServerLock(path: string): void {
         }
         oneLockClassesIndexed(oneRemoteNormal(compiler.resultType(function)), seen, current)
     }
-    val currentIndex = OneLockIndex()
-    for (line in current) oneLockRemember(currentIndex, line)
+    val currentIndex = oneLockIndexOf(current)
     val file = Path(path)
     val previous = if (file.exists()) file.readText() else ""
     val old = oneLockSplit(previous, 10)
@@ -178,8 +177,7 @@ compile fun oneServerLock(path: string): void {
         val words = oneLockSplit(line, 32)
         if (line.startsWith("route ")) {
             val name = oneLockSplit(words[1], 40)[0]
-            var isRetired = false
-            for (r in retired) if (r == name) isRetired = true
+            val isRetired = oneLockKnown(retired, name)
             val now = oneLockFindIndexed(currentIndex, "route $name(")
             if (isRetired) merged.append(line)
             else if (now == "") problems.append("route $name was removed: mark it @retired instead")
@@ -204,11 +202,12 @@ compile fun oneServerLock(path: string): void {
         compiler.generateModule("one_server_lock", "fun oneServerLockProblem(): void {\n    ${oneRemoteErrorName("server lock: ${problems[0]}")}()\n}\n")
         return
     }
-    val mergedIndex = OneLockIndex()
-    for (line in merged) oneLockRemember(mergedIndex, line)
+    val mergedRoutes: array<string> = []
+    for (line in merged) if (line.startsWith("route ")) mergedRoutes.append(line)
+    val mergedIndex = oneLockIndexOf(mergedRoutes)
     for (line in current) if (!line.startsWith("route ") || oneLockFindIndexed(mergedIndex, line) == "") {
         merged.append(line)
-        oneLockRemember(mergedIndex, line)
+        if (line.startsWith("route ")) oneLockRemember(mergedIndex, line)
     }
     var text = ""
     // Discovery and valid old-lock order may differ between build paths.

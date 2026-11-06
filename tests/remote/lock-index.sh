@@ -24,17 +24,28 @@ compile fun probe(lines: array<string>, var problems: array<string>): int {
         var existed = false
         for (old in prefix) if (old == line) existed = true
         if (oneLockRemember(index, line) == existed) problems.append("duplicate insertion changed")
+        if (!oneLockKnown(index, line)) problems.append("inserted key is not known")
         prefix.append(line)
+        val bulk = oneLockIndexOf(prefix)
+        // Retired route membership is exact, unlike ABI record-prefix lookup.
+        for (key in ["", "a", "route f()", "route f() -> Result", "class A", "é", "key/0000", "key/0040", "missing key"]) {
+            var known = false
+            for (old in prefix) if (old == key) known = true
+            if (oneLockKnown(index, key) != known) problems.append("exact membership changed")
+            if (oneLockKnown(bulk, key) != known) problems.append("bulk exact membership changed")
+        }
         for (value in prefix) {
             var length = 0
             while (length <= value.size) {
                 val key = value.slice(0, length)
                 if (oneLockFindIndexed(index, key) != oneLockFind(prefix, key)) problems.append("first prefix changed")
+                if (oneLockFindIndexed(bulk, key) != oneLockFind(prefix, key)) problems.append("bulk prefix changed")
                 checks = checks + 1
                 length = length + 1
             }
         }
         if (oneLockFindIndexed(index, "missing key") != "") problems.append("missing key matched")
+        if (oneLockKnown(index, "missing key")) problems.append("missing exact key matched")
     }
     var node = 0
     while (node < index.keys.size) {
@@ -62,13 +73,13 @@ cat >> "$work/app/server.ab" <<'AB'
     checks = checks + probe(ascending, problems)
     checks = checks + probe(descending, problems)
     if (problems.size > 0) compiler.generateModule("lock_index_failure", "fun failedLockIndex(): void { first_prefix_or_balance_changed() }\n")
-    compiler.writeFile("result.txt", "$checks prefix comparisons; balance and first-insertion checks passed\n")
+    compiler.writeFile("result.txt", "$checks prefix comparisons; exact membership, balance and first-insertion checks passed\n")
     return
 }
 #compiler.transform(run)
 fun main: int = 0
 AB
 (cd "$work/app" && "$ablac" build server.ab -o "$work/probe" --fast --no-cache) > "$work/compiler.log" 2>&1 || { cat "$work/compiler.log"; exit 1; }
-grep -Eq '^[0-9]+ prefix comparisons; balance and first-insertion checks passed$' "$work/app/result.txt"
+grep -Eq '^[0-9]+ prefix comparisons; exact membership, balance and first-insertion checks passed$' "$work/app/result.txt"
 cat "$work/app/result.txt"
 failed=0
