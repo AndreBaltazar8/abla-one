@@ -1,0 +1,24 @@
+// macOS CI diagnostic for the existing native_roots self-test. It creates only
+// its own synthetic source/mirror; no application or SDK secrets are inspected.
+import "../tools/native_build_roots.ab"
+
+fun main: int {
+    val root = currentDirectory()
+    val folder = root.child("build/ios-native-roots-probe")
+    folder.createDirectories()
+    val source = folder.child("source")
+    source.child("src").createDirectories()
+    source.child("examples").createDirectories()
+    source.child("tests").createDirectories()
+    source.child("src/entry.ab").writeText("selected source")
+    val mirror = folder.child("mirror")
+    println("probe source=${source.text}")
+    val canonical = command("realpath").argument(source.text).capture()
+    println("realpath exit=${canonical.status} stdout=${canonical.output}")
+    val copied = nativeRootsMirror(source, mirror)
+    println("mirror=$copied dirLink=${mirror.child("src").isSymbolicLink()} fileLink=${mirror.child("src/entry.ab").isSymbolicLink()} copiedText=${mirror.child("src/entry.ab").readText()}")
+    source.child("src/entry.ab").writeText("updated source")
+    println("updatedText=${mirror.child("src/entry.ab").readText()} selfRefusal=${!nativeRootsMirror(source, source)}")
+    folder.removeTree()
+    0
+}
