@@ -16,6 +16,7 @@ shop="$work/p/tests/remote/server/shop.ab"
 if [ "${1:-}" != "--large-only" ]; then
 ABLAC="$ablac" tests/remote/lock-order.sh || exit 1
 ABLAC="$ablac" tests/remote/lock-index.sh || exit 1
+ABLAC="$ablac" tests/remote/lock-wide-fields.sh || exit 1
 ABLAC="$ablac" tests/remote/lock-sort-scale.sh || exit 1
 copy
 build server.ab server > "$work/log" || { cat "$work/log"; exit 1; }

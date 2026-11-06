@@ -98,6 +98,16 @@ compile fun run(): void {
     for (left in samples) for (right in samples) {
         if (oneLockByteLess(left, right) != byteLessOracle(left, right)) problems.append("byte ordering changed")
     }
+    val queries: array<string> = []
+    for (value in samples) queries.append(value)
+    queries.append("a"); queries.append("é")
+    val sorted = oneServerLockSorted(queries)
+    queries.append("missing"); queries.append("aa"); queries.append("route f() -> Result!")
+    for (key in queries) {
+        var expected = false
+        for (value in samples) if (value == key) expected = true
+        if (oneLockSortedHas(sorted, key) != expected) problems.append("sorted exact membership changed")
+    }
     var checks = probe(["route f() -> Result", "route f() -> R", "route f() -> Result", "class Z|value: int", "class A|value: string", "class Aa|value: bool", "é", "", "a", "ab", "aé"], problems)
     checks = checks + probe(["aé", "ab", "a", "", "é", "class Aa|value: bool", "class A|value: string", "class Z|value: int", "route f() -> Result", "route f() -> R", "route f() -> Result"], problems)
     val ascending: array<string> = []

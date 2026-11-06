@@ -152,6 +152,20 @@ compile fun oneServerLockSorted(values: array<string>): array<string> {
     current
 }
 
+// Membership in a local sorted copy, without changing ABI declaration order.
+compile fun oneLockSortedHas(values: array<string>, key: string): bool {
+    var first = 0
+    var end = values.size
+    while (first < end) {
+        val middle = (first + end) / 2
+        val value = values[middle]
+        if (value == key) return true
+        if (oneLockByteLess(value, key)) first = middle + 1
+        else end = middle
+    }
+    false
+}
+
 compile fun oneServerLock(path: string): void {
     val current: array<string> = []
     val seen = OneLockIndex()
@@ -188,10 +202,15 @@ compile fun oneServerLock(path: string): void {
             val now = oneLockSplit(oneLockFindIndexed(currentIndex, "class ${parts[0]}|"), 124)
             if (now.size == 0 && oneLockFindIndexed(currentIndex, "class ${parts[0]}") == "") merged.append(line)
             else {
+                // A bounded scan keeps small DTOs cheap. Wide DTOs use one
+                // sorted copy plus logarithmic exact checks, rather than
+                // scanning every current field for every retained field.
+                val fields = if (now.size > 65) oneServerLockSorted(now) else []
                 var index = 1
                 while (index < parts.size) {
                     var kept = false
-                    for (field in now) if (field == parts[index]) kept = true
+                    if (fields.size > 0) kept = oneLockSortedHas(fields, parts[index])
+                    else { for (field in now) if (field == parts[index]) kept = true }
                     if (!kept) problems.append("class ${parts[0]}: field ${parts[index]} was changed or removed")
                     index = index + 1
                 }
