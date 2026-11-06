@@ -23,6 +23,8 @@ class IosContractFixture(
             pressable(ui.press { status = "disabled_button_sent" }, style(), [text("Blocked", style())]).set("enabled", "false").keyed("blocked"),
             pressable(ui.press { ignore = true; value = ""; status = "ignore_mode" }, style(), [text("Ignore echoes", style())]).keyed("ignore"),
             pressable(ui.press { services.navigate("/next") }, style(), [text("New route", style())]).keyed("route"),
+            pressable(ui.press { value = "é"; status = "unicode_nfc" }, style(), [text("Set NFC", style())]).keyed("nfc"),
+            pressable(ui.press { value = "é"; status = "unicode_nfd" }, style(), [text("Set NFD", style())]).keyed("nfd"),
             text(status, style()).keyed("status"),
             text(if (timerDone) "timer_ready" else "timer_waiting", style()).keyed("timer")
         ]).keyed("root")
