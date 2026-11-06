@@ -1,0 +1,12 @@
+version = 2
+
+[[package]]
+name = "abla-mobile"
+provider = "git"
+identity = "git:https://github.com/AndreBaltazar8/abla-mobile.git"
+source = "https://github.com/AndreBaltazar8/abla-mobile.git"
+selector-kind = "rev"
+selector = "3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11"
+revision = "3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11"
+digest = "1d44e626e5f25922b595ed08b08f533b4c0bdac5"
+entry = "src/mobile.ab"
