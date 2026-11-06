@@ -14,5 +14,5 @@ fun main: int {
     expect(!oneResolve(t,normal.kind,normal.style,"android").has("width"),"native button width default stays unchanged")
     expect(!oneResolve(t,"pressable",style(),"web-document").has("width"),"generic pressable width stays unchanged")
     expectEqual(oneWebDeclaration("pressable","width","hug",false),"width:fit-content","hug emits an intrinsic CSS width")
-    0
+    testsPassed()
 }
