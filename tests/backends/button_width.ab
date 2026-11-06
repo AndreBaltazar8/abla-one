@@ -1,0 +1,18 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_document.ab"
+
+fun main: int {
+    val t=oneDefaultTheme()
+    var ui=oneUi("web-document",t)
+    val normal=button(ui,"Guardar","primary",1,style())
+    val filled=button(ui,"Guardar","primary",1,style().fillWidth())
+    val fixed=button(ui,"Guardar","primary",1,style().width(240))
+    expectEqual(oneResolve(t,normal.kind,normal.style,"web-document").get("width"),"hug","web buttons default to content width")
+    expectEqual(oneResolve(t,filled.kind,filled.style,"web-document").get("width"),"fill","explicit fill overrides content default")
+    expectEqual(oneResolve(t,fixed.kind,fixed.style,"web-document").get("width"),"240","explicit width overrides content default")
+    expect(!oneResolve(t,normal.kind,normal.style,"android").has("width"),"native button width default stays unchanged")
+    expect(!oneResolve(t,"pressable",style(),"web-document").has("width"),"generic pressable width stays unchanged")
+    expectEqual(oneWebDeclaration("pressable","width","hug",false),"width:fit-content","hug emits an intrinsic CSS width")
+    0
+}

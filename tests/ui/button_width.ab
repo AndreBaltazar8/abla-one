@@ -1,0 +1,24 @@
+import "abla/fs"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_document.ab"
+fun main: int {
+    val t=oneDefaultTheme()
+    Path("build/button-width").createDirectories()
+    for(locale in ["en","pt-PT"]){
+        var ui=oneUi("web-document",t)
+        val label=if(locale=="en")"Weekly summary"else"Resumo semanal"
+        val nodes: array<Node> = [
+            button(ui,label,"secondary",1,style()).keyed("normal"),
+            linkButton(ui,label,"secondary","#",style()).keyed("link"),
+            pressable(1,oneParts(t,"Button","primary","",style()),[text(label,style().fillWidth().maxLines(1))]).keyed("custom"),
+            button(ui,label,"primary",1,style().fillWidth()).keyed("fill"),
+            button(ui,label,"primary",1,style().width(240)).keyed("fixed"),
+            pressable(1,style().height(40),[text(label,style())]).keyed("row"),
+            row(style(),[button(ui,label,"primary",1,style().fillWidth()).keyed("row-fill")]),
+            stack(style(),[button(ui,label,"primary",1,style().fillWidth()).keyed("stack-fill")]),
+            button(ui,if(locale=="en")"A much longer explicit action label"else"Uma ação com uma descrição bastante mais longa","secondary",1,style()).keyed("long")
+        ]
+        Path("build/button-width/$locale.html").writeText(oneWebDocument("Button width",locale,column(style().padding(16).gap(12),nodes),t,"","#fff"))
+    }
+    0
+}
