@@ -8,8 +8,7 @@ fun oneIosRun(var app: OneApp, theme: Theme, background: string): int =
 
 // Services use the same copied request/effect protocol. The host reports an
 // explicit unsupported result for capabilities not yet implemented on iOS.
-class OneIosServices() : OneServices {
-    val mobile = OneAndroidServices()
+class OneIosServices(val mobile: OneAndroidServices = OneAndroidServices()) : OneServices {
     fun send(request: OneRequest): int = mobile.send(request)
     fun secureRead(key: string): int = mobile.secureRead(key)
     fun secureWrite(key: string, value: Json): int = mobile.secureWrite(key, value)
