@@ -16,7 +16,10 @@ for ((i=0;i<80;i++)); do
     printf 'class Data%04d(val id: int, val labels: array<string>)\n@server\nfun route%04d(value: Data%04d): Data%04d = value\n' "$i" "$i" "$i" "$i" > "$work/app/m$i.ab"
     printf 'import "m%d.ab" as mod%d\n' "$i" "$i"
 done > "$work/app/server.ab"
-for ((i=0;i<4;i++)); do printf 'import contract "m%d.ab" as client%d\n' "$i" "$i"; done >> "$work/app/server.ab"
+for ((i=80;i<84;i++)); do
+    printf 'class Data%04d(val id: int, val labels: array<string>)\n@server\nfun route%04d(value: Data%04d): Data%04d = value\n' "$i" "$i" "$i" "$i" > "$work/app/m$i.ab"
+    printf 'import contract "m%d.ab" as client%d\n' "$i" "$i"
+done >> "$work/app/server.ab"
 cat >> "$work/app/server.ab" <<'AB'
 import "../src/server/remote.ab"
 #compilerGrant("filesystem.write")
