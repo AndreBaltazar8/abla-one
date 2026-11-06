@@ -2,6 +2,7 @@
 // not claim an iOS slice or execute the mobile runtime;552 owns that link gate.
 import "abla/build"
 import "../src/one.ab"
+import "../src/one_kit.ab"
 import "../src/backends/ios.ab"
 
 class IosContractFixture(val services: OneServices, var value: string = "", var status: string = "ready") : OneApp {
