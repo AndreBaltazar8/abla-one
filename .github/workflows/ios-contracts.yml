@@ -3,6 +3,12 @@ on:
   push:
     branches: [feat/ios-host]
   workflow_dispatch:
+    inputs:
+      compiler_version:
+        description: Released compiler containing the package-path cycle fix
+        required: true
+        default: 0.2.48
+        type: string
 permissions:
   contents: read
 jobs:
@@ -15,7 +21,7 @@ jobs:
       # not accidentally satisfy a broken public-package import.
       - uses: AndreBaltazar8/setup-abla@13c3fdc74b5961bf2d281b25c47e4b9ace18d11e
         with:
-          version: 0.2.47
+          version: ${{ inputs.compiler_version || '0.2.48' }}
       - name: Lock and compile exact public package modules
         shell: bash
         run: |
@@ -33,7 +39,7 @@ jobs:
               "rev", "65555622d38f8db8a614b512126db07da0dddc9e")
           compile fun oneSource(): ImportSource = gitImportSource(
               "abla-one", "https://github.com/AndreBaltazar8/abla-one.git",
-              "rev", "3ee4793b0ceccf96c4cdd48d7159eeec340c2a57")
+              "rev", "4589d6cc082f0a18424dd48695d601471382cd00")
           import importSubpath(mobileSource(), "ios_runtime")
           import importSubpath(mobileSource(), "ios_build")
           import importSubpath(oneSource(), "backends/ios")
@@ -67,7 +73,7 @@ jobs:
           persist-credentials: false
       - uses: AndreBaltazar8/setup-abla@13c3fdc74b5961bf2d281b25c47e4b9ace18d11e
         with:
-          version: 0.2.47
+          version: ${{ inputs.compiler_version || '0.2.48' }}
       - name: Test existing contracts and the iOS encoder
         working-directory: abla-one
         shell: bash
