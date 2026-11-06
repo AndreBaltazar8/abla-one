@@ -58,7 +58,7 @@ jobs:
               "rev", "3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11")
           compile fun oneSource(): ImportSource = gitImportSource(
               "abla-one", "https://github.com/AndreBaltazar8/abla-one.git",
-              "rev", "b0d967525db57b7dbe15a7c79763d74de296742e")
+              "rev", "1aacbb622b2bebe38188eef19d7b20af2ba4c8f1")
           import importSubpath(mobileSource(), "ios_runtime")
           import importSubpath(mobileSource(), "ios_build")
           import importSubpath(oneSource(), "backends/ios")
@@ -87,7 +87,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code b0d967525db57b7dbe15a7c79763d74de296742e HEAD -- src tests
+          git diff --exit-code 1aacbb622b2bebe38188eef19d7b20af2ba4c8f1 HEAD -- src tests abla.toml
+          ablac package update --project .
+          cp abla.lock "$RUNNER_TEMP/ios-package-candidate-evidence/one-development.lock"
+          if git ls-files --error-unmatch abla.lock >/dev/null 2>&1; then
+            git diff --exit-code -- abla.lock
+          else
+            echo 'Initial development lock candidate retained; checked-in lock acceptance remains pending.'
+          fi
           mkdir -p build
           ablac build tools/check-native-build-roots.ab -o build/check-native-build-roots --fast
           ablac build tests/ios_native_roots_probe.ab -o build/ios-native-roots-probe --fast

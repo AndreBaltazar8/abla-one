@@ -63,6 +63,12 @@ and server at the same SDK revision as described above.
 
 ## Tests
 
+Prepare the locked development dependencies with `ablac package update --project .`
+before a fresh checkout's host tests. Optional mobile backends use the immutable
+provider in `src/mobile_source.ab`; the development manifest seeds that same
+dependency without importing its runtime into the web/core entry. When changing
+its revision, update the manifest, provider and committed lock together.
+
 ```sh
 make test          # unit, backend and integration tests (host)
 make ui-web        # renders the gallery and checks it in headless Chromium

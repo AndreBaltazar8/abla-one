@@ -50,8 +50,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code b0d967525db57b7dbe15a7c79763d74de296742e HEAD -- src tests
+          git diff --exit-code 1aacbb622b2bebe38188eef19d7b20af2ba4c8f1 HEAD -- src tests abla.toml
           export ABLA_SYSROOT="$GITHUB_WORKSPACE/ablac"
+          nix-shell ../ablac/shell.nix --run '"$GITHUB_WORKSPACE/ablac/build/ablac" package update --project .'
+          cp abla.lock "$RUNNER_TEMP/mobile-provider-linux-evidence/one-development.lock"
+          if git ls-files --error-unmatch abla.lock >/dev/null 2>&1; then
+            git diff --exit-code -- abla.lock
+          else
+            echo 'Initial development lock candidate retained; checked-in lock acceptance remains pending.'
+          fi
           make test ABLAC="$GITHUB_WORKSPACE/ablac/build/ablac" \
             2>&1 | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/one-default.log"
           make test-remote ABLAC="$GITHUB_WORKSPACE/ablac/build/ablac" \
