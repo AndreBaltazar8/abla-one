@@ -14,5 +14,9 @@ fun main: int {
     expect(!oneResolve(t,normal.kind,normal.style,"android").has("width"),"native button width default stays unchanged")
     expect(!oneResolve(t,"pressable",style(),"web-document").has("width"),"generic pressable width stays unchanged")
     expectEqual(oneWebDeclaration("pressable","width","hug",false),"width:fit-content","hug emits an intrinsic CSS width")
+    val page=oneWebRender(normal,t,"")
+    expect(page.css.contains("width:fit-content;max-width:100%"),"default hug width is bounded by its container")
+    val maximum=oneWebRender(button(ui,"Guardar","primary",1,style().maxWidth(220)),t,"")
+    expect(maximum.css.contains("max-width:220px") && !maximum.css.contains("max-width:100%"),"an authored maximum is not replaced by the default cap")
     testsPassed()
 }

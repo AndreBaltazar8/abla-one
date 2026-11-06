@@ -367,6 +367,10 @@ fun oneWebDeclarations(node: Node, r: Resolved, state: string, parentKind: strin
         val decl = if (prop == "border" || prop == "borderTop" || prop == "borderBottom" || prop == "borderLeft" || prop == "borderRight")
             "${if (prop == "border") "border" else if (prop == "borderTop") "border-top" else if (prop == "borderBottom") "border-bottom" else if (prop == "borderLeft") "border-left" else "border-right"}:${v}px solid $color"
             else if (prop == "align" && node.kind == "stack") "place-items:${oneFlexValue(v)}"
+            // A nowrap label can have a min-content width larger than its
+            // column. Hug remains intrinsic, bounded by the available width;
+            // an authored maximum keeps its own declaration and precedence.
+            else if (prop == "width" && v == "hug" && !r.has("${p}maxWidth") && !r.has("maxWidth")) "width:fit-content;max-width:100%"
             else oneWebDeclaration(node.kind, prop, v, parentRow, parentKind == "stack")
         if (decl != "") out.append(decl)
     }
