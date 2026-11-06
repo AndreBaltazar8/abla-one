@@ -6,14 +6,8 @@ class OneLockIndex(
     val first: array<int> = [], val root: array<int> = [-1]
 )
 
-compile fun oneLockByteLess(left: string, right: string): bool {
-    var index = 0
-    while (index < left.size && index < right.size) {
-        if (left[index] != right[index]) return left[index] < right[index]
-        index = index + 1
-    }
-    left.size < right.size
-}
+// String ordering is bytewise in both the evaluator and compiled runtime.
+compile fun oneLockByteLess(left: string, right: string): bool = left < right
 
 compile fun oneLockIndexHeight(index: OneLockIndex, node: int): int =
     if (node < 0) 0 else index.height[node]

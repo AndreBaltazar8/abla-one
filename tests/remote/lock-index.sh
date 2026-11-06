@@ -16,6 +16,14 @@ cat > "$work/app/server.ab" <<'AB'
 import "../src/server/lock.ab"
 #compilerGrant("filesystem.read")
 #compilerGrant("filesystem.write")
+compile fun byteLessOracle(left: string, right: string): bool {
+    var index = 0
+    while (index < left.size && index < right.size) {
+        if (left[index] != right[index]) return left[index] < right[index]
+        index = index + 1
+    }
+    left.size < right.size
+}
 compile fun verifyIndex(index: OneLockIndex, var problems: array<string>): void {
     var node = 0
     while (node < index.keys.size) {
@@ -86,6 +94,10 @@ compile fun probe(lines: array<string>, var problems: array<string>): int {
 }
 compile fun run(): void {
     val problems: array<string> = []
+    val samples = ["", "a", "ab", "aé", "é", "éa", "é", "Ω", "中", "😀", "route f() -> R", "route f() -> Result"]
+    for (left in samples) for (right in samples) {
+        if (oneLockByteLess(left, right) != byteLessOracle(left, right)) problems.append("byte ordering changed")
+    }
     var checks = probe(["route f() -> Result", "route f() -> R", "route f() -> Result", "class Z|value: int", "class A|value: string", "class Aa|value: bool", "é", "", "a", "ab", "aé"], problems)
     checks = checks + probe(["aé", "ab", "a", "", "é", "class Aa|value: bool", "class A|value: string", "class Z|value: int", "route f() -> Result", "route f() -> R", "route f() -> Result"], problems)
     val ascending: array<string> = []
