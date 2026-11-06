@@ -63,7 +63,9 @@ and server at the same SDK revision as described above.
 
 ## Tests
 
-Prepare the locked development dependencies with `ablac package update --project .`
+Fresh provider preparation requires ablac0.2.48 (the relative package-path cycle
+fix; exact candidate99aa427d was used before release). Prepare the locked
+development dependencies with `ablac package update --project .`
 before a fresh checkout's host tests. Optional mobile backends use the immutable
 provider in `src/mobile_source.ab`; the development manifest seeds that same
 dependency without importing its runtime into the web/core entry. When changing
