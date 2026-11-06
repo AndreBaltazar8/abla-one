@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: AndreBaltazar8/abla-mobile
-          ref: 3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11
+          ref: 6d9cfaf574031729d2426565c47bad9c20712a47
           path: abla-mobile
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code 8ab9104feebcb0eb439943aaeabcc9065a037f69 HEAD -- src tests abla.toml abla.lock
+          git diff --exit-code 0ab017ff459d71c603c0b649cdd5739b3bae8ef6 HEAD -- src tests abla.toml abla.lock
           export ABLA_SYSROOT="$GITHUB_WORKSPACE/ablac"
           nix-shell ../ablac/shell.nix --run '"$GITHUB_WORKSPACE/ablac/build/ablac" package update --project .'
           cp abla.lock "$RUNNER_TEMP/mobile-provider-linux-evidence/one-development.lock"

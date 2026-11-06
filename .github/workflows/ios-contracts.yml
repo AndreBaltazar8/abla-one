@@ -36,10 +36,10 @@ jobs:
           cat > main.ab <<'EOF'
           compile fun mobileSource(): ImportSource = gitImportSource(
               "abla-mobile", "https://github.com/AndreBaltazar8/abla-mobile.git",
-              "rev", "3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11")
+              "rev", "6d9cfaf574031729d2426565c47bad9c20712a47")
           compile fun oneSource(): ImportSource = gitImportSource(
               "abla-one", "https://github.com/AndreBaltazar8/abla-one.git",
-              "rev", "b0d967525db57b7dbe15a7c79763d74de296742e")
+              "rev", "0ab017ff459d71c603c0b649cdd5739b3bae8ef6")
           import importSubpath(mobileSource(), "ios_runtime")
           import importSubpath(mobileSource(), "ios_build")
           import importSubpath(oneSource(), "backends/ios")
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: AndreBaltazar8/abla-mobile
-          ref: 3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11
+          ref: 6d9cfaf574031729d2426565c47bad9c20712a47
           path: abla-mobile
           persist-credentials: false
       - uses: AndreBaltazar8/setup-abla@13c3fdc74b5961bf2d281b25c47e4b9ace18d11e

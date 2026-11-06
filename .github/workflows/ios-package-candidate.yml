@@ -55,10 +55,10 @@ jobs:
           cat > main.ab <<'EOF'
           compile fun mobileSource(): ImportSource = gitImportSource(
               "abla-mobile", "https://github.com/AndreBaltazar8/abla-mobile.git",
-              "rev", "3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11")
+              "rev", "6d9cfaf574031729d2426565c47bad9c20712a47")
           compile fun oneSource(): ImportSource = gitImportSource(
               "abla-one", "https://github.com/AndreBaltazar8/abla-one.git",
-              "rev", "8ab9104feebcb0eb439943aaeabcc9065a037f69")
+              "rev", "0ab017ff459d71c603c0b649cdd5739b3bae8ef6")
           import importSubpath(mobileSource(), "ios_runtime")
           import importSubpath(mobileSource(), "ios_build")
           import importSubpath(oneSource(), "backends/ios")
@@ -79,7 +79,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: AndreBaltazar8/abla-mobile
-          ref: 3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11
+          ref: 6d9cfaf574031729d2426565c47bad9c20712a47
           path: abla-mobile
           persist-credentials: false
       - name: Test the exact provider candidate and all One contracts
@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code 8ab9104feebcb0eb439943aaeabcc9065a037f69 HEAD -- src tests abla.toml abla.lock
+          git diff --exit-code 0ab017ff459d71c603c0b649cdd5739b3bae8ef6 HEAD -- src tests abla.toml abla.lock
           ablac package update --project .
           cp abla.lock "$RUNNER_TEMP/ios-package-candidate-evidence/one-development.lock"
           if git ls-files --error-unmatch abla.lock >/dev/null 2>&1; then
