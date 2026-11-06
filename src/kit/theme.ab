@@ -60,7 +60,7 @@ fun oneDefaultTheme(): Theme {
     t.kind("icon", style().size(24).tint("@ink"))
     t.kind("pressable", style().on("web", style().set("cursor", "pointer")))
 
-    t.define("Button", style().height(48).paddingX(18).radius(12).align("center").justify("center").on("web", style().set("transition", "background .12s")))
+    t.define("Button", style().height(48).paddingX(18).radius(12).align("center").justify("center").on("web", style().set("width", "hug").set("transition", "background .12s")))
     t.define("Button.label", style().text("label").maxLines(1))
     t.define("Button.primary", style().background("@primary").pressed(style().background("@primary-pressed")))
     t.define("Button.primary.label", style().color("@on-primary"))

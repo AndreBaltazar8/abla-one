@@ -387,7 +387,7 @@ fun oneWebDeclaration(kind: string, prop: string, v: string, parentRow: bool, pa
         "justify" -> "justify-content:${oneFlexValue(v)}"
         "alignSelf" -> "align-self:${oneFlexValue(v)}"
         // A stack is a grid of one cell: filling it is stretching in that cell, whatever the stack aligns.
-        "width" -> if (v == "fill") (if (parentRow) "flex:1 1 0" else if (parentStack) "justify-self:stretch" else "align-self:stretch") else if (v == "hug") "" else "width:${v}px;flex-shrink:0"
+        "width" -> if (v == "fill") (if (parentRow) "flex:1 1 0" else if (parentStack) "justify-self:stretch" else "align-self:stretch") else if (v == "hug") "width:fit-content" else "width:${v}px;flex-shrink:0"
         "height" -> if (v == "fill") (if (parentRow) "align-self:stretch" else if (parentStack) "align-self:stretch;min-height:0" else "flex:1 1 0;min-height:0") else if (v == "hug") "" else "height:${v}px;flex-shrink:0"
         "minWidth" -> "min-width:${v}px"
         "maxWidth" -> "max-width:${v}px;width:100%"
