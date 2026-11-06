@@ -16,6 +16,20 @@ cat > "$work/app/server.ab" <<'AB'
 import "../src/server/lock.ab"
 #compilerGrant("filesystem.read")
 #compilerGrant("filesystem.write")
+compile fun verifyIndex(index: OneLockIndex, var problems: array<string>): void {
+    var node = 0
+    while (node < index.keys.size) {
+        val left = oneLockIndexHeight(index, index.left[node])
+        val right = oneLockIndexHeight(index, index.right[node])
+        if (left - right > 1 || right - left > 1 || index.height[node] != 1 + (if (left > right) left else right)) problems.append("index is not balanced")
+        var first = node
+        if (index.left[node] >= 0 && index.first[index.left[node]] < first) first = index.first[index.left[node]]
+        if (index.right[node] >= 0 && index.first[index.right[node]] < first) first = index.first[index.right[node]]
+        if (first != index.first[node]) problems.append("oldest record changed")
+        node = node + 1
+    }
+    return
+}
 compile fun probe(lines: array<string>, var problems: array<string>): int {
     val index = OneLockIndex()
     val prefix: array<string> = []
@@ -47,16 +61,26 @@ compile fun probe(lines: array<string>, var problems: array<string>): int {
         if (oneLockFindIndexed(index, "missing key") != "") problems.append("missing key matched")
         if (oneLockKnown(index, "missing key")) problems.append("missing exact key matched")
     }
-    var node = 0
-    while (node < index.keys.size) {
-        val left = oneLockIndexHeight(index, index.left[node])
-        val right = oneLockIndexHeight(index, index.right[node])
-        if (left - right > 1 || right - left > 1 || index.height[node] != 1 + (if (left > right) left else right)) problems.append("index is not balanced")
-        var first = node
-        if (index.left[node] >= 0 && index.first[index.left[node]] < first) first = index.first[index.left[node]]
-        if (index.right[node] >= 0 && index.first[index.right[node]] < first) first = index.first[index.right[node]]
-        if (first != index.first[node]) problems.append("oldest record changed")
-        node = node + 1
+    verifyIndex(index, problems)
+    // The writer bulk-builds retained routes, then inserts newly discovered
+    // routes. Exercise that transition too, including existing/duplicate keys.
+    val mixed = oneLockIndexOf(prefix)
+    for (line in ["late", "key/0010", "route f() -> R", "class Late", "é", ""]) {
+        var existed = false
+        for (old in prefix) if (old == line) existed = true
+        if (oneLockRemember(mixed, line) == existed) problems.append("bulk insertion changed")
+        if (!oneLockKnown(mixed, line)) problems.append("bulk insertion is not known")
+        prefix.append(line)
+        for (value in prefix) {
+            var length = 0
+            while (length <= value.size) {
+                val key = value.slice(0, length)
+                if (oneLockFindIndexed(mixed, key) != oneLockFind(prefix, key)) problems.append("bulk insertion prefix changed")
+                checks = checks + 1
+                length = length + 1
+            }
+        }
+        verifyIndex(mixed, problems)
     }
     checks
 }
