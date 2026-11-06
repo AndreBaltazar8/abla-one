@@ -1,0 +1,125 @@
+name: iOS package consumer with exact compiler candidate
+on:
+  push:
+    branches: [fix/mobile-package-source]
+    paths: [.github/workflows/ios-package-candidate.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package-and-contracts:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      ABLA_NATIVE_JOBS: 2
+      ABLA_CODEGEN_JOBS: 2
+      JOBS: 2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: AndreBaltazar8/ablac
+          ref: 99aa427d0269605ecdfc620218355e41cff06a2e
+          path: ablac
+          persist-credentials: false
+      - name: Build exact candidate with the upstream macOS toolchain
+        working-directory: ablac
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ios-package-candidate-evidence"
+          test "$(git rev-parse HEAD)" = 99aa427d0269605ecdfc620218355e41cff06a2e
+          brew install --force-bottle llvm@23 lld@23 openssl@3 binaryen
+          export PATH="$(brew --prefix llvm@23)/bin:$(brew --prefix lld@23)/bin:$(brew --prefix openssl@3)/bin:$PATH"
+          tools/bootstrap-compiler.sh build/ci/bootstrap-ablac
+          tools/build-self-hosted-current.sh build/ci/bootstrap-ablac build/ci/ablac-stage1
+          tools/build-self-hosted-current.sh build/ci/ablac-stage1 build/ci/ablac
+          {
+            git rev-parse HEAD; shasum -a 256 build/ci/ablac
+            build/ci/ablac --version; sw_vers; xcodebuild -version
+          } | tee "$RUNNER_TEMP/ios-package-candidate-evidence/compiler.txt"
+          echo "ABLA_SYSROOT=$PWD" >> "$GITHUB_ENV"
+          printf '%s\n' "$PWD/build/ci" "$(brew --prefix llvm@23)/bin" "$(brew --prefix lld@23)/bin" "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+      - name: Resolve public packages before any One or Mobile checkout exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -d "$GITHUB_WORKSPACE/abla-one"
+          test ! -d "$GITHUB_WORKSPACE/abla-mobile"
+          mkdir -p "$RUNNER_TEMP/ios-package-consumer"
+          cd "$RUNNER_TEMP/ios-package-consumer"
+          cat > abla.toml <<'EOF'
+          name = "ios-package-consumer"
+          version = "0.0.1"
+          entry = "main.ab"
+          EOF
+          cat > main.ab <<'EOF'
+          compile fun mobileSource(): ImportSource = gitImportSource(
+              "abla-mobile", "https://github.com/AndreBaltazar8/abla-mobile.git",
+              "rev", "3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11")
+          compile fun oneSource(): ImportSource = gitImportSource(
+              "abla-one", "https://github.com/AndreBaltazar8/abla-one.git",
+              "rev", "b0d967525db57b7dbe15a7c79763d74de296742e")
+          import importSubpath(mobileSource(), "ios_runtime")
+          import importSubpath(mobileSource(), "ios_build")
+          import importSubpath(oneSource(), "backends/ios")
+          fun services(): OneServices = OneIosServices()
+          fun main: int = mobileIosApplicationProtocolVersion() - 1
+          EOF
+          ablac package update --project . 2>&1 | tee "$RUNNER_TEMP/ios-package-candidate-evidence/package-resolution.log"
+          ablac build main.ab --emit object -o consumer.o --fast --no-cache \
+            2>&1 | tee "$RUNNER_TEMP/ios-package-candidate-evidence/package-build.log"
+          nm -gU consumer.o > "$RUNNER_TEMP/ios-package-candidate-evidence/consumer-symbols.txt"
+          test "$(grep -c ' _abla_mobile_application_protocol_version$' "$RUNNER_TEMP/ios-package-candidate-evidence/consumer-symbols.txt")" = 1
+          cp abla.lock "$RUNNER_TEMP/ios-package-candidate-evidence/consumer.lock"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: abla-one
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: AndreBaltazar8/abla-mobile
+          ref: 3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11
+          path: abla-mobile
+          persist-credentials: false
+      - name: Test the exact provider candidate and all One contracts
+        working-directory: abla-one
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code b0d967525db57b7dbe15a7c79763d74de296742e HEAD -- src tests
+          mkdir -p build
+          ablac build tools/check-native-build-roots.ab -o build/check-native-build-roots --fast
+          ablac build tests/ios_native_roots_probe.ab -o build/ios-native-roots-probe --fast
+          build/ios-native-roots-probe 2>&1 | tee "$RUNNER_TEMP/ios-package-candidate-evidence/native-roots.log"
+          ablac build tests/ios_backend_exports.ab --emit object -o build/ios-backend-host.o --fast
+          nm -gU build/ios-backend-host.o | grep '_abla_mobile_run'
+          ablac test tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab \
+            tests/remote/client.ab tests/remote/routes.ab \
+            2>&1 | tee "$RUNNER_TEMP/ios-package-candidate-evidence/one-contracts.log"
+      - name: Package both actual iOS slices with the provider dependency
+        working-directory: abla-one
+        shell: bash
+        run: |
+          set -euo pipefail
+          ablac build tests/ios_xcframework.ab -o build/ios-driver --fast --no-cache \
+            2>&1 | tee "$RUNNER_TEMP/ios-package-candidate-evidence/ios-archives.log"
+          build/ios-driver
+          for target in ios-arm64 ios-arm64-simulator; do
+            archive="build/ios-real-app/$target/libabla_app.a"
+            test -s "$archive"
+            shasum -a 256 "$archive"
+            nm -gU "$archive" | grep -E '_abla_mobile_run$|_abla_mobile_application_protocol_version$'
+            llvm-objdump --macho --private-headers "$archive" > "$RUNNER_TEMP/ios-package-candidate-evidence/$target-platform.txt"
+            node ../abla-mobile/runtime/ios-host/Tests/check-archive-platform.mjs \
+              "$RUNNER_TEMP/ios-package-candidate-evidence/$target-platform.txt" "$target"
+          done
+          ../abla-mobile/runtime/ios-host/Tests/check-xcframework.sh \
+            "$PWD/build/ios-real-app/AblaApp.xcframework" "$PWD/build/ios-real-app" \
+            "$RUNNER_TEMP/ios-package-candidate-evidence/packaging"
+      - name: Retain exact candidate evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ios-package-compiler-candidate
+          path: ${{ runner.temp }}/ios-package-candidate-evidence
+          retention-days: 14
