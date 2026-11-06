@@ -34,6 +34,8 @@ jobs:
           ablac build tools/check-native-build-roots.ab -o build/check-native-build-roots --fast
           ablac build tests/ios_native_roots_probe.ab -o build/ios-native-roots-probe --fast
           build/ios-native-roots-probe 2>&1 | tee "$RUNNER_TEMP/one-ios-evidence/native-roots-probe.log"
+          ablac build tests/ios_backend_exports.ab --emit object -o build/ios-backend-host.o --fast
+          nm -gU build/ios-backend-host.o | grep '_abla_mobile_run'
           ablac test tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab \
             tests/remote/client.ab tests/remote/routes.ab \
             2>&1 | tee "$RUNNER_TEMP/one-ios-evidence/contracts.log"

@@ -4,7 +4,7 @@ import "../tools/native_build_roots.ab"
 
 fun main: int {
     val root = currentDirectory()
-    val folder = root.child("build/ios-native-roots-probe")
+    val folder = root.child("build/ios-native-roots-probe-data")
     folder.createDirectories()
     val source = folder.child("source")
     source.child("src").createDirectories()

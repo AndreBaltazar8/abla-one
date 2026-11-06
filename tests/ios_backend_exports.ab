@@ -1,0 +1,24 @@
+// Host object compile gate for the complete iOS backend call graph. This does
+// not claim an iOS slice or execute the mobile runtime;552 owns that link gate.
+import "abla/build"
+import "../src/one.ab"
+import "../src/backends/ios.ab"
+
+class IosContractFixture(val services: OneServices, var value: string = "", var status: string = "ready") : OneApp {
+    fun render(var ui: Ui): Node {
+        column(style().padding(16).gap(8), [
+            input(value, "Fixture password", ui.change { next -> value = next }, style()).set("secure", "true").keyed("secure"),
+            pressable(ui.press { services.timer(100); value = "" }, style(), [text("Accept", style())]),
+            text(status, style())
+        ])
+    }
+    fun receive(kind: string, payload: string): void {
+        if (kind == "result") status = "completion"
+        return
+    }
+}
+fun iosContractApplication(): int {
+    var app = IosContractFixture(OneIosServices())
+    oneIosRun(app, oneDefaultTheme(), "#FFFFFF")
+}
+val iosContractExported = #exportFunction("iosContractApplication", "abla_mobile_run")
