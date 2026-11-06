@@ -1,0 +1,78 @@
+name: Linux mobile provider regression
+on:
+  push:
+    branches: [fix/mobile-package-source]
+    paths: [.github/workflows/mobile-provider-linux.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  default-and-remote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      ABLA_NATIVE_JOBS: 2
+      ABLA_CODEGEN_JOBS: 2
+      JOBS: 2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: AndreBaltazar8/ablac
+          ref: 99aa427d0269605ecdfc620218355e41cff06a2e
+          path: ablac
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: abla-one
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: AndreBaltazar8/abla-mobile
+          ref: 3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11
+          path: abla-mobile
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
+        with:
+          nix_path: nixpkgs=https://github.com/NixOS/nixpkgs/archive/6510408d147d8c5e6d76043e899e9251756f6a75.tar.gz
+      - name: Build the exact ready compiler
+        working-directory: ablac
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mobile-provider-linux-evidence"
+          test "$(git rev-parse HEAD)" = 99aa427d0269605ecdfc620218355e41cff06a2e
+          nix-shell shell.nix --run 'make ablac' 2>&1 | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/compiler-build.log"
+          { git rev-parse HEAD; sha256sum build/ablac; build/ablac --version; } \
+            | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/compiler.txt"
+      - name: Run the full documented One host gate and real HTTP contracts
+        working-directory: abla-one
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code b0d967525db57b7dbe15a7c79763d74de296742e HEAD -- src tests
+          export ABLA_SYSROOT="$GITHUB_WORKSPACE/ablac"
+          make test ABLAC="$GITHUB_WORKSPACE/ablac/build/ablac" \
+            2>&1 | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/one-default.log"
+          make test-remote ABLAC="$GITHUB_WORKSPACE/ablac/build/ablac" \
+            2>&1 | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/one-remote.log"
+      - name: Exercise unchanged Mobile core and native queues
+        working-directory: abla-mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ABLA_SYSROOT="$GITHUB_WORKSPACE/ablac"
+          export ABLAC="$GITHUB_WORKSPACE/ablac/build/ablac"
+          nix-shell ../ablac/shell.nix --run '
+            set -euo pipefail
+            for suite in native-loop ui-tree mobile-template android-build-config multiscreen showcase-host platform-requests panic-containment file-exports; do
+              printf "MOBILE_CORE_SUITE %s\n" "$suite"
+              "./tools/test-$suite.sh"
+            done
+          ' 2>&1 | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/mobile-core.log"
+      - name: Retain exact evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mobile-provider-linux-evidence
+          path: ${{ runner.temp }}/mobile-provider-linux-evidence
+          retention-days: 14
