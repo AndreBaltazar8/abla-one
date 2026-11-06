@@ -4,5 +4,5 @@
 // generating the application's package lock; no root override exists yet.
 compile fun oneMobileSource(): ImportSource = gitImportSource(
     "abla-mobile", "https://github.com/AndreBaltazar8/abla-mobile.git", "rev",
-    "65555622d38f8db8a614b512126db07da0dddc9e"
+    "3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11"
 )

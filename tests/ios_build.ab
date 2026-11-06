@@ -1,5 +1,6 @@
 // Requires the compiler release/candidate containing iOS target552.
-import "../../abla-mobile/src/ios_slices.ab"
+import "../src/mobile_source.ab"
+import importSubpath(oneMobileSource(), "ios_slices")
 val accepted = #mobileBuildIosSlices(
     "one-ios-fixture", "tests/ios_backend_exports.ab", "build/ios-real-app", true, false
 )

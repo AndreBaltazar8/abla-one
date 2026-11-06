@@ -1,6 +1,7 @@
 // Real application plus staged packaging, separate from the Linux slices-only
 // fixture. Requires the compiler containing the iOS packaging API.
-import "../../abla-mobile/src/ios_build.ab"
+import "../src/mobile_source.ab"
+import importSubpath(oneMobileSource(), "ios_build")
 val accepted = #mobileBuildIos(mobileIosConfiguration(
     "one-ios-fixture", "tests/ios_backend_exports.ab", "build/ios-real-app",
     "../abla-mobile/runtime/ios-host/AppHeaders"
