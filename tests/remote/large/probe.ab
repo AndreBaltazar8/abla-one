@@ -1,7 +1,7 @@
 import "abla/compiler"
 import "../../../src/server/remote.ab"
 compile fun largeProbe(): void {
-    var source = OneRemoteSource("", [], [], oneRemotePrefixes(), [], [], [])
+    var source = OneRemoteSource("", [], [], oneRemotePrefixes(), [], [], [], indexed = true)
     oneRemoteWriteClients(source)
     oneRemoteWriteRoutes(source)
     var bytes = source.code.size

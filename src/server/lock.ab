@@ -2,6 +2,7 @@ import "abla/compiler"
 import "abla/fs"
 import "abla/text"
 import "remote.ab"
+import "lock_index.ab"
 
 // server.lock (SPEC §16): what deployed clients may rely on. Each build compares the
 // `@server` routes and their data shapes with the committed file: adding a route or a
@@ -68,6 +69,29 @@ compile fun oneLockClasses(type: string, var seen: array<string>, var lines: arr
     return
 }
 
+compile fun oneLockClassesIndexed(type: string, var seen: OneLockIndex, var lines: array<string>): void {
+    if (type.endsWith("?")) return oneLockClassesIndexed(type.slice(0, type.size - 1), seen, lines)
+    var open = 0
+    while (open < type.size && type[open] != 60) open = open + 1
+    val head = type.slice(0, open)
+    if (open < type.size) for (argument in oneRemoteArguments(type.slice(open + 1, type.size - 1))) oneLockClassesIndexed(argument, seen, lines)
+    if (head == "array" || head == "Map" || head == "int" || head == "string" || head == "bool" || head == "f64" || head == "Json") return
+    if (!oneLockRemember(seen, head)) return
+    val declaration = compilerFindClass(head)
+    if (declaration < 0) return
+    val none: array<string> = []
+    var fields = ""
+    var index = 0
+    while (index < compilerClassFieldCount(declaration)) {
+        val fieldType = oneRemoteSubstitute(compilerClassFieldType(declaration, index), none, none)
+        fields = "$fields|${compilerClassFieldName(declaration, index)}: $fieldType"
+        oneLockClassesIndexed(fieldType, seen, lines)
+        index = index + 1
+    }
+    lines.append(oneLockPortable("class $head$fields"))
+    return
+}
+
 compile fun oneLockSplit(text: string, separator: int): array<string> {
     val out: array<string> = []
     var start = 0
@@ -85,15 +109,6 @@ compile fun oneLockSplit(text: string, separator: int): array<string> {
 compile fun oneLockFind(lines: array<string>, prefix: string): string {
     for (line in lines) if (line.startsWith(prefix)) return line
     ""
-}
-
-compile fun oneLockByteLess(left: string, right: string): bool {
-    var index = 0
-    while (index < left.size && index < right.size) {
-        if (left[index] != right[index]) return left[index] < right[index]
-        index = index + 1
-    }
-    left.size < right.size
 }
 
 // The merge starts with retained routes, then discovered classes: even a
@@ -137,21 +152,36 @@ compile fun oneServerLockSorted(values: array<string>): array<string> {
     current
 }
 
+// Membership in a local sorted copy, without changing ABI declaration order.
+compile fun oneLockSortedHas(values: array<string>, key: string): bool {
+    var first = 0
+    var end = values.size
+    while (first < end) {
+        val middle = (first + end) / 2
+        val value = values[middle]
+        if (value == key) return true
+        if (oneLockByteLess(value, key)) first = middle + 1
+        else end = middle
+    }
+    false
+}
+
 compile fun oneServerLock(path: string): void {
     val current: array<string> = []
-    val seen: array<string> = []
-    val retired: array<string> = []
+    val seen = OneLockIndex()
+    val retired = OneLockIndex()
     for (function in compiler.functionsAnnotated("server")) {
         val route = oneRemoteRoute(compiler.functionName(function))
-        if (oneRemoteIsRetired(function)) retired.append(route)
+        if (oneRemoteIsRetired(function)) oneLockRemember(retired, route)
         current.append(oneLockRouteLine(function))
         var index = 0
         while (index < compiler.parameterCount(function)) {
-            oneLockClasses(oneRemoteNormal(compiler.parameterType(function, index)), seen, current)
+            oneLockClassesIndexed(oneRemoteNormal(compiler.parameterType(function, index)), seen, current)
             index = index + 1
         }
-        oneLockClasses(oneRemoteNormal(compiler.resultType(function)), seen, current)
+        oneLockClassesIndexed(oneRemoteNormal(compiler.resultType(function)), seen, current)
     }
+    val currentIndex = oneLockIndexOf(current)
     val file = Path(path)
     val previous = if (file.exists()) file.readText() else ""
     val old = oneLockSplit(previous, 10)
@@ -161,22 +191,26 @@ compile fun oneServerLock(path: string): void {
         val words = oneLockSplit(line, 32)
         if (line.startsWith("route ")) {
             val name = oneLockSplit(words[1], 40)[0]
-            var isRetired = false
-            for (r in retired) if (r == name) isRetired = true
-            val now = oneLockFind(current, "route $name(")
+            val isRetired = oneLockKnown(retired, name)
+            val now = oneLockFindIndexed(currentIndex, "route $name(")
             if (isRetired) merged.append(line)
             else if (now == "") problems.append("route $name was removed: mark it @retired instead")
             else if (now != line) problems.append("route $name changed: was $line")
             else merged.append(line)
         } else if (line.startsWith("class ")) {
             val parts = oneLockSplit(line.slice(6, line.size), 124)
-            val now = oneLockSplit(oneLockFind(current, "class ${parts[0]}|"), 124)
-            if (now.size == 0 && oneLockFind(current, "class ${parts[0]}") == "") merged.append(line)
+            val now = oneLockSplit(oneLockFindIndexed(currentIndex, "class ${parts[0]}|"), 124)
+            if (now.size == 0 && oneLockFindIndexed(currentIndex, "class ${parts[0]}") == "") merged.append(line)
             else {
+                // A bounded scan keeps small DTOs cheap. Wide DTOs use one
+                // sorted copy plus logarithmic exact checks, rather than
+                // scanning every current field for every retained field.
+                val fields = if (now.size > 65) oneServerLockSorted(now) else []
                 var index = 1
                 while (index < parts.size) {
                     var kept = false
-                    for (field in now) if (field == parts[index]) kept = true
+                    if (fields.size > 0) kept = oneLockSortedHas(fields, parts[index])
+                    else { for (field in now) if (field == parts[index]) kept = true }
                     if (!kept) problems.append("class ${parts[0]}: field ${parts[index]} was changed or removed")
                     index = index + 1
                 }
@@ -187,7 +221,13 @@ compile fun oneServerLock(path: string): void {
         compiler.generateModule("one_server_lock", "fun oneServerLockProblem(): void {\n    ${oneRemoteErrorName("server lock: ${problems[0]}")}()\n}\n")
         return
     }
-    for (line in current) if (!line.startsWith("route ") || oneLockFind(merged, line) == "") merged.append(line)
+    val mergedRoutes: array<string> = []
+    for (line in merged) if (line.startsWith("route ")) mergedRoutes.append(line)
+    val mergedIndex = oneLockIndexOf(mergedRoutes)
+    for (line in current) if (!line.startsWith("route ") || oneLockFindIndexed(mergedIndex, line) == "") {
+        merged.append(line)
+        if (line.startsWith("route ")) oneLockRemember(mergedIndex, line)
+    }
     var text = ""
     // Discovery and valid old-lock order may differ between build paths.
     // Sort complete records; parameter and class-field declaration order stays intact.

@@ -1,0 +1,175 @@
+// A balanced string index, including the first inserted record for a prefix.
+// Keep this in Abla: the evaluator's Map currently scans its keys linearly.
+class OneLockIndex(
+    val keys: array<string> = [], val left: array<int> = [],
+    val right: array<int> = [], val height: array<int> = [],
+    val first: array<int> = [], val root: array<int> = [-1]
+)
+
+// String ordering is bytewise in both the evaluator and compiled runtime.
+compile fun oneLockByteLess(left: string, right: string): bool = left < right
+
+compile fun oneLockIndexHeight(index: OneLockIndex, node: int): int =
+    if (node < 0) 0 else index.height[node]
+
+compile fun oneLockIndexRefresh(var index: OneLockIndex, node: int): void {
+    val left = index.left[node]
+    val right = index.right[node]
+    val a = oneLockIndexHeight(index, left)
+    val b = oneLockIndexHeight(index, right)
+    index.height[node] = 1 + (if (a > b) a else b)
+    var first = node
+    if (left >= 0 && index.first[left] < first) first = index.first[left]
+    if (right >= 0 && index.first[right] < first) first = index.first[right]
+    index.first[node] = first
+    return
+}
+
+compile fun oneLockIndexLeft(var index: OneLockIndex, node: int): int {
+    val top = index.right[node]
+    index.right[node] = index.left[top]
+    index.left[top] = node
+    oneLockIndexRefresh(index, node)
+    oneLockIndexRefresh(index, top)
+    top
+}
+
+compile fun oneLockIndexRight(var index: OneLockIndex, node: int): int {
+    val top = index.left[node]
+    index.left[node] = index.right[top]
+    index.right[top] = node
+    oneLockIndexRefresh(index, node)
+    oneLockIndexRefresh(index, top)
+    top
+}
+
+compile fun oneLockIndexInsert(var index: OneLockIndex, node: int, key: string): int {
+    if (node < 0) {
+        val added = index.keys.size
+        index.keys.append(key)
+        index.left.append(-1); index.right.append(-1)
+        index.height.append(1); index.first.append(added)
+        return added
+    }
+    if (key == index.keys[node]) return node
+    if (oneLockByteLess(key, index.keys[node])) {
+        index.left[node] = oneLockIndexInsert(index, index.left[node], key)
+    } else index.right[node] = oneLockIndexInsert(index, index.right[node], key)
+    oneLockIndexRefresh(index, node)
+    val balance = oneLockIndexHeight(index, index.left[node]) - oneLockIndexHeight(index, index.right[node])
+    if (balance > 1) {
+        if (!oneLockByteLess(key, index.keys[index.left[node]])) index.left[node] = oneLockIndexLeft(index, index.left[node])
+        return oneLockIndexRight(index, node)
+    }
+    if (balance < -1) {
+        if (oneLockByteLess(key, index.keys[index.right[node]])) index.right[node] = oneLockIndexRight(index, index.right[node])
+        return oneLockIndexLeft(index, node)
+    }
+    node
+}
+
+compile fun oneLockRemember(var index: OneLockIndex, key: string): bool {
+    val before = index.keys.size
+    index.root[0] = oneLockIndexInsert(index, index.root[0], key)
+    index.keys.size != before
+}
+
+compile fun oneLockKnown(index: OneLockIndex, key: string): bool {
+    var node = index.root[0]
+    while (node >= 0) {
+        if (index.keys[node] == key) return true
+        node = if (oneLockByteLess(key, index.keys[node])) index.left[node] else index.right[node]
+    }
+    false
+}
+
+// Stable insertion position, including bulk inputs with duplicate keys.
+compile fun oneLockPosition(index: OneLockIndex, key: string): int {
+    var node = index.root[0]
+    var found = -1
+    while (node >= 0) {
+        val value = index.keys[node]
+        if (value == key) { found = node; node = index.left[node] }
+        else node = if (oneLockByteLess(key, value)) index.left[node] else index.right[node]
+    }
+    found
+}
+
+compile fun oneLockIndexBuild(var index: OneLockIndex, order: array<int>, first: int, end: int): int {
+    if (first >= end) return -1
+    val middle = first + (end - first) / 2
+    val node = order[middle]
+    index.left[node] = oneLockIndexBuild(index, order, first, middle)
+    index.right[node] = oneLockIndexBuild(index, order, middle + 1, end)
+    oneLockIndexRefresh(index, node)
+    node
+}
+
+compile fun oneLockIndexOf(values: array<string>): OneLockIndex {
+    val index = OneLockIndex()
+    val order: array<int> = []
+    val scratch: array<int> = []
+    for (value in values) {
+        val added = index.keys.size
+        index.keys.append(value)
+        index.left.append(-1); index.right.append(-1)
+        index.height.append(1); index.first.append(added)
+        order.append(added); scratch.append(0)
+    }
+    var width = 1
+    while (width < order.size) {
+        var first = 0
+        while (first < order.size) {
+            val middle = if (first + width < order.size) first + width else order.size
+            val end = if (middle + width < order.size) middle + width else order.size
+            var left = first
+            var right = middle
+            var out = first
+            while (out < end) {
+                if (right < end && (left >= middle || oneLockByteLess(index.keys[order[right]], index.keys[order[left]]))) {
+                    scratch[out] = order[right]; right = right + 1
+                } else { scratch[out] = order[left]; left = left + 1 }
+                out = out + 1
+            }
+            first = end
+        }
+        var copy = 0
+        while (copy < order.size) { order[copy] = scratch[copy]; copy = copy + 1 }
+        width = width * 2
+    }
+    index.root[0] = oneLockIndexBuild(index, order, 0, order.size)
+    index
+}
+
+compile fun oneLockFindIndexed(index: OneLockIndex, prefix: string): string {
+    var node = index.root[0]
+    while (node >= 0) {
+        val key = index.keys[node]
+        if (key.startsWith(prefix)) {
+            var first = node
+            // Matching prefixes form a contiguous lexical range. On each
+            // boundary walk, whole interior subtrees can use their oldest key.
+            var lower = index.left[node]
+            while (lower >= 0) {
+                if (index.keys[lower].startsWith(prefix)) {
+                    if (lower < first) first = lower
+                    val inside = index.right[lower]
+                    if (inside >= 0 && index.first[inside] < first) first = index.first[inside]
+                    lower = index.left[lower]
+                } else lower = index.right[lower]
+            }
+            var upper = index.right[node]
+            while (upper >= 0) {
+                if (index.keys[upper].startsWith(prefix)) {
+                    if (upper < first) first = upper
+                    val inside = index.left[upper]
+                    if (inside >= 0 && index.first[inside] < first) first = index.first[inside]
+                    upper = index.right[upper]
+                } else upper = index.left[upper]
+            }
+            return index.keys[first]
+        }
+        node = if (oneLockByteLess(key, prefix)) index.right[node] else index.left[node]
+    }
+    ""
+}

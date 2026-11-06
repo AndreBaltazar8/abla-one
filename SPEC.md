@@ -868,6 +868,11 @@ stable by default, and removing one is deliberate:
   Records are serialized in byte order, one per LF-terminated line, so build and
   discovery order do not change the file. Parameter and class-field order within
   a record remains as declared.
+  Canonicalization uses stable merge sort. Balanced prefix indexes preserve
+  first-discovery lookup semantics; wide-field compatibility uses exact binary
+  searches in a sorted local copy. Writer regressions cover whole-record byte
+  order, 1,280 records below sixteen million evaluator steps, and four 512-field
+  DTOs below eight million evaluator steps.
 - To remove or replace a route, mark it `@retired("reason")`: it stays recorded, and
   answers with a clear "update the app" response that `$remote` passes to the app.
   The entry can be dropped once no supported client calls it.

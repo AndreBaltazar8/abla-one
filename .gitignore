@@ -6,6 +6,7 @@ examples/*/android/android-app/.cxx/
 examples/*/android/build/
 build/
 .abla-cache/
+.abla/
 examples/*/papermono/sdkconfig*
 !examples/*/papermono/sdkconfig.thin
 build-thin/
