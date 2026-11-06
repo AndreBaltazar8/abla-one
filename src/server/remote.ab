@@ -2,6 +2,7 @@ import "abla/compiler"
 import "abla/compiler/parser"
 import "abla/json"
 import "../core/services.ab"
+import "lock_index.ab"
 
 // `@server` functions, called from any client (SPEC §16). A client imports the
 // server module with `import contract`, so only signatures and data shapes reach
@@ -224,7 +225,21 @@ fun oneRemoteParseF64(text: string): f64 {
 // before analysis) writes plain Abla: one encoder and decoder per type, and for each
 // `@server` function either the client call (a contract) or a route (its real body).
 
-compile class OneRemoteSource(var code: string, val seen: array<string>, val problems: array<string>, val prefixes: array<string>, val classes: array<string>, val spellings: array<string>, val parts: array<string>)
+// Automatic generation owns append-only caches. Legacy/manual sources retain
+// their original mutable-array behavior unless they explicitly opt in.
+compile class OneRemoteSource(var code: string, val seen: array<string>, val problems: array<string>, val prefixes: array<string>, val classes: array<string>, val spellings: array<string>, val parts: array<string>, val indexed: bool = false, var seenIndex: OneLockIndex = OneLockIndex(), var classIndex: OneLockIndex = OneLockIndex())
+
+compile fun oneRemoteRemember(var source: OneRemoteSource, name: string): bool {
+    if (source.indexed && source.seen.size > 64) {
+        if (source.seenIndex.keys.size != source.seen.size) source.seenIndex = oneLockIndexOf(source.seen)
+        if (oneLockKnown(source.seenIndex, name)) return false
+        oneLockRemember(source.seenIndex, name)
+    } else {
+        for (seen in source.seen) if (seen == name) return false
+    }
+    source.seen.append(name)
+    true
+}
 
 // Keep complete declarations (including annotations) together. A program can have more
 // than ablac's 1 MiB per-module limit; individual generated units stay below 512 KiB.
@@ -306,10 +321,16 @@ compile fun oneRemoteSubstitute(type: string, names: array<string>, values: arra
 // The name a class goes by here: one that came through an import alias carries its
 // module's prefix.
 compile fun oneRemoteClassName(var source: OneRemoteSource, name: string): string {
-    var known = 0
-    while (known < source.classes.size) {
-        if (source.classes[known] == name) return source.spellings[known]
-        known = known + 1
+    if (source.indexed && source.classes.size > 64) {
+        if (source.classIndex.keys.size != source.classes.size) source.classIndex = oneLockIndexOf(source.classes)
+        val known = oneLockPosition(source.classIndex, name)
+        if (known >= 0) return source.spellings[known]
+    } else {
+        var known = 0
+        while (known < source.classes.size) {
+            if (source.classes[known] == name) return source.spellings[known]
+            known = known + 1
+        }
     }
     var spelled = name
     val handle = compilerFindType(name)
@@ -318,6 +339,7 @@ compile fun oneRemoteClassName(var source: OneRemoteSource, name: string): strin
         if (own != "" && compilerFindClass("$own$name") >= 0) spelled = "$own$name"
     }
     if (spelled == name) for (prefix in source.prefixes) if (spelled == name && compilerFindClass("$prefix$name") >= 0) spelled = "$prefix$name"
+    if (source.indexed && source.classIndex.keys.size > 0) oneLockRemember(source.classIndex, name)
     source.classes.append(name)
     source.spellings.append(spelled)
     spelled
@@ -334,6 +356,7 @@ compile fun oneRemoteModulePrefix(module: string): string {
 // The modules `@server` functions come from, once each: spelling a class looks in them, and there are many of both.
 compile fun oneRemotePrefixes(): array<string> {
     val modules: array<string> = []
+    var moduleIndex = OneLockIndex()
     val prefixes: array<string> = []
     val functions: array<int> = []
     for (function in compilerContractFunctionsAnnotated("server")) functions.append(function)
@@ -341,8 +364,12 @@ compile fun oneRemotePrefixes(): array<string> {
     for (function in functions) {
         val module = compiler.functionModuleIdentity(function)
         var known = false
-        for (seen in modules) if (seen == module) known = true
+        if (modules.size > 64) {
+            if (moduleIndex.keys.size != modules.size) moduleIndex = oneLockIndexOf(modules)
+            known = oneLockKnown(moduleIndex, module)
+        } else { for (seen in modules) if (seen == module) known = true }
         if (!known) {
+            if (moduleIndex.keys.size > 0) oneLockRemember(moduleIndex, module)
             modules.append(module)
             prefixes.append(oneRemoteModulePrefix(module))
         }
@@ -395,8 +422,7 @@ compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool,
     if (type == "f64") return if (out) "oneRemoteOutF64" else "oneRemoteInF64"
     if (type == "Json") return if (out) "oneRemoteOutJson" else "oneRemoteInJson"
     val name = "oneRemote${if (out) "Out" else "In"}_${oneRemoteHash(type)}"
-    for (seen in source.seen) if (seen == name) return name
-    source.seen.append(name)
+    if (!oneRemoteRemember(source, name)) return name
     val spelled = oneRemoteSpell(source, type)
     val signature = if (out) "fun $name(value: $spelled): Json" else "fun $name(json: Json): $spelled"
     val argument = if (out) "value" else "json"
@@ -465,8 +491,7 @@ compile fun oneRemoteValidator(var source: OneRemoteSource, type: string, comple
     if (type == "f64") return "oneRemoteValidF64"
     if (type == "Json") return "oneRemoteValidOther"
     val name = "oneRemoteValidate${if (complete) "Reply" else ""}_${oneRemoteHash(type)}"
-    for (seen in source.seen) if (seen == name) return name
-    source.seen.append(name)
+    if (!oneRemoteRemember(source, name)) return name
     if (type.endsWith("?")) {
         val inner = oneRemoteValidator(source, type.slice(0, type.size - 1), complete)
         oneRemoteAppend(source, "fun $name(json: Json): bool = json.isNull() || $inner(json)\n")
@@ -635,7 +660,7 @@ compile fun oneRemoteReservedRoute(route: string): bool =
     route == "live" || route == "upload" || route == "cookies" || route == "host" || route == "canvas" || route == "fonts" || route == "thin"
 
 compile fun oneRemoteGenerate(): void {
-    var source = OneRemoteSource("", [], [], oneRemotePrefixes(), [], [], [])
+    var source = OneRemoteSource("", [], [], oneRemotePrefixes(), [], [], [], indexed = true)
     for (function in compiler.functionsAnnotated("server")) {
         val route = oneRemoteRoute(compiler.functionName(function))
         if (oneRemoteReservedRoute(route)) source.problems.append("route $route is reserved by the live server: rename it")

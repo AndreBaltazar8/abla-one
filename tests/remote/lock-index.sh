@@ -52,9 +52,15 @@ compile fun probe(lines: array<string>, var problems: array<string>): int {
         // Retired route membership is exact, unlike ABI record-prefix lookup.
         for (key in ["", "a", "route f()", "route f() -> Result", "class A", "é", "key/0000", "key/0040", "missing key"]) {
             var known = false
-            for (old in prefix) if (old == key) known = true
+            var first = -1
+            var position = 0
+            for (old in prefix) {
+                if (old == key) { known = true; if (first < 0) first = position }
+                position = position + 1
+            }
             if (oneLockKnown(index, key) != known) problems.append("exact membership changed")
             if (oneLockKnown(bulk, key) != known) problems.append("bulk exact membership changed")
+            if (oneLockPosition(bulk, key) != first) problems.append("bulk first exact position changed")
         }
         for (value in prefix) {
             var length = 0

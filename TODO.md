@@ -16,7 +16,7 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Bugs seen
 
-- [ ] Finish server-lock scaling verification (NovaKind523): 048 record and wide-field matrices and compatibility controls pass; run default `make test` and the complete remote suite, including the eight-million-step wide-field regression, before publishing.
+- [ ] Finish server/lock scaling verification (NovaKind523): default44 passed, but the record guard exposed 23.99M steps in the imported remote generator's linear caches. Verify indexed generation parity and full-context scaling, then rerun default/remote before publication. Keep the normal50M cap.
 
 - [ ] Audit the live `.file()` MIME contract: OneRequest.file documents using OneFile.mime unless a Content-Type header is already set, but its builder retains only the handle and oneLiveExecute reads bytes without restoring the MIME. Add an actual handler-header control for default MIME and an explicit override before fixing across backends. No MIME behavior change is included in451.
 

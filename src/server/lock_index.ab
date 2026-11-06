@@ -83,6 +83,18 @@ compile fun oneLockKnown(index: OneLockIndex, key: string): bool {
     false
 }
 
+// Stable insertion position, including bulk inputs with duplicate keys.
+compile fun oneLockPosition(index: OneLockIndex, key: string): int {
+    var node = index.root[0]
+    var found = -1
+    while (node >= 0) {
+        val value = index.keys[node]
+        if (value == key) { found = node; node = index.left[node] }
+        else node = if (oneLockByteLess(key, value)) index.left[node] else index.right[node]
+    }
+    found
+}
+
 compile fun oneLockIndexBuild(var index: OneLockIndex, order: array<int>, first: int, end: int): int {
     if (first >= end) return -1
     val middle = first + (end - first) / 2
