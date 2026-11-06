@@ -16,7 +16,7 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 ## Bugs seen
 
-- [ ] Finish server/lock scaling verification (NovaKind523): default44 passed, but the record guard exposed 23.99M steps in the imported remote generator's linear caches. Verify indexed generation parity and full-context scaling, then rerun default/remote before publication. Keep the normal50M cap.
+- [x] Server/lock scaling (NovaKind523): official048 default44 plus auxiliary and complete remote checks passed, including exact legacy/indexed generation parity, 1280 records below16M and four512-field DTOs below8M. All18 measured record/order cases retained exact bytes. At1280 records writer26.96M→10.86M and imported generator23.99M→9.29M; field512 writer10.68M→5.92M. Small-input overhead remains explicit; normal50M unchanged. Historical717/042 failure attribution stays qualified.
 
 - [ ] Audit the live `.file()` MIME contract: OneRequest.file documents using OneFile.mime unless a Content-Type header is already set, but its builder retains only the handle and oneLiveExecute reads bytes without restoring the MIME. Add an actual handler-header control for default MIME and an explicit override before fixing across backends. No MIME behavior change is included in451.
 
