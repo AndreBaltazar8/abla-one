@@ -67,6 +67,15 @@ fun main: int {
     expect(has(html, "type=\"email\""), "email keyboard")
     expect(has(oneWebRender(input("1,5", "Valor", 3, style()).set("keyboard", "decimal"), t, "/icons").html, "inputmode=\"decimal\""), "decimal keyboard")
     expect(has(html, "<textarea"), "multiline input")
+    val secureMultiline = input("synthetic<&\"secret", "Private value", 17, style()).set("secure", "true").set("multiline", "true").set("keyboard", "decimal").set("onSubmit", "19").set("sameField", "private-editor")
+    val secureHtml = oneWebRender(secureMultiline, t, "/icons").html
+    expect(has(secureHtml, "<input ") && has(secureHtml, "type=\"password\""), "secure multiline renders a single-line password input")
+    expect(!has(secureHtml, "<textarea"), "secure mode never exposes a multiline textarea")
+    expect(!has(secureHtml, "inputmode="), "secure mode takes precedence over the decimal keyboard hint")
+    expect(has(secureHtml, "value=\"synthetic&lt;&amp;&quot;secret\""), "secure input preserves attribute escaping")
+    expect(has(secureHtml, "data-one-change=\"17\"") && has(secureHtml, "data-one-submit=\"19\"") && has(secureHtml, "data-one-field=\"private-editor\""), "secure multiline preserves change, submit and field identity")
+    val ordinaryMultiline = oneWebRender(input("line one\nline two", "Public notes", 21, style()).set("multiline", "true"), t, "/icons").html
+    expect(has(ordinaryMultiline, "<textarea") && has(ordinaryMultiline, ">line one\nline two</textarea>"), "ordinary multiline keeps its textarea and line breaks")
     expect(has(html, "--i:url('/icons/bell.svg')"), "icon mask url")
     expect(has(html, "<video></video>"), "web native node renders raw html")
     expect(!has(html, ">fallback<"), "web native skips its fallback")
