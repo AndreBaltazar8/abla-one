@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code 1aacbb622b2bebe38188eef19d7b20af2ba4c8f1 HEAD -- src tests abla.toml
+          git diff --exit-code 8ab9104feebcb0eb439943aaeabcc9065a037f69 HEAD -- src tests abla.toml abla.lock
           export ABLA_SYSROOT="$GITHUB_WORKSPACE/ablac"
           nix-shell ../ablac/shell.nix --run '"$GITHUB_WORKSPACE/ablac/build/ablac" package update --project .'
           cp abla.lock "$RUNNER_TEMP/mobile-provider-linux-evidence/one-development.lock"
@@ -72,10 +72,27 @@ jobs:
           export ABLAC="$GITHUB_WORKSPACE/ablac/build/ablac"
           nix-shell ../ablac/shell.nix --run '
             set -euo pipefail
+            failed=0
             for suite in native-loop ui-tree mobile-template android-build-config multiscreen showcase-host platform-requests panic-containment file-exports; do
               printf "MOBILE_CORE_SUITE %s\n" "$suite"
-              "./tools/test-$suite.sh"
+              if "./tools/test-$suite.sh"; then
+                printf "MOBILE_CORE_PASS %s\n" "$suite"
+              else
+                result=$?
+                printf "MOBILE_CORE_FAIL %s status %s\n" "$suite" "$result"
+                if test "$suite" = mobile-template; then
+                  for stream in stdout stderr; do
+                    file="build/mobile-template/invalid-mobile-template.$stream"
+                    if test -f "$file"; then
+                      cp "$file" "$RUNNER_TEMP/mobile-provider-linux-evidence/invalid-mobile-template.$stream"
+                      cat "$file"
+                    fi
+                  done
+                fi
+                failed=1
+              fi
             done
+            exit "$failed"
           ' 2>&1 | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/mobile-core.log"
       - name: Retain exact evidence
         if: always()

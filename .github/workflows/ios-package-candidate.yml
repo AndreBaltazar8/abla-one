@@ -58,7 +58,7 @@ jobs:
               "rev", "3abbd5be7587a05b4b1eb97ed4e867e1a0c81d11")
           compile fun oneSource(): ImportSource = gitImportSource(
               "abla-one", "https://github.com/AndreBaltazar8/abla-one.git",
-              "rev", "1aacbb622b2bebe38188eef19d7b20af2ba4c8f1")
+              "rev", "8ab9104feebcb0eb439943aaeabcc9065a037f69")
           import importSubpath(mobileSource(), "ios_runtime")
           import importSubpath(mobileSource(), "ios_build")
           import importSubpath(oneSource(), "backends/ios")
@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code 1aacbb622b2bebe38188eef19d7b20af2ba4c8f1 HEAD -- src tests abla.toml
+          git diff --exit-code 8ab9104feebcb0eb439943aaeabcc9065a037f69 HEAD -- src tests abla.toml abla.lock
           ablac package update --project .
           cp abla.lock "$RUNNER_TEMP/ios-package-candidate-evidence/one-development.lock"
           if git ls-files --error-unmatch abla.lock >/dev/null 2>&1; then
@@ -124,6 +124,39 @@ jobs:
           ../abla-mobile/runtime/ios-host/Tests/check-xcframework.sh \
             "$PWD/build/ios-real-app/AblaApp.xcframework" "$PWD/build/ios-real-app" \
             "$RUNNER_TEMP/ios-package-candidate-evidence/packaging"
+      - name: Link real Abla archive and execute unchanged SwiftUI journeys
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/ios-package-candidate-evidence/simulators.json"
+          device=$(jq -r '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))][0].udid' \
+            "$RUNNER_TEMP/ios-package-candidate-evidence/simulators.json")
+          test -n "$device" && test "$device" != null
+          if test "$(jq -r --arg id "$device" '.devices[][] | select(.udid == $id) | .state' "$RUNNER_TEMP/ios-package-candidate-evidence/simulators.json")" = Shutdown; then
+            xcrun simctl boot "$device"
+          fi
+          xcrun simctl bootstatus "$device" -b
+          archive="$GITHUB_WORKSPACE/abla-one/build/ios-real-app/ios-arm64-simulator/libabla_app.a"
+          set +e
+          xcodebuild test -project abla-mobile/runtime/ios-host/SmokeApp/HostSmoke.xcodeproj \
+            -scheme HostSmoke -sdk iphonesimulator -destination "id=$device" \
+            -parallel-testing-enabled NO -derivedDataPath "$RUNNER_TEMP/ios-real-build" \
+            -resultBundlePath "$RUNNER_TEMP/ios-package-candidate-evidence/RealOne.xcresult" \
+            -only-testing:HostSmokeUITests/HostSmokeUITests/testApplicationReplacementPreservesExactUnicodeBytes \
+            -only-testing:HostSmokeUITests/HostSmokeUITests/testMultilineModelReplacementPreservesExactUnicodeBytes \
+            -only-testing:HostSmokeUITests/HostSmokeUITests/testMultilineTypingPreservesNewlineThroughChangeEvent \
+            -only-testing:HostSmokeUITests/HostSmokeUITests/testNewRouteCannotRetainUnacknowledgedSecureEdit \
+            -only-testing:HostSmokeUITests/HostSmokeUITests/testSecureEditingExactActionAndNativeDisabledState \
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            EXCLUDED_SOURCE_FILE_NAMES=fake_app.c "OTHER_LDFLAGS=\$(inherited) $archive" \
+            2>&1 | tee "$RUNNER_TEMP/ios-package-candidate-evidence/simulator-real.log"
+          result=${PIPESTATUS[0]}
+          set -e
+          if test "$result" -ne 0; then
+            xcrun simctl spawn "$device" log show --last 3m --style compact --predicate 'process == "HostSmoke"' \
+              > "$RUNNER_TEMP/ios-package-candidate-evidence/app-after-failure.log" 2>&1 || true
+          fi
+          exit "$result"
       - name: Retain exact candidate evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
