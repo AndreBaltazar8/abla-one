@@ -6,6 +6,51 @@ on:
 permissions:
   contents: read
 jobs:
+  package-consumer:
+    name: Fresh public iOS package subpaths
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      # Intentionally no repository checkout: relative workspace siblings must
+      # not accidentally satisfy a broken public-package import.
+      - uses: AndreBaltazar8/setup-abla@13c3fdc74b5961bf2d281b25c47e4b9ace18d11e
+        with:
+          version: 0.2.47
+      - name: Lock and compile exact public package modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ios-package-consumer"
+          cd "$RUNNER_TEMP/ios-package-consumer"
+          cat > abla.toml <<'EOF'
+          name = "ios-package-consumer"
+          version = "0.0.1"
+          entry = "main.ab"
+          EOF
+          cat > main.ab <<'EOF'
+          compile fun mobileSource(): ImportSource = gitImportSource(
+              "abla-mobile", "https://github.com/AndreBaltazar8/abla-mobile.git",
+              "rev", "65555622d38f8db8a614b512126db07da0dddc9e")
+          compile fun oneSource(): ImportSource = gitImportSource(
+              "abla-one", "https://github.com/AndreBaltazar8/abla-one.git",
+              "rev", "3ee4793b0ceccf96c4cdd48d7159eeec340c2a57")
+          import importSubpath(mobileSource(), "ios_runtime")
+          import importSubpath(mobileSource(), "ios_build")
+          import importSubpath(oneSource(), "backends/ios")
+          fun services(): OneServices = OneIosServices()
+          fun main: int = mobileIosApplicationProtocolVersion() - 1
+          EOF
+          ablac package update --project .
+          ablac build main.ab --emit object -o consumer.o --fast --no-cache
+          nm -gU consumer.o > symbols.txt
+          test "$(grep -c ' _abla_mobile_application_protocol_version$' symbols.txt)" = 1
+      - name: Retain consumer lock and object metadata
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fresh-ios-package-subpaths
+          path: ${{ runner.temp }}/ios-package-consumer
+          retention-days: 14
   mobile-contracts:
     runs-on: macos-26
     timeout-minutes: 25
