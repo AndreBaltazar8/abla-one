@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: AndreBaltazar8/abla-mobile
-          ref: e55d749ad4eb65789783fbafbde87a5fb0eab29b
+          ref: cb4ee962a507c36a9d84380228838dc713908e68
           path: abla-mobile
           persist-credentials: false
       - uses: AndreBaltazar8/setup-abla@13c3fdc74b5961bf2d281b25c47e4b9ace18d11e

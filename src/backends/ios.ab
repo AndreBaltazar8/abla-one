@@ -1,5 +1,6 @@
 import "android.ab"
 import "ios_tree.ab"
+import "../../../abla-mobile/src/ios_runtime.ab"
 
 // Static iOS application entry; export a caller-owned abla_mobile_run wrapper.
 // The mobile-owned C/Swift host supplies protocol v1, with no JNI or dlopen.

@@ -1,0 +1,9 @@
+// Requires the compiler release/candidate containing iOS target552.
+import "../../abla-mobile/src/ios_slices.ab"
+val accepted = #mobileBuildIosSlices(
+    "one-ios-fixture", "tests/ios_backend_exports.ab", "build/ios-real-app", true, false
+)
+fun main: int {
+    if (!accepted) return 1
+    0
+}
