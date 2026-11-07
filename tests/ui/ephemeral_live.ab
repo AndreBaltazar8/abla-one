@@ -1,0 +1,47 @@
+import "../port.ab"
+import "recovery_store.ab"
+import "../../src/one_kit.ab"
+
+class EphemeralBrowserApp(val services: OneServices,var picking: int=0,var reading: int=0,var content: string="",var file: OneFile=OneFile("","",0,"")) : OneApp {
+    fun discard(): void {services.cancelEphemeralFiles();picking=0;reading=0;content="";file=OneFile("","",0,"");return}
+    fun render(var ui: Ui): Node = column(style(),[
+        button(ui,"Choose private file","",ui.press{picking=services.pickEphemeralFile(["text/plain"],4096,900000)},style()),
+        button(ui,"Discard private file","",ui.press{discard()},style()),
+        text(if(content=="")"No private content" else content,style())])
+    fun receive(kind: string,value: string): void {
+        if(kind=="checkpoint")services.effect("live-checkpoint","{\"v\":1}")
+        else if(kind=="restore" || kind=="ephemeral-expired")discard()
+        else if(kind=="result"){
+            val response=oneResponse(value)
+            if(picking>0 && response.requestId==picking){picking=0;val files=response.files();if(files.size==1){file=files[0];reading=services.readFile(file,0,4096)}}
+            else if(reading>0 && response.requestId==reading){reading=0;if(response.status==200)content=base64Decode(response.bodyBase64);services.deleteFile(file)}
+        }
+        return
+    }
+}
+fun ephemeralBrowserFactory(request: HttpRequest,id: string): OneApp = EphemeralBrowserApp(oneLiveServices(id))
+fun ephemeralBrowserInspect(request: HttpRequest,id: string,proof: string): OneRecoveryResult {
+    if(request.queryParameter("kind")=="files-ephemeral"){
+        if(request.body!="" || request.header("x-one-name")!=""){proofDirectory().child("unexpected-private-inspect").writeText("1");return OneRecoveryResult(403)}
+        if(proofDirectory().child("hold-private-inspect").exists()){proofDirectory().child("private-inspect-pending").writeText("1");return OneRecoveryResult(202)}
+    }
+    proofInspect(request,id,proof)
+}
+fun ephemeralBrowserSeed(request: HttpRequest): Map<string,string> {val out: Map<string,string> = Map();out.set("test-user",proofUser(request));out}
+fun ephemeralBrowserResumes(request: HttpRequest,stored: Map<string,string>): bool = stored.get("test-user")==proofUser(request) && proofUser(request)!=""
+fun ephemeralBrowserHandler(request: HttpRequest): HttpResponse = httpText("not found",404)
+fun main: int {
+    val store=OneLiveRecoveryStore(true,proofCreate,proofAttach,ephemeralBrowserInspect,proofSave,proofFence,proofEnd,proofInbox,proofUpload,proofRead,proofDelete)
+    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",testPort()),ephemeralBrowserHandler,oneLivePaths(["/private"]),ephemeralBrowserFactory,oneDefaultTheme(),OneLiveOptions("Ephemeral proof","en","#fff","/icons","src/backends/web/host.js",""),OneLiveStorage(ephemeralBrowserSeed,resumes=ephemeralBrowserResumes),recovery=store)
+    if(!server.listening())return 1
+    testPublishPort(server.listener.localPort())
+    while(!server.stopped){
+        server.step()
+        if(proofDirectory().child("expire-private").exists()){
+            proofDirectory().child("expire-private").remove()
+            for(session in server.sessions)if(session.queue.ephemeralDeadline>0)session.queue.expireEphemeral(session.queue.ephemeralDeadline)
+        }
+        proofUploadPump(server)
+    }
+    0
+}
