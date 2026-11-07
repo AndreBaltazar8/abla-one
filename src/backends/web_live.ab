@@ -626,7 +626,12 @@ fun OneLiveServer.ephemeralUpload(request: HttpRequest): HttpResponse {
     val state=oneRecoverySessions.get(sessions[index].id)
     if(state!=null){
         val proof=request.header("x-one-proof")
-        if(!state.ready || state.ending || state.status!=200 || picker.epoch!=state.epoch || !oneRecoveryIdentifier(proof) || !oneEphemeralProofEqual(proof,state.proof))return httpText("Ephemeral session unavailable",403)
+        if(!state.ready || state.ending || picker.epoch!=state.epoch || !oneRecoveryIdentifier(proof) || !oneEphemeralProofEqual(proof,state.proof))return httpText("Ephemeral session unavailable",403)
+        // An asynchronous fence is not a refusal. Keep this bounded upload in
+        // the existing volatile pending array until authority settles, then
+        // repeat every identity/proof/epoch and current-source check.
+        if(state.status==202)return httpText("Ephemeral authorization pending",202)
+        if(state.status!=200)return httpText("Ephemeral session unavailable",403)
         val checked=recovery.inspect(oneEphemeralInspectRequest(request),sessions[index].id,proof)
         if(checked.status!=200)return httpText("Ephemeral authorization pending",checked.status)
         if(checked.epoch!=state.epoch)return httpText("Ephemeral session changed",409)
