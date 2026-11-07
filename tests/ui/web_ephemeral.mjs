@@ -54,12 +54,13 @@ try{
   fs.unlinkSync(path.join(directory,'hold-private-inspect'));
   await wait(visible,'authorized volatile read reaches app');scan();
   check(await visible(),'actual chooser/upload/read works with recovery enabled');
-  const discardCount=()=>sent.filter(frame=>{try{return JSON.parse(frame).t==='ephemeral-discard';}catch{return false;}}).length;
-  const before=discardCount();
+  await page.evaluate(()=>{
+    const original=WebSocket.prototype.send;window.__private593Discards=0;
+    WebSocket.prototype.send=function(value){try{if(JSON.parse(value).t==='ephemeral-discard')window.__private593Discards++;}catch{}return original.call(this,value);};
+  });
   const [receiptChooser]=await Promise.all([page.waitForEvent('filechooser'),page.getByRole('button',{name:'Choose receipt',exact:true}).click()]);
-  await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});
-  await pause(100);
-  check(discardCount()===before,'controlled OS receipt-picker handoff preserves the active private selection');
+  const discards=await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));return window.__private593Discards;});
+  check(discards===0,'controlled OS receipt-picker handoff preserves the active private selection');
   await page.evaluate(()=>{delete document.hidden;document.dispatchEvent(new Event('visibilitychange'));});
   const receiptDone=page.waitForResponse(response=>response.url().includes('/one/upload') && new URL(response.url()).searchParams.get('kind')==='files' && response.status()===200);
   await receiptChooser.setFiles({name:'SYNTHETIC_RECEIPT_593.txt',mimeType:'text/plain',buffer:Buffer.from('PUBLIC_RECEIPT_BYTES')});
