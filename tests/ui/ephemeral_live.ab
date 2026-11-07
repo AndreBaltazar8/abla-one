@@ -29,10 +29,11 @@ fun ephemeralBrowserInspect(request: HttpRequest,id: string,proof: string): OneR
 }
 fun ephemeralBrowserSeed(request: HttpRequest): Map<string,string> {val out: Map<string,string> = Map();out.set("test-user",proofUser(request));out}
 fun ephemeralBrowserResumes(request: HttpRequest,stored: Map<string,string>): bool = stored.get("test-user")==proofUser(request) && proofUser(request)!=""
+fun ephemeralBrowserCookies(request: HttpRequest,key: string,value: string): array<string> = []
 fun ephemeralBrowserHandler(request: HttpRequest): HttpResponse = httpText("not found",404)
 fun main: int {
     val store=OneLiveRecoveryStore(true,proofCreate,proofAttach,ephemeralBrowserInspect,proofSave,proofFence,proofEnd,proofInbox,proofUpload,proofRead,proofDelete)
-    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",testPort()),ephemeralBrowserHandler,oneLivePaths(["/private"]),ephemeralBrowserFactory,oneDefaultTheme(),OneLiveOptions("Ephemeral proof","en","#fff","/icons","src/backends/web/host.js",""),OneLiveStorage(ephemeralBrowserSeed,resumes=ephemeralBrowserResumes),recovery=store)
+    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",testPort()),ephemeralBrowserHandler,oneLivePaths(["/private"]),ephemeralBrowserFactory,oneDefaultTheme(),OneLiveOptions("Ephemeral proof","en","#fff","/icons","src/backends/web/host.js",""),OneLiveStorage(ephemeralBrowserSeed,ephemeralBrowserCookies,ephemeralBrowserResumes),recovery=store)
     if(!server.listening())return 1
     testPublishPort(server.listener.localPort())
     while(!server.stopped){
