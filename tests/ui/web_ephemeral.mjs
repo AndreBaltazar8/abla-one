@@ -59,6 +59,10 @@ try{
   fs.writeFileSync(path.join(directory,'expire-private'),'1');
   await wait(async()=>!(await visible()),'server-enforced expiry clears app');scan();
   await choose();await wait(visible,'third private read');
+  await page.reload();await page.waitForSelector('html[data-one-ready]');
+  await wait(async()=>!(await visible()),'browser navigation discards private flow');scan();
+  check(!(await visible()),'reload/disconnect clears private state even while its node remains alive');
+  await choose();await wait(visible,'fourth private read');
   await kill();scan();await start();
   await page.reload();await page.waitForSelector('html[data-one-ready]');await page.getByRole('button',{name:'Choose private file',exact:true}).waitFor();
   await wait(async()=>!(await visible()),'node loss cannot reconstruct private bytes');scan();
