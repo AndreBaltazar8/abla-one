@@ -1,0 +1,17 @@
+import "abla/test"
+import "../../src/backends/web_session.ab"
+
+// Keep this import boundary independent of web_live.ab. Consumers such as
+// app-state/recovery tests do not instantiate the live HTTP server.
+fun main: int {
+    val service=oneLiveServices("private-isolation593")
+    expect(service.pickEphemeralFile(["text/plain"],64,900000)==0,"non-browser standalone adapter refuses private upload")
+    val queue=oneLiveQueueList[oneLiveQueueIndex("private-isolation593")]
+    queue.browser=true
+    val id=service.pickEphemeralFile(["text/plain"],64,900000)
+    val picker=queue.ephemeralPickers.get(id)
+    expect(picker!=null && picker.nonce.size==32,"standalone session module owns its private nonce dependency")
+    service.cancelEphemeralFiles()
+    expect(queue.ephemeralPickers.keys().size==0 && queue.ephemeralOutbox.size==0,"standalone cancellation drops private chooser")
+    testsPassed()
+}

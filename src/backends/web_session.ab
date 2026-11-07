@@ -1,5 +1,6 @@
 import "abla/json"
 import "abla/crypto"
+import "abla/sys/linux/random"
 import "abla/process/time"
 import "../one.ab"
 import "web_document.ab"
@@ -377,7 +378,8 @@ class OneLiveServices(val session: string) : OneServices {
         if(q.ephemeralPickers.keys().size>0 || q.ephemeralFiles.keys().size>0)return complete(id,409,"","Ephemeral picker already active")
         val types: array<Json> = []
         for(item in mime){if(item.size>128)return complete(id,400,"","Invalid ephemeral picker type");types.append(jsonString(item))}
-        val nonce=oneLiveSessionId()
+        val nonce=hexEncode(secureRandomBytes(16).bytes)
+        if(nonce.size!=32)return complete(id,503,"","Ephemeral picker randomness unavailable")
         val recovery=oneRecoverySessions.get(session)
         q.ephemeralDeadline=oneLiveNow()+lifetimeMilliseconds
         q.ephemeralRequests.set(id,q.ephemeralDeadline)
