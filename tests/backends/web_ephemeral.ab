@@ -31,7 +31,7 @@ fun main: int {
     val state=OneRecoveryState(id,proof,"test-owner",store)
     state.ready=true;state.epoch=7
     oneRecoverySessions.set(id,state)
-    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),{request->httpText("ok")},{request->false},ephemeralTestFactory,oneDefaultTheme(),OneLiveOptions("ephemeral test","en","#fff","/icons","src/backends/web/host.js",""),recovery=store)
+    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),{request: HttpRequest->httpText("ok")},{request: HttpRequest->false},ephemeralTestFactory,oneDefaultTheme(),OneLiveOptions("ephemeral test","en","#fff","/icons","src/backends/web/host.js",""),recovery=store)
     server.sessions.append(oneSession(id,EphemeralTestApp(),q))
     server.sessions[0].render(oneDefaultTheme(),"/icons")
     val pick=service.pickEphemeralFile(["application/pdf"],64,900000)

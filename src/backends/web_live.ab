@@ -614,10 +614,9 @@ fun OneLiveServer.ephemeralUpload(request: HttpRequest): HttpResponse {
     val index=findSession(request.queryParameter("s"))
     if(index<0)return httpText("Ephemeral session unavailable",404)
     val session=sessions[index]
-    val q=session.queue
-    q.expireEphemeral(oneLiveNow())
+    sessions[index].queue.expireEphemeral(oneLiveNow())
     val id=oneParseInt(request.queryParameter("id"),0)
-    val picker=q.ephemeralPickers.get(id)
+    val picker=sessions[index].queue.ephemeralPickers.get(id)
     if(id<1 || picker==null)return httpText("Ephemeral picker unavailable",410)
     if(!oneEphemeralProofEqual(request.queryParameter("nonce"),picker.nonce))return httpText("Ephemeral picker changed",403)
     val state=oneRecoverySessions.get(session.id)
@@ -630,8 +629,8 @@ fun OneLiveServer.ephemeralUpload(request: HttpRequest): HttpResponse {
     }else if(recovery.enabled && session.recoveryEligible)return httpText("Ephemeral session unavailable",503)
     if(request.queryParameter("kind")=="ephemeral-cancel"){
         if(request.body.size!=0)return httpText("Invalid ephemeral cancellation",400)
-        q.ephemeralPickers.remove(id)
-        q.complete(oneResponsePayload(id,204,"[]",""))
+        sessions[index].queue.ephemeralPickers.remove(id)
+        sessions[index].queue.complete(oneResponsePayload(id,204,"[]",""))
         return HttpResponse(204,[HttpHeader("Cache-Control","no-store")],"")
     }
     if(request.queryParameter("picked")!="" || request.header("x-one-last")!="1" || request.body.size==0 || request.body.size>picker.maximumBytes)return httpText("Invalid ephemeral file",413)
@@ -639,9 +638,9 @@ fun OneLiveServer.ephemeralUpload(request: HttpRequest): HttpResponse {
     if(name.size>1024)return httpText("Invalid ephemeral file name",400)
     val handle="ephemeral-file-${oneLiveSessionId()}"
     val info=jsonObject(["handle","name","size","mime"],[jsonString(handle),jsonString(name),jsonInteger(request.body.size),jsonString(request.header("content-type"))])
-    q.addFile(handle,request.body,jsonStringify(info));q.ephemeralFiles.set(handle,picker.expires)
-    q.ephemeralPickers.remove(id)
-    q.complete(oneResponsePayload(id,200,jsonStringify(jsonArray([info])),""))
+    sessions[index].queue.addFile(handle,request.body,jsonStringify(info));sessions[index].queue.ephemeralFiles.set(handle,picker.expires)
+    sessions[index].queue.ephemeralPickers.remove(id)
+    sessions[index].queue.complete(oneResponsePayload(id,200,jsonStringify(jsonArray([info])),""))
     HttpResponse(200,[HttpHeader("Cache-Control","no-store"),HttpHeader("Content-Type","text/plain")],handle)
 }
 
@@ -821,8 +820,7 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     if (!parsed.succeeded) return
     val m = parsed.value
     if(m.getString("t")=="pick-error" && oneCheckpointCounter(m.get("id"))){
-        val q=sessions[index].queue
-        if(q.ephemeralPickers.has(m.getInt("id"))){q.ephemeralPickers.remove(m.getInt("id"));q.ephemeralOutbox.clear()}
+        if(sessions[index].queue.ephemeralPickers.has(m.getInt("id"))){sessions[index].queue.ephemeralPickers.remove(m.getInt("id"));sessions[index].queue.ephemeralOutbox.clear()}
     }
     val persisted = oneRecoverySessions.get(sessions[index].id)
     val before = sessions[index].eventFrontier
