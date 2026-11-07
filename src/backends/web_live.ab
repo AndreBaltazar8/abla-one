@@ -312,6 +312,11 @@ fun OneLiveServer.closeSlot(slot: int): void {
     slots[slot].generation = slots[slot].generation + 1
     slots[slot].appSocket = false
     val session = findSession(slots[slot].session)
+    if(session>=0 && sessions[session].slot==slot && sessions[session].queue.ephemeralDeadline>0){
+        sessions[session].queue.clearEphemeral()
+        sessions[session].app.receive("ephemeral-expired","")
+        sessions[session].changed=true
+    }
     if (session >= 0 && sessions[session].slot == slot) sessions[session].slot = -1
     slots[slot].descriptor = -1
     slots[slot].input = ""
@@ -818,6 +823,14 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     val parsed = jsonParse(payload)
     if (!parsed.succeeded) return
     val m = parsed.value
+    if(m.getString("t")=="ephemeral-discard"){
+        if(sessions[index].queue.ephemeralDeadline>0){
+            sessions[index].queue.clearEphemeral()
+            sessions[index].app.receive("ephemeral-expired","")
+            sessions[index].changed=true
+        }
+        return
+    }
     if(m.getString("t")=="pick-error" && oneCheckpointCounter(m.get("id"))){
         if(sessions[index].queue.ephemeralPickers.has(m.getInt("id"))){sessions[index].queue.ephemeralPickers.remove(m.getInt("id"));sessions[index].queue.ephemeralOutbox.clear()}
     }

@@ -748,7 +748,21 @@
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(fallback);
     else fallback();
   };
+  let ephemeralActive = false;
+  let ephemeralChoosing = false;
+  const discardEphemeral = () => {
+    if (!ephemeralActive) return;
+    ephemeralActive = false;
+    send({t: 'ephemeral-discard'});
+  };
+  document.addEventListener('visibilitychange', () => {
+    // An OS chooser is the expected handoff. Leaving the app afterwards drops
+    // the opt-in flow; ordinary pickers and ordinary recovery are unchanged.
+    if (document.hidden && !ephemeralChoosing) discardEphemeral();
+  });
+  addEventListener('pagehide', discardEphemeral);
   const pick = (message) => {
+    if (message.kind === 'files-ephemeral') { ephemeralActive = true; ephemeralChoosing = true; }
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = (message.accept || []).join(',');
@@ -756,7 +770,13 @@
     input.style.display = 'none';
     document.body.appendChild(input);
     let done = false;
-    const finish = () => { done = true; input.remove(); };
+    const finish = () => {
+      done = true; input.remove();
+      if (message.kind === 'files-ephemeral') {
+        ephemeralChoosing = false;
+        if (document.hidden) discardEphemeral();
+      }
+    };
     const cancel = async () => {
       try {
         const response = await upload(`id=${message.id}&kind=${message.kind === 'files-ephemeral' ? 'ephemeral-cancel' : 'cancel'}${message.kind === 'files' ? '&files=1' : ''}${message.kind === 'files-ephemeral' ? '&nonce=' + encodeURIComponent(message.nonce) : ''}`, '');
