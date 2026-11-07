@@ -7,6 +7,7 @@ class EphemeralBrowserApp(val services: OneServices,var picking: int=0,var readi
     fun render(var ui: Ui): Node = column(style(),[
         button(ui,"Choose private file","",ui.press{picking=services.pickEphemeralFile(["text/plain"],4096,900000)},style()),
         button(ui,"Discard private file","",ui.press{discard()},style()),
+        button(ui,"Choose receipt","",ui.press{services.pickFiles(["text/plain"],false);return},style()),
         text(if(content=="")"No private content" else content,style())])
     fun receive(kind: string,value: string): void {
         if(kind=="checkpoint")services.effect("live-checkpoint","{\"v\":1}")
