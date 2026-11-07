@@ -426,7 +426,23 @@ class OneLiveServices(val session: string) : OneServices {
     fun trackEphemeralRequest(requestId: int): bool {
         val q=oneLiveQueueList[oneLiveQueueIndex(session)]
         q.expireEphemeral(oneLiveNow())
-        if(requestId<1 || requestId>q.nextId || q.ephemeralDeadline<=oneLiveNow() || q.ephemeralRequests.keys().size>=128)return false
+        if(requestId<1 || requestId>q.nextId)return false
+        if(q.ephemeralDeadline<=oneLiveNow() || q.ephemeralRequests.keys().size>=128){
+            // Classification occurs synchronously after send(), before pump.
+            // A deadline/capacity refusal must remove that queued request,
+            // rather than let it fall back to ordinary dispatch or completion.
+            q.ephemeralRequests.set(requestId,0)
+            val pending: array<OneLiveRequest> = []
+            for(item in q.requests)if(item.id!=requestId)pending.append(item)
+            q.requests.clear();for(item in pending)q.requests.append(item)
+            val completions: array<string> = []
+            for(payload in q.completions){val parsed=jsonParse(payload);if(!parsed.succeeded || parsed.value.getInt("requestId")!=requestId)completions.append(payload)}
+            q.completions.clear();for(payload in completions)q.completions.append(payload)
+            q.requestContexts.remove(requestId)
+            q.ephemeralRequests.remove(requestId)
+            q.ephemeralCancelled.set(requestId,true)
+            return false
+        }
         q.ephemeralRequests.set(requestId,q.ephemeralDeadline)
         true
     }

@@ -62,6 +62,10 @@ fun main: int {
     expect(q.fileBytes.keys().size==0 && q.fileInfo.keys().size==0 && q.ephemeralPickers.keys().size==0 && q.completions.size==0 && q.requests.size==0,"cancel discards private buffers, pending requests and late completions")
     val expired=service.readFile(picked[0],0,64)
     expect(oneResponse(q.takeCompletions()[0]).status==404 && ephemeralDurableFileCalls==0,"forgotten private handle never falls back to durable storage")
+    val tooLate=service.send(oneRequest("POST","https://synthetic.invalid/private").json(jsonObject(["secret"],[jsonString("PRIVATE_REFUSED_RPC_SENTINEL")])))
+    expect(!service.trackEphemeralRequest(tooLate) && q.requests.size==0,"classification after cancellation refuses and removes the queued private RPC")
+    q.complete(oneResponsePayload(tooLate,200,"PRIVATE_REFUSED_REPLY_SENTINEL",""))
+    expect(q.completions.size==0,"a refused private RPC cannot later deliver its response")
     val second=service.pickEphemeralFile(["text/csv"],64,900000)
     val secondPick=q.ephemeralPickers.get(second)
     if(secondPick!=null){
