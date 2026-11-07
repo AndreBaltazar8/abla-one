@@ -613,20 +613,19 @@ fun OneLiveServer.ephemeralUpload(request: HttpRequest): HttpResponse {
     if(request.queryParameter("kind")!="files-ephemeral" && request.queryParameter("kind")!="ephemeral-cancel")return httpText("Invalid ephemeral operation",400)
     val index=findSession(request.queryParameter("s"))
     if(index<0)return httpText("Ephemeral session unavailable",404)
-    val session=sessions[index]
     sessions[index].queue.expireEphemeral(oneLiveNow())
     val id=oneParseInt(request.queryParameter("id"),0)
     val picker=sessions[index].queue.ephemeralPickers.get(id)
     if(id<1 || picker==null)return httpText("Ephemeral picker unavailable",410)
     if(!oneEphemeralProofEqual(request.queryParameter("nonce"),picker.nonce))return httpText("Ephemeral picker changed",403)
-    val state=oneRecoverySessions.get(session.id)
+    val state=oneRecoverySessions.get(sessions[index].id)
     if(state!=null){
         val proof=request.header("x-one-proof")
         if(!state.ready || state.ending || state.status!=200 || picker.epoch!=state.epoch || !oneRecoveryIdentifier(proof) || !oneEphemeralProofEqual(proof,state.proof))return httpText("Ephemeral session unavailable",403)
-        val checked=recovery.inspect(oneEphemeralInspectRequest(request),session.id,proof)
+        val checked=recovery.inspect(oneEphemeralInspectRequest(request),sessions[index].id,proof)
         if(checked.status!=200)return httpText("Ephemeral authorization pending",checked.status)
         if(checked.epoch!=state.epoch)return httpText("Ephemeral session changed",409)
-    }else if(recovery.enabled && session.recoveryEligible)return httpText("Ephemeral session unavailable",503)
+    }else if(recovery.enabled && sessions[index].recoveryEligible)return httpText("Ephemeral session unavailable",503)
     if(request.queryParameter("kind")=="ephemeral-cancel"){
         if(request.body.size!=0)return httpText("Invalid ephemeral cancellation",400)
         sessions[index].queue.ephemeralPickers.remove(id)
