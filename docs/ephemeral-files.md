@@ -40,3 +40,17 @@ and adapter calls, including cancellation, pending inspection and restore.
 No ephemeral content is restored after checkpoint hydration. Existing ordinary
 picker/file metadata is restored through its original mechanism. Releasing an
 Android picked URI handle never deletes the user's original file.
+
+The live web flow also discards on its owner socket disconnect and browser
+pagehide/visibility loss. The expected OS chooser handoff is exempt until that
+chooser closes. An interrupted upload is refused rather than recovered on a
+different node; the application asks the person to choose the file again.
+
+Validation on the NovaKind 299 backport lineage, released compiler 0.2.48:
+`make test test-remote` passed all 45 default suites and the complete remote
+contract/canonical/indexed-generation checks. The separate actual-browser
+fixture `tests/ui/web_ephemeral.mjs` passed 12 checks against a real disk-backed
+synthetic recovery store: held asynchronous inspection, upload/read, entire
+store scans, cancellation, expiry, browser reload and process loss/resume.
+The fixture is built from `tests/ui/ephemeral_live.ab`. Android app lifecycle
+acceptance remains the consuming application's responsibility.
