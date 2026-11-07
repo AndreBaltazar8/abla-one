@@ -95,8 +95,8 @@ class OneLiveQueue(
             if(pick!=null && now>=pick.expires)ephemeralPickers.remove(id)
         }
         for(handle in ephemeralFiles.keys()){
-            val until=ephemeralFiles.get(handle)
-            if(until!=null && now>=until){removeFile(handle);ephemeralFiles.remove(handle)}
+            val expiresAt=ephemeralFiles.get(handle)
+            if(expiresAt!=null && now>=expiresAt){removeFile(handle);ephemeralFiles.remove(handle)}
         }
         if(ephemeralPickers.keys().size==0)ephemeralOutbox.clear()
         return
