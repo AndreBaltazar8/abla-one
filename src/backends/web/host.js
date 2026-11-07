@@ -762,7 +762,11 @@
   });
   addEventListener('pagehide', discardEphemeral);
   const pick = (message) => {
-    if (message.kind === 'files-ephemeral') { ephemeralActive = true; ephemeralChoosing = true; }
+    // A selected claim still needs its ordinary receipt. That OS chooser is
+    // also an expected handoff while this opt-in private flow remains active.
+    const privateHandoff = message.kind === 'files-ephemeral' || ephemeralActive;
+    if (message.kind === 'files-ephemeral') ephemeralActive = true;
+    if (privateHandoff) ephemeralChoosing = true;
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = (message.accept || []).join(',');
@@ -772,7 +776,7 @@
     let done = false;
     const finish = () => {
       done = true; input.remove();
-      if (message.kind === 'files-ephemeral') {
+      if (privateHandoff) {
         ephemeralChoosing = false;
         if (document.hidden) discardEphemeral();
       }
