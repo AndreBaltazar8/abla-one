@@ -72,6 +72,7 @@ class OneRecoveryState(
     var status: int = 200,
     val consumed: array<string> = [],
     var inboxAt: int = -1000,
+    var awaitingSince: int = -1,
     var active: bool = true,
     val pickers: Map<int, string> = Map(),
     val files: Map<int, OneRecoveryFileJob> = Map(),

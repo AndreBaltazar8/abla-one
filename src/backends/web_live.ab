@@ -1123,6 +1123,12 @@ fun OneLiveServer.nextTimeout(timersReady: (OneLiveSession) -> bool = oneLiveAll
             val pending = if (recoveryState.batch.retryAt > now) recoveryState.batch.retryAt - now else 10
             if (pending < timeout) timeout = pending
         }
+        if (recoveryState != null && recoveryState.ready && session.queue.requestContexts.keys().size > 0) {
+            val interval = oneRecoveryInboxInterval(false, if (recoveryState.awaitingSince < 0) 0 else now - recoveryState.awaitingSince)
+            val since = now - recoveryState.inboxAt
+            val due = if (since >= interval) 0 else interval - since
+            if (due < timeout) timeout = due
+        }
         if (timersReady(session)) {
             val wait = session.queue.nextTimer(now)
             if (wait < timeout) timeout = wait

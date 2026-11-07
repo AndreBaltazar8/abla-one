@@ -246,7 +246,9 @@ fun OneLiveServer.recoverySettle(index: int): void {
     val requested: array<int> = []
     if (hydration) for (id in state.hydrationFiles.keys()) requested.append(id)
     if (hydration && requested.size == 0) return
-    val interval = if (state.files.keys().size > 0 || state.pickers.keys().size > 0) 100 else oneRecoveryBatchMilliseconds
+    if (sessions[index].queue.requestContexts.keys().size == 0) state.awaitingSince = -1
+    else if (state.awaitingSince < 0) state.awaitingSince = oneLiveNow()
+    val interval = oneRecoveryInboxInterval(state.files.keys().size > 0 || state.pickers.keys().size > 0, if (state.awaitingSince < 0) -1 else oneLiveNow() - state.awaitingSince)
     if ((state.inboxPending || oneLiveNow() - state.inboxAt >= interval) && state.consumed.size < 64) {
         if (!state.inboxPending) state.inboxAt = oneLiveNow()
         val inbox = recovery.inbox(state.id, recoveryOwner, state.epoch, requested)

@@ -7,6 +7,16 @@ val oneRecoveryFilesLimit = 67108864
 val oneRecoveryPickerLimit = 4
 val oneRecoveryIdleMilliseconds = 1800000
 val oneRecoveryBatchMilliseconds = 1000
+// While the app waits on a request, its result lands in the inbox: look often
+// then, so a navigation that loads data doesn't wait for the idle pace.
+// A request that runs for long (a large intake) falls back to the transfer pace.
+val oneRecoveryAwaitMilliseconds = 10
+val oneRecoveryAwaitFastMilliseconds = 2000
+
+// How long the inbox may go unread. `awaitedFor` is how long the app has been waiting on a request, or -1.
+fun oneRecoveryInboxInterval(transfers: bool, awaitedFor: int): int =
+    if (awaitedFor >= 0 && awaitedFor < oneRecoveryAwaitFastMilliseconds) oneRecoveryAwaitMilliseconds
+    else if (transfers || awaitedFor >= 0) 100 else oneRecoveryBatchMilliseconds
 
 class OneRecoveryBatch(
     var pending: bool = false,

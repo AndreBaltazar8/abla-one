@@ -1,0 +1,14 @@
+import "abla/test"
+import "../../src/backends/web_recovery.ab"
+
+// A navigation that loads data waits for its result in the inbox: it must not wait for the idle pace.
+fun main: int {
+    expect(oneRecoveryInboxInterval(false, -1) == oneRecoveryBatchMilliseconds, "idle: the inbox is read at the idle pace")
+    expect(oneRecoveryInboxInterval(true, -1) == 100, "files or pickers moving: the transfer pace")
+    expect(oneRecoveryInboxInterval(false, 0) == oneRecoveryAwaitMilliseconds, "a request just sent: read at once and often")
+    expect(oneRecoveryInboxInterval(true, 500) == oneRecoveryAwaitMilliseconds, "waiting beats transfers")
+    expect(oneRecoveryAwaitMilliseconds <= 10, "the awaited pace stays within 10 ms")
+    expect(oneRecoveryInboxInterval(false, oneRecoveryAwaitFastMilliseconds) == 100, "a long request falls back to the transfer pace")
+    expect(oneRecoveryInboxInterval(false, 60000) < oneRecoveryBatchMilliseconds, "and is never slower than the transfer pace while waited on")
+    testsPassed()
+}
