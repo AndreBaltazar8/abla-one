@@ -168,6 +168,7 @@ try {
   for (const [control, expected] of [['Enviar', 'Enviado: agora'], ['Guardar', 'Enviado: guardado:agora']]) {
     const page = await open();
     // Nothing yet at this control: no press number, or aria-disabled. Typed and pressed in one go.
+    if (control === 'Guardar') check(await page.getByRole('button', {name: control}).evaluate((b) => b.disabled && b.getAttribute('aria-disabled') === 'true'), 'a disabled control is natively disabled before any typing');
     await typeNow(page, 'agora', control);
     await page.getByText(expected).waitFor({timeout: 5000});
     check(true, `a press right after typing reaches "${control}"`);
