@@ -9,7 +9,9 @@ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'one-private593-'));
 const executable=fs.realpathSync('build/ephemeral-live');
 const secret='SYNTHETIC_PRIVATE_BANK_BYTES_593';
 const filename='SYNTHETIC_PRIVATE_FILE_593.txt';
-let child,browser,port=0,sequence=0;
+let child,browser,page,port=0,sequence=0;
+const frames=[];
+console.log(`synthetic evidence ${directory}`);
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const wait=async(test,label)=>{const end=Date.now()+15000;while(Date.now()<end){if(await test())return;await pause(30);}throw new Error(label);};
 let checks=0;
@@ -36,9 +38,10 @@ try{
   const context=await browser.newContext({extraHTTPHeaders:{'X-Test-User':'alice'}});
   const base=`http://127.0.0.1:${port}`;
   await context.addCookies([{name:'test-user',value:'alice',url:base}]);
-  const page=await context.newPage();
+  page=await context.newPage();
+  page.on('websocket',socket=>socket.on('framereceived',event=>frames.push(event.payload)));
   await page.goto(`${base}/private`);
-  const choose=async()=>{const event=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Choose private file',exact:true}).click();const chooser=await event;await chooser.setFiles({name:filename,mimeType:'text/plain',buffer:Buffer.from(secret)});};
+  const choose=async()=>{const [chooser]=await Promise.all([page.waitForEvent('filechooser'),page.getByRole('button',{name:'Choose private file',exact:true}).click()]);await chooser.setFiles({name:filename,mimeType:'text/plain',buffer:Buffer.from(secret)});};
   const visible=()=>page.getByText(secret,{exact:true}).isVisible();
   fs.writeFileSync(path.join(directory,'hold-private-inspect'),'1');
   await choose();
@@ -59,4 +62,8 @@ try{
   check(!(await visible()),'fresh process and resumed browser do not restore private file or rows');
   check((await page.evaluate(()=>Object.keys(localStorage).length))===0,'browser localStorage receives no private state');
   console.log(`PASS ephemeral browser ${checks} checks; synthetic evidence ${directory}`);
+}catch(error){
+  fs.writeFileSync(path.join(directory,'failure-frames.json'),JSON.stringify(frames));
+  if(page){fs.writeFileSync(path.join(directory,'failure.html'),await page.content());await page.screenshot({path:path.join(directory,'failure.png')});}
+  throw error;
 }finally{await browser?.close();await kill();}
