@@ -171,6 +171,9 @@ fun oneCheckpointSeed(var queue: OneLiveQueue, value: Json): void {
 // Apply transport metadata after the fresh app has hydrated and accepted its
 // whitelisted draft. Do not overwrite credentials changed during hydration.
 fun oneCheckpointRestore(var session: OneLiveSession, value: Json): void {
+    // An attached/rebuilt app never inherits another process/epoch's private
+    // picker or temporary file bytes. Ordinary recoverable files are separate.
+    session.queue.clearEphemeral()
     session.maps.clear()
     for (saved in value.get("maps").values) {
         val map = OneEventMap(Map(), Map(), Map(), Map(), Map(), saved.get("screen").asInt())

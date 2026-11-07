@@ -36,6 +36,8 @@ class OneLiveRequest(val id: int, val request: OneRequest, val operation: string
 class OneLiveTimer(val id: int, val due: int)
 
 // A session's platform state, shared between the session and its services.
+class OneEphemeralPicker(val request: int, val maximumBytes: int, val expires: int, val nonce: string, val epoch: int)
+
 class OneLiveQueue(
     var nextId: int,
     val requests: array<OneLiveRequest>,
@@ -58,8 +60,47 @@ class OneLiveQueue(
     var eventOrdinal: int = 0,
     val requestContexts: Map<int, string> = Map(),
     // Text to copy, for a window with no page to do it (the desktop).
-    val copies: array<string> = []
+    val copies: array<string> = [],
+    // These values never enter recovery checkpoints, files or inboxes.
+    val ephemeralPickers: Map<int, OneEphemeralPicker> = Map(),
+    val ephemeralFiles: Map<string, int> = Map(),
+    val ephemeralOutbox: array<string> = [],
+    val ephemeralRequests: Map<int, int> = Map(),
+    val ephemeralCancelled: Map<int, bool> = Map(),
+    var ephemeralDeadline: int = 0,
+    var ephemeralExpired: bool = false
 ) {
+    fun clearEphemeral(): void {
+        for(id in ephemeralRequests.keys())ephemeralCancelled.set(id,true)
+        val kept: array<string> = []
+        for(payload in completions){
+            val parsed=jsonParse(payload)
+            if(!parsed.succeeded || !ephemeralRequests.has(parsed.value.getInt("requestId")))kept.append(payload)
+        }
+        completions.clear();for(payload in kept)completions.append(payload)
+        val pending: array<OneLiveRequest> = []
+        for(item in requests)if(!ephemeralRequests.has(item.id))pending.append(item)
+        requests.clear();for(item in pending)requests.append(item)
+        for(id in ephemeralRequests.keys())requestContexts.remove(id)
+        ephemeralRequests.clear();ephemeralDeadline=0
+        ephemeralPickers.clear();ephemeralOutbox.clear()
+        for(handle in ephemeralFiles.keys())removeFile(handle)
+        ephemeralFiles.clear()
+        return
+    }
+    fun expireEphemeral(now: int): void {
+        if(ephemeralDeadline>0 && now>=ephemeralDeadline){clearEphemeral();ephemeralExpired=true}
+        for(id in ephemeralPickers.keys()){
+            val pick=ephemeralPickers.get(id)
+            if(pick!=null && now>=pick.expires)ephemeralPickers.remove(id)
+        }
+        for(handle in ephemeralFiles.keys()){
+            val until=ephemeralFiles.get(handle)
+            if(until!=null && now>=until){removeFile(handle);ephemeralFiles.remove(handle)}
+        }
+        if(ephemeralPickers.keys().size==0)ephemeralOutbox.clear()
+        return
+    }
     fun takeCopies(): array<string> {
         val out: array<string> = []
         for (item in copies) out.append(item)
@@ -74,7 +115,10 @@ class OneLiveQueue(
     }
     fun takeCompletions(): array<string> {
         val out: array<string> = []
-        for (item in completions) out.append(item)
+        for (item in completions) {
+            if(ephemeralRequests.keys().size>0){val parsed=jsonParse(item);if(parsed.succeeded)ephemeralRequests.remove(parsed.value.getInt("requestId"))}
+            out.append(item)
+        }
         completions.clear()
         out
     }
@@ -85,6 +129,7 @@ class OneLiveQueue(
         out
     }
     fun complete(payload: string): void {
+        if(ephemeralCancelled.keys().size>0){val parsed=jsonParse(payload);if(parsed.succeeded && ephemeralCancelled.has(parsed.value.getInt("requestId")))return}
         completions.append(payload)
         return
     }
@@ -321,7 +366,39 @@ class OneLiveServices(val session: string) : OneServices {
         oneLiveQueueList[oneLiveQueueIndex(session)].toPage(jsonStringify(jsonObject(["t", "id", "kind", "accept", "multiple"], [jsonString("pick"), jsonInteger(id), jsonString("files"), jsonArray(types), jsonBoolean(multiple)])))
         id
     }
+    fun pickEphemeralFile(mime: array<string>, maximumBytes: int = 16777216, lifetimeMilliseconds: int = 900000): int {
+        // The Wasm adapter has no private upload transport yet: fail closed.
+        val q=oneLiveQueueList[oneLiveQueueIndex(session)]
+        if(session=="client" || !q.browser)return 0
+        val id=nextId()
+        if(maximumBytes<1 || maximumBytes>16777216 || lifetimeMilliseconds<1 || lifetimeMilliseconds>900000 || mime.size>64)return complete(id,400,"","Invalid ephemeral picker bounds")
+        q.expireEphemeral(oneLiveNow())
+        if(q.ephemeralCancelled.keys().size>=2048)return complete(id,429,"","Ephemeral request capacity unavailable")
+        if(q.ephemeralPickers.keys().size>0 || q.ephemeralFiles.keys().size>0)return complete(id,409,"","Ephemeral picker already active")
+        val types: array<Json> = []
+        for(item in mime){if(item.size>128)return complete(id,400,"","Invalid ephemeral picker type");types.append(jsonString(item))}
+        val nonce=oneLiveSessionId()
+        val recovery=oneRecoverySessions.get(session)
+        q.ephemeralDeadline=oneLiveNow()+lifetimeMilliseconds
+        q.ephemeralRequests.set(id,q.ephemeralDeadline)
+        q.ephemeralPickers.set(id,OneEphemeralPicker(id,maximumBytes,oneLiveNow()+lifetimeMilliseconds,nonce,if(recovery==null)0 else recovery.epoch))
+        q.ephemeralOutbox.append(jsonStringify(jsonObject(["t","id","kind","accept","multiple","maximumBytes","nonce"],[jsonString("pick-ephemeral"),jsonInteger(id),jsonString("files-ephemeral"),jsonArray(types),jsonBoolean(false),jsonInteger(maximumBytes),jsonString(nonce)])))
+        id
+    }
     fun readFile(file: OneFile, offset: int, length: int): int {
+        if(file.handle.startsWith("ephemeral-file-")){
+            val q=oneLiveQueueList[oneLiveQueueIndex(session)]
+            q.expireEphemeral(oneLiveNow())
+            val bytes=q.fileBytes.get(file.handle)
+            if(!q.ephemeralFiles.has(file.handle) || bytes==null)return complete(nextId(),404,"","Ephemeral file unavailable")
+            val start=if(offset<0)0 else if(offset>bytes.size)bytes.size else offset
+            val count=if(length>262144)262144 else if(length<0)0 else length
+            val end=if(start+count>bytes.size)bytes.size else start+count
+            val id=nextId()
+            q.ephemeralRequests.set(id,q.ephemeralDeadline)
+            q.complete(jsonStringify(jsonObject(["requestId","status","body","error","bodyBase64"],[jsonInteger(id),jsonInteger(200),jsonString(""),jsonString(""),jsonString(base64Encode(bytes.slice(start,end)))])))
+            return id
+        }
         if (oneRecoverySessions.has(session)) {
             val id = nextId()
             val count = if (length > 262144) 262144 else if (length < 0) 0 else length
@@ -338,7 +415,27 @@ class OneLiveServices(val session: string) : OneServices {
         oneLiveQueueList[oneLiveQueueIndex(session)].complete(jsonStringify(jsonObject(["requestId", "status", "body", "error", "bodyBase64"], [jsonInteger(id), jsonInteger(200), jsonString(""), jsonString(""), jsonString(base64Encode(bytes.slice(start, end)))])))
         id
     }
+    fun cancelEphemeralFiles(): void {
+        val q=oneLiveQueueList[oneLiveQueueIndex(session)]
+        q.clearEphemeral()
+        q.ephemeralExpired=false
+        return
+    }
+    fun trackEphemeralRequest(requestId: int): bool {
+        val q=oneLiveQueueList[oneLiveQueueIndex(session)]
+        q.expireEphemeral(oneLiveNow())
+        if(requestId<1 || requestId>q.nextId || q.ephemeralDeadline<=oneLiveNow() || q.ephemeralRequests.keys().size>=128)return false
+        q.ephemeralRequests.set(requestId,q.ephemeralDeadline)
+        true
+    }
     fun deleteFile(file: OneFile): int {
+        if(file.handle.startsWith("ephemeral-file-")){
+            val q=oneLiveQueueList[oneLiveQueueIndex(session)]
+            q.expireEphemeral(oneLiveNow())
+            val found=q.ephemeralFiles.has(file.handle)
+            q.removeFile(file.handle);q.ephemeralFiles.remove(file.handle)
+            return complete(nextId(),if(found)204 else 404,"","")
+        }
         val id = nextId()
         if (oneRecoverySessions.has(session)) {
             val status = oneRecoveryFileDelete(session, id, file.handle)

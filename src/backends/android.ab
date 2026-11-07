@@ -90,6 +90,13 @@ class OneAndroidServices() : OneServices {
         for (item in mime) types.append(jsonString(item))
         mobileHttpRequest("PICKFILE", jsonStringify(jsonObject(["mime", "multiple"], [jsonArray(types), jsonBoolean(multiple)])), "")
     }
+    // The pinned Android host keeps picked ContentResolver URIs only in
+    // process memory; it never copies a picked document into app storage.
+    fun pickEphemeralFile(mime: array<string>, maximumBytes: int = 16777216, lifetimeMilliseconds: int = 900000): int =
+        if(maximumBytes<1 || maximumBytes>16777216 || lifetimeMilliseconds<1 || lifetimeMilliseconds>900000)0 else pickFiles(mime,false)
+    // Android HTTP completions and URI handles are already process-local;
+    // the application owns scope/nonce validation and its absolute timer.
+    fun trackEphemeralRequest(requestId: int): bool = requestId>0
     fun readFile(file: OneFile, offset: int, length: int): int =
         mobileHttpRequest("FILEREAD", file.handle, jsonStringify(jsonObject(["offset", "length"], [jsonInteger(offset), jsonInteger(length)])))
     fun deleteFile(file: OneFile): int = mobileHttpRequest("FILEDEL", file.handle, "")

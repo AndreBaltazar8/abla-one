@@ -184,6 +184,15 @@ interface OneServices {
     // or stays when that is "".
     fun back(fallback: string = ""): void
     fun forward(): void
+    // Opt-in single-file selection without recovery/blob/inbox persistence.
+    // Unsupported adapters return 0 rather than using a durable picker.
+    // Callers must delete the handle after reading and clear their own parsed
+    // values on abandonment/expiry. The user's original document is untouched.
+    fun pickEphemeralFile(mime: array<string>, maximumBytes: int = 16777216, lifetimeMilliseconds: int = 900000): int = 0
+    fun cancelEphemeralFiles(): void { return }
+    // Mark a private RPC completion for the same volatile lifetime as the
+    // picker flow. It must not survive cancellation while waiting to deliver.
+    fun trackEphemeralRequest(requestId: int): bool = false
 }
 
 // The value of a secure read. Values written before typed storage existed
@@ -239,6 +248,10 @@ class OneRecordedServices(var next: int, val log: array<string>, val requests: a
     fun secureRemove(key: string): int = record("SECUREREMOVE $key")
     fun timer(milliseconds: int): int = record("TIMER $milliseconds")
     fun pickFiles(mime: array<string>, multiple: bool): int = record("PICKFILES ${mime.size} $multiple")
+    fun pickEphemeralFile(mime: array<string>, maximumBytes: int = 16777216, lifetimeMilliseconds: int = 900000): int =
+        if(maximumBytes<1 || maximumBytes>16777216 || lifetimeMilliseconds<1 || lifetimeMilliseconds>900000)0 else record("EPHEMERALPICK ${mime.size} $maximumBytes $lifetimeMilliseconds")
+    fun cancelEphemeralFiles(): void {record("EPHEMERALCANCEL");return}
+    fun trackEphemeralRequest(requestId: int): bool {record("EPHEMERALREQUEST $requestId");return requestId>0}
     fun readFile(file: OneFile, offset: int, length: int): int = record("READ ${file.handle} $offset $length")
     fun deleteFile(file: OneFile): int = record("DELETE ${file.handle}")
     fun pickImage(kind: string): int = record("PICK $kind")

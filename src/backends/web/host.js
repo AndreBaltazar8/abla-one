@@ -752,14 +752,14 @@
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = (message.accept || []).join(',');
-    input.multiple = !!message.multiple;
+    input.multiple = message.kind !== 'files-ephemeral' && !!message.multiple;
     input.style.display = 'none';
     document.body.appendChild(input);
     let done = false;
     const finish = () => { done = true; input.remove(); };
     const cancel = async () => {
       try {
-        const response = await upload(`id=${message.id}&kind=cancel${message.kind === 'files' ? '&files=1' : ''}`, '');
+        const response = await upload(`id=${message.id}&kind=${message.kind === 'files-ephemeral' ? 'ephemeral-cancel' : 'cancel'}${message.kind === 'files' ? '&files=1' : ''}${message.kind === 'files-ephemeral' ? '&nonce=' + encodeURIComponent(message.nonce) : ''}`, '');
         if (response.ok === false) throw new Error('File upload failed');
       } catch (_) { send({t: 'pick-error', id: message.id, error: 'File upload failed'}); }
     };
@@ -768,7 +768,7 @@
       const files = Array.from(input.files || []);
       finish();
       if (!files.length) return cancel();
-      if (message.kind !== 'files') {
+      if (message.kind !== 'files' && message.kind !== 'files-ephemeral') {
         try {
           const response = await upload(`id=${message.id}&kind=${message.kind}`, await normalize(files[0], message.kind));
           if (response.ok === false) throw new Error('File upload failed');
@@ -779,14 +779,15 @@
         }
       }
       // This local limit is safe to explain; remote failures remain generic.
-      if (!boot.wasm && files.some(file => file.size > 16777216)) {
-        send({t: 'pick-error', id: message.id, error: 'File exceeds the 16 MiB upload limit'});
+      const fileLimit = message.kind === 'files-ephemeral' ? message.maximumBytes : 16777216;
+      if ((!boot.wasm || message.kind === 'files-ephemeral') && (!Number.isSafeInteger(fileLimit) || fileLimit < 1 || files.some(file => file.size > fileLimit))) {
+        send({t: 'pick-error', id: message.id, error: message.kind === 'files-ephemeral' ? 'File exceeds the upload limit' : 'File exceeds the 16 MiB upload limit'});
         return;
       }
       try {
         let picked = '';
         for (let i = 0; i < files.length; i++) {
-          const response = await upload(`id=${message.id}&kind=files&picked=${encodeURIComponent(picked)}`, files[i], {
+          const response = await upload(`id=${message.id}&kind=${message.kind === 'files-ephemeral' ? 'files-ephemeral' : 'files'}&picked=${encodeURIComponent(picked)}${message.kind === 'files-ephemeral' ? '&nonce=' + encodeURIComponent(message.nonce) : ''}`, files[i], {
             'Content-Type': files[i].type || 'application/octet-stream',
             'X-One-Name': encodeURIComponent(files[i].name),
             'X-One-Last': i === files.length - 1 ? '1' : '0'});
@@ -875,7 +876,7 @@
     if (message.t === 'patch') patched(message);
     else if (message.t === 'back') goBack(message.to);
     else if (message.t === 'forward') history.forward();
-    else if (message.t === 'pick') pick(message);
+    else if (message.t === 'pick' || message.t === 'pick-ephemeral') pick(message);
     else if (message.t === 'copy') copyText(message.text);
     else if (message.t === 'cookies') updateCookies();
     else if (message.t === 'reload') location.reload();

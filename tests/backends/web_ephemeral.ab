@@ -1,0 +1,77 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_checkpoint.ab"
+import "../../src/backends/web_live.ab"
+
+var ephemeralDurableFileCalls=0
+var ephemeralInspectCalls=0
+var ephemeralInspectStatus=200
+class EphemeralTestApp() : OneApp {
+    fun render(var ui: Ui): Node = column(style(),[text("PRIVATE_VISIBLE_ROW_SENTINEL",style()),button(ui,"Choose","",ui.press {return},style())])
+    fun receive(kind: string,value: string): void {return}
+}
+fun ephemeralTestStore(): OneLiveRecoveryStore = OneLiveRecoveryStore(true,
+    {request,id,proof,owner,body->OneRecoveryResult(503)},
+    {request,id,proof,owner->OneRecoveryResult(503)},
+    {request,id,proof->ephemeralInspectCalls=ephemeralInspectCalls+1;expect(request.body=="" && request.header("x-one-name")=="","authorization never receives private bytes or the original filename");OneRecoveryResult(ephemeralInspectStatus,7)},
+    {id,owner,epoch,version,body,active,consumed->OneRecoveryResult(503)},
+    {id,owner,epoch->503},{id,owner,epoch->503},
+    {id,owner,epoch,requests->ephemeralDurableFileCalls=ephemeralDurableFileCalls+1;OneRecoveryInbox(503)},
+    {request,ticket->ephemeralDurableFileCalls=ephemeralDurableFileCalls+1;false},
+    {id,owner,epoch,request,handle,offset,length->ephemeralDurableFileCalls=ephemeralDurableFileCalls+1;503},
+    {id,owner,epoch,request,handle->ephemeralDurableFileCalls=ephemeralDurableFileCalls+1;503},
+    oneRecoveryAllPages())
+fun ephemeralTestFactory(request: HttpRequest,id: string): OneApp = EphemeralTestApp()
+fun ephemeralRequest(session: string,id: int,nonce: string,proof: string,body: string,kind: string="files-ephemeral"): HttpRequest = HttpRequest("POST","/one/upload","s=$session&id=$id&kind=$kind&nonce=$nonce",[HttpHeader("X-One-Proof",proof),HttpHeader("X-One-Name","PRIVATE_FILE_NAME_SENTINEL.pdf"),HttpHeader("X-One-Last","1"),HttpHeader("Content-Type","application/pdf")],body,[],[])
+fun main: int {
+    val id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";val proof="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    val service=oneLiveServices(id);val q=oneLiveQueueList[oneLiveQueueIndex(id)]
+    q.browser=true
+    val store=ephemeralTestStore()
+    val state=OneRecoveryState(id,proof,"test-owner",store)
+    state.ready=true;state.epoch=7
+    oneRecoverySessions.set(id,state)
+    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),{request->httpText("ok")},{request->false},ephemeralTestFactory,oneDefaultTheme(),OneLiveOptions("ephemeral test","en","#fff","/icons","src/backends/web/host.js",""),recovery=store)
+    server.sessions.append(oneSession(id,EphemeralTestApp(),q))
+    server.sessions[0].render(oneDefaultTheme(),"/icons")
+    val pick=service.pickEphemeralFile(["application/pdf"],64,900000)
+    val pending=q.ephemeralPickers.get(pick)
+    expect(pending!=null && q.ephemeralOutbox.size==1 && q.outbox.size==0 && state.pickers.keys().size==0,"opt-in chooser is volatile rather than a durable picker/effect")
+    if(pending==null)return testsPassed()
+    expect(server.ephemeralUpload(ephemeralRequest(id,pick,"wrong",proof,"BANK_BYTES")).status==403,"picker nonce fences an older or forged chooser")
+    expect(server.ephemeralUpload(ephemeralRequest(id,pick,pending.nonce,"cccccccccccccccccccccccccccccccc","BANK_BYTES")).status==403,"another proof cannot upload into this chooser")
+    state.epoch=8
+    expect(server.ephemeralUpload(ephemeralRequest(id,pick,pending.nonce,proof,"BANK_BYTES")).status==403,"chooser is bound to its original owner epoch")
+    state.epoch=7;ephemeralInspectStatus=202
+    expect(server.ephemeralUpload(ephemeralRequest(id,pick,pending.nonce,proof,"BANK_BYTES")).status==202 && q.fileBytes.keys().size==0,"pending authority does not store file bytes")
+    ephemeralInspectStatus=200
+    val response=server.ephemeralUpload(ephemeralRequest(id,pick,pending.nonce,proof,"BANK_BYTES"))
+    expect(response.status==200 && response.header("Cache-Control")=="no-store","authorized private upload is not cacheable")
+    val picked=oneResponse(q.takeCompletions()[0]).files()
+    expect(picked.size==1 && q.ephemeralFiles.has(response.body),"single ephemeral handle resolves only in this live queue")
+    val encoded=oneCheckpoint(server.sessions[0],jsonObject(["safe"],[jsonBoolean(true)]))
+    expect(!encoded.contains("BANK_BYTES") && !encoded.contains("PRIVATE_FILE_NAME_SENTINEL") && !encoded.contains("PRIVATE_VISIBLE_ROW_SENTINEL") && !encoded.contains(response.body),"the entire checkpoint excludes private bytes, filenames, noninteractive row labels and handles")
+    val reading=service.readFile(picked[0],0,64)
+    val read=oneResponse(q.takeCompletions()[0])
+    expect(read.requestId==reading && read.status==200 && base64Decode(read.bodyBase64)=="BANK_BYTES","private read bypasses durable file IO even with recovery enabled")
+    expect(ephemeralDurableFileCalls==0,"private upload/read/checkpoint use no durable upload/file/inbox callbacks")
+    val privateRpc=service.send(oneRequest("POST","https://synthetic.invalid/private").json(jsonObject(["secret"],[jsonString("PRIVATE_RPC_SENTINEL")])))
+    expect(service.trackEphemeralRequest(privateRpc),"a private parse RPC shares the volatile flow lifetime")
+    service.cancelEphemeralFiles()
+    q.complete(oneResponsePayload(privateRpc,200,"PRIVATE_LATE_REPLY_SENTINEL",""))
+    expect(q.fileBytes.keys().size==0 && q.fileInfo.keys().size==0 && q.ephemeralPickers.keys().size==0 && q.completions.size==0 && q.requests.size==0,"cancel discards private buffers, pending requests and late completions")
+    val expired=service.readFile(picked[0],0,64)
+    expect(oneResponse(q.takeCompletions()[0]).status==404 && ephemeralDurableFileCalls==0,"forgotten private handle never falls back to durable storage")
+    val second=service.pickEphemeralFile(["text/csv"],64,900000)
+    val secondPick=q.ephemeralPickers.get(second)
+    if(secondPick!=null){
+        expect(server.ephemeralUpload(ephemeralRequest(id,second,secondPick.nonce,proof,"TEMP_BANK")).status==200,"second private chooser starts fresh")
+        q.expireEphemeral(secondPick.expires)
+        expect(q.fileBytes.keys().size==0 && q.fileInfo.keys().size==0 && q.completions.size==0 && q.ephemeralExpired,"absolute expiry erases undelivered private bytes and signals app cleanup")
+    }
+    val ordinary=service.pickFiles(["application/pdf"],false)
+    expect(state.pickers.has(ordinary) && q.outbox.size>0,"ordinary picker retains its original durable behavior")
+    expectEqual(OneNoServices().pickEphemeralFile([]),0,"unsupported adapter fails closed")
+    oneRecoverySessions.remove(id);oneLiveForget(id)
+    testsPassed()
+}

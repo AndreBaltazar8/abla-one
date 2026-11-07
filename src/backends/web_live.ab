@@ -108,6 +108,8 @@ class OneLivePrivateRequests(val handle: (HttpRequest, OneLiveCallContext) -> Ht
 // Internal renderer RPC is governed by the application's private callback.
 class OneLiveRequestAdmission(val check: (HttpRequest) -> HttpResponse?)
 
+class OneEphemeralUpload(val request: HttpRequest, val ticket: int)
+
 resource class OneLiveServer(
     val handler: (HttpRequest) -> HttpResponse,
     // Which requests are live pages (SSR + session) instead of handler requests:
@@ -135,7 +137,8 @@ resource class OneLiveServer(
     val hostSource: string,
     val privateRequests: OneLivePrivateRequests? = null,
     val browserContexts: Map<string, OneLiveBrowserContext> = Map(),
-    val admission: OneLiveRequestAdmission? = null
+    val admission: OneLiveRequestAdmission? = null,
+    val ephemeralUploads: array<OneEphemeralUpload> = []
 ) {
     fun drop(): void {
         for (session in sessions) {
@@ -512,6 +515,18 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
     }
     val defers = this.defers
     if (!oneLiveReserved(request.path) && defers(request, this.ticket(slot))) return
+    if(request.path=="/one/upload" && request.method=="POST" && (request.queryParameter("kind")=="files-ephemeral" || request.queryParameter("kind")=="ephemeral-cancel")){
+        for(job in ephemeralUploads)if(job.request.queryParameter("s")==request.queryParameter("s") && job.request.queryParameter("id")==request.queryParameter("id")){
+            queue(slot,httpText("Ephemeral picker already pending",409).render());slots[slot].closing=true;return
+        }
+        var bytes=request.body.size
+        for(job in ephemeralUploads)bytes=bytes+job.request.body.size
+        if(ephemeralUploads.size>=16 || bytes>67108864){queue(slot,httpText("Ephemeral file capacity unavailable",429).render());slots[slot].closing=true;return}
+        val response=ephemeralUpload(request)
+        if(response.status==202)ephemeralUploads.append(OneEphemeralUpload(request,this.ticket(slot)))
+        else{queue(slot,response.render());slots[slot].closing=true}
+        return
+    }
     if (request.path == "/one/upload" && request.method == "POST" && recoveryRequired(request.queryParameter("s"))) {
         val start = recovery.upload
         if (start(request, this.ticket(slot))) return
@@ -575,6 +590,59 @@ fun OneLiveServer.upload(request: HttpRequest): HttpResponse {
         return HttpResponse(200, [HttpHeader("Content-Type", "text/plain"), HttpHeader("Cache-Control", "no-store")], handle)
     }
     HttpResponse(204, [HttpHeader("Cache-Control", "no-store")], "")
+}
+
+fun oneEphemeralProofEqual(a: string,b: string): bool {
+    if(a.size!=b.size)return false
+    var difference=0
+    for(i in 0 until a.size)difference=difference | (a[i] ^ b[i])
+    difference==0
+}
+
+// Only authorization metadata is offered to inspect; never the file body or
+// its original name. Asynchronous inspection leaves bytes only in this node's
+// bounded pending array, not in the recovery upload/blob/inbox path.
+fun oneEphemeralInspectRequest(request: HttpRequest): HttpRequest {
+    val headers: array<HttpHeader> = []
+    for(header in request.headers)if(header.name.lowercase()!="x-one-name" && header.name.lowercase()!="content-length")headers.append(header)
+    HttpRequest(request.method,request.path,request.query,headers,"",request.parameterNames,request.parameterValues,request.peerAddress)
+}
+
+fun OneLiveServer.ephemeralUpload(request: HttpRequest): HttpResponse {
+    if(request.method!="POST")return httpText("Method not allowed",405)
+    if(request.queryParameter("kind")!="files-ephemeral" && request.queryParameter("kind")!="ephemeral-cancel")return httpText("Invalid ephemeral operation",400)
+    val index=findSession(request.queryParameter("s"))
+    if(index<0)return httpText("Ephemeral session unavailable",404)
+    val session=sessions[index]
+    val q=session.queue
+    q.expireEphemeral(oneLiveNow())
+    val id=oneParseInt(request.queryParameter("id"),0)
+    val picker=q.ephemeralPickers.get(id)
+    if(id<1 || picker==null)return httpText("Ephemeral picker unavailable",410)
+    if(!oneEphemeralProofEqual(request.queryParameter("nonce"),picker.nonce))return httpText("Ephemeral picker changed",403)
+    val state=oneRecoverySessions.get(session.id)
+    if(state!=null){
+        val proof=request.header("x-one-proof")
+        if(!state.ready || state.ending || state.status!=200 || picker.epoch!=state.epoch || !oneRecoveryIdentifier(proof) || !oneEphemeralProofEqual(proof,state.proof))return httpText("Ephemeral session unavailable",403)
+        val checked=recovery.inspect(oneEphemeralInspectRequest(request),session.id,proof)
+        if(checked.status!=200)return httpText("Ephemeral authorization pending",checked.status)
+        if(checked.epoch!=state.epoch)return httpText("Ephemeral session changed",409)
+    }else if(recovery.enabled && session.recoveryEligible)return httpText("Ephemeral session unavailable",503)
+    if(request.queryParameter("kind")=="ephemeral-cancel"){
+        if(request.body.size!=0)return httpText("Invalid ephemeral cancellation",400)
+        q.ephemeralPickers.remove(id)
+        q.complete(oneResponsePayload(id,204,"[]",""))
+        return HttpResponse(204,[HttpHeader("Cache-Control","no-store")],"")
+    }
+    if(request.queryParameter("picked")!="" || request.header("x-one-last")!="1" || request.body.size==0 || request.body.size>picker.maximumBytes)return httpText("Invalid ephemeral file",413)
+    val name=oneUrlDecode(request.header("x-one-name"))
+    if(name.size>1024)return httpText("Invalid ephemeral file name",400)
+    val handle="ephemeral-file-${oneLiveSessionId()}"
+    val info=jsonObject(["handle","name","size","mime"],[jsonString(handle),jsonString(name),jsonInteger(request.body.size),jsonString(request.header("content-type"))])
+    q.addFile(handle,request.body,jsonStringify(info));q.ephemeralFiles.set(handle,picker.expires)
+    q.ephemeralPickers.remove(id)
+    q.complete(oneResponsePayload(id,200,jsonStringify(jsonArray([info])),""))
+    HttpResponse(200,[HttpHeader("Cache-Control","no-store"),HttpHeader("Content-Type","text/plain")],handle)
 }
 
 // The cookies for a session's stored values, fetched by the page after the
@@ -752,6 +820,10 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     val parsed = jsonParse(payload)
     if (!parsed.succeeded) return
     val m = parsed.value
+    if(m.getString("t")=="pick-error" && oneCheckpointCounter(m.get("id"))){
+        val q=sessions[index].queue
+        if(q.ephemeralPickers.has(m.getInt("id"))){q.ephemeralPickers.remove(m.getInt("id"));q.ephemeralOutbox.clear()}
+    }
     val persisted = oneRecoverySessions.get(sessions[index].id)
     val before = sessions[index].eventFrontier
     if (persisted != null) {
@@ -936,6 +1008,14 @@ fun oneLiveFileBytesFor(session: string, handle: string): string? {
 fun oneLiveAllTimersReady(): (OneLiveSession) -> bool = { session: OneLiveSession -> true }
 
 fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimersReady()): void {
+    val pendingEphemeral: array<OneEphemeralUpload> = []
+    for(job in ephemeralUploads){
+        val response=ephemeralUpload(job.request)
+        if(response.status==202)pendingEphemeral.append(job)
+        else answer(job.ticket,response)
+    }
+    ephemeralUploads.clear()
+    for(job in pendingEphemeral)ephemeralUploads.append(job)
     if (recovery.enabled) recoveryPending()
     if (oneLiveBroadcasts.size > 0) {
         var i = 0
@@ -952,17 +1032,29 @@ fun OneLiveServer.settle(timersReady: (OneLiveSession) -> bool = oneLiveAllTimer
     val now = oneLiveNow()
     var index = 0
     while (index < sessions.size) {
+        sessions[index].queue.expireEphemeral(now)
+        if(sessions[index].queue.ephemeralExpired){sessions[index].queue.ephemeralExpired=false;sessions[index].app.receive("ephemeral-expired","");sessions[index].changed=true}
         val recoveryState = oneRecoverySessions.get(sessions[index].id)
+        if(recoveryState!=null && (recoveryState.ending || recoveryState.status==401 || recoveryState.status==403 || recoveryState.status==404 || recoveryState.status==409 || recoveryState.status==410) && sessions[index].queue.ephemeralDeadline>0){sessions[index].queue.clearEphemeral();sessions[index].app.receive("ephemeral-expired","");sessions[index].changed=true}
         if (recoveryState != null && recoveryState.pendingPage) { index = index + 1; continue }
         if (timersReady(sessions[index])) sessions[index].queue.fireTimers(now)
         var rounds = 0
         while (rounds < 8 && pump(index)) rounds = rounds + 1
         if (recovery.enabled && sessions[index].recoveryEligible) {
             recoverySettle(index)
+            val current=oneRecoverySessions.get(sessions[index].id)
+            if(current!=null && current.ready && current.status==200 && !current.ending && current.batch.acknowledged() && current.prepared==null && sessions[index].slot>=0){
+                for(message in sessions[index].queue.ephemeralOutbox)queue(sessions[index].slot,webSocketEncodeFrame(message,1))
+                sessions[index].queue.ephemeralOutbox.clear()
+            }
             index = index + 1
             continue
         }
         if (sessions[index].slot >= 0) for (message in sessions[index].queue.takeOutbox()) queue(sessions[index].slot, webSocketEncodeFrame(message, 1))
+        if(sessions[index].slot>=0){
+            for(message in sessions[index].queue.ephemeralOutbox)queue(sessions[index].slot,webSocketEncodeFrame(message,1))
+            sessions[index].queue.ephemeralOutbox.clear()
+        }
         if (sessions[index].queue.cookiesChanged && sessions[index].slot >= 0) {
             sessions[index].queue.cookiesChanged = false
             queue(sessions[index].slot, webSocketEncodeFrame("{\"t\":\"cookies\"}", 1))
