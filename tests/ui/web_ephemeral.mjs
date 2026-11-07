@@ -41,6 +41,7 @@ try{
   page=await context.newPage();
   page.on('websocket',socket=>socket.on('framereceived',event=>frames.push(event.payload)));
   await page.goto(`${base}/private`);
+  await page.waitForSelector('html[data-one-ready]');
   const choose=async()=>{const [chooser]=await Promise.all([page.waitForEvent('filechooser'),page.getByRole('button',{name:'Choose private file',exact:true}).click()]);await chooser.setFiles({name:filename,mimeType:'text/plain',buffer:Buffer.from(secret)});};
   const visible=()=>page.getByText(secret,{exact:true}).isVisible();
   fs.writeFileSync(path.join(directory,'hold-private-inspect'),'1');
@@ -57,7 +58,7 @@ try{
   await wait(async()=>!(await visible()),'server-enforced expiry clears app');scan();
   await choose();await wait(visible,'third private read');
   await kill();scan();await start();
-  await page.reload();await page.getByRole('button',{name:'Choose private file',exact:true}).waitFor();
+  await page.reload();await page.waitForSelector('html[data-one-ready]');await page.getByRole('button',{name:'Choose private file',exact:true}).waitFor();
   await wait(async()=>!(await visible()),'node loss cannot reconstruct private bytes');scan();
   check(!(await visible()),'fresh process and resumed browser do not restore private file or rows');
   check((await page.evaluate(()=>Object.keys(localStorage).length))===0,'browser localStorage receives no private state');
