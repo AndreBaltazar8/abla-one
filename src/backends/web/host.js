@@ -761,7 +761,68 @@
     if (document.hidden && !ephemeralChoosing) discardEphemeral();
   });
   addEventListener('pagehide', discardEphemeral);
+  // Direct uploads: a chosen file stays here, by handle, and its parts go straight
+  // to the storage URLs the app signs. A reload forgets them.
+  const directFiles = new Map();
+  const directHandle = () => {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return 'direct-' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  };
+  const pickDirect = (message) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = (message.accept || []).join(',');
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    let done = false;
+    const finish = () => { done = true; input.remove(); };
+    input.addEventListener('cancel', () => { if (!done) { finish(); send({t: 'pick-direct', id: message.id, files: []}); } });
+    input.addEventListener('change', () => {
+      const file = (input.files || [])[0];
+      finish();
+      if (!file) return send({t: 'pick-direct', id: message.id, files: []});
+      if (!Number.isSafeInteger(message.maximumBytes) || file.size > message.maximumBytes) return send({t: 'pick-error', id: message.id, error: 'File exceeds the upload limit'});
+      const handle = directHandle();
+      directFiles.set(handle, file);
+      send({t: 'pick-direct', id: message.id, files: [{handle, name: file.name.slice(0, 1024) || 'file', size: file.size, mime: (file.type || '').slice(0, 128)}]});
+    });
+    input.click();
+  };
+  // Each part is tried up to three times; parts go two at a time.
+  const uploadDirect = async (message) => {
+    const file = directFiles.get(message.handle);
+    if (!file || !Array.isArray(message.urls) || !Number.isSafeInteger(message.first) || !Number.isSafeInteger(message.partBytes)) return send({t: 'direct-parts', id: message.id, error: 'Direct file unavailable'});
+    const parts = new Array(message.urls.length);
+    let next = 0;
+    let failed = '';
+    const one = async (index) => {
+      const part = message.first + index;
+      const start = (part - 1) * message.partBytes;
+      const body = file.slice(start, Math.min(start + message.partBytes, file.size));
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const response = await fetch(message.urls[index], {method: 'PUT', body, credentials: 'omit', mode: 'cors', redirect: 'error'});
+          const etag = response.headers.get('ETag');
+          if (response.ok && etag) { parts[index] = {part, etag}; return; }
+          if (response.status < 500 || attempt >= 2) throw new Error(`Direct upload failed (${response.status})`);
+        } catch (error) {
+          if (attempt >= 2) throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    };
+    const worker = async () => {
+      while (!failed && next < message.urls.length) {
+        const index = next++;
+        try { await one(index); } catch (error) { failed = String(error && error.message || 'Direct upload failed').slice(0, 200); }
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    send(failed ? {t: 'direct-parts', id: message.id, error: failed} : {t: 'direct-parts', id: message.id, parts});
+  };
   const pick = (message) => {
+    if (message.kind === 'files-direct') return pickDirect(message);
     // A selected claim still needs its ordinary receipt. That OS chooser is
     // also an expected handoff while this opt-in private flow remains active.
     const privateHandoff = message.kind === 'files-ephemeral' || ephemeralActive;
@@ -901,6 +962,8 @@
     else if (message.t === 'back') goBack(message.to);
     else if (message.t === 'forward') history.forward();
     else if (message.t === 'pick' || message.t === 'pick-ephemeral') pick(message);
+    else if (message.t === 'direct-parts') void uploadDirect(message);
+    else if (message.t === 'direct-release') directFiles.delete(message.handle);
     else if (message.t === 'copy') copyText(message.text);
     else if (message.t === 'cookies') updateCookies();
     else if (message.t === 'reload') location.reload();

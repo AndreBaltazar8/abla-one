@@ -189,6 +189,18 @@ interface OneServices {
     // Callers must delete the handle after reading and clear their own parsed
     // values on abandonment/expiry. The user's original document is untouched.
     fun pickEphemeralFile(mime: array<string>, maximumBytes: int = 16777216, lifetimeMilliseconds: int = 900000): int = 0
+    // Direct uploads, for files too large to pass through the app: the bytes go
+    // from where the file is (the browser, the phone) straight to storage URLs the
+    // app has signed. pickDirectFile completes with response.files() (a
+    // "direct-" handle, name, size, mime; empty if cancelled), nothing read.
+    // uploadDirectParts PUTs parts firstPart, firstPart+1, ... (part n is bytes
+    // (n-1)*partBytes up to n*partBytes) to urls in order and completes with
+    // {"parts":[{"part":n,"etag":"..."}]}, or an error. releaseDirectFile forgets
+    // the file. A handle lives as long as the page or app: a reload loses it.
+    // Unsupported adapters return 0, and the caller keeps its ordinary path.
+    fun pickDirectFile(mime: array<string>, maximumBytes: int): int = 0
+    fun uploadDirectParts(file: OneFile, firstPart: int, partBytes: int, urls: array<string>): int = 0
+    fun releaseDirectFile(file: OneFile): void { return }
     fun cancelEphemeralFiles(): void { return }
     // Mark a private RPC completion for the same volatile lifetime as the
     // picker flow. It must not survive cancellation while waiting to deliver.
@@ -310,3 +322,14 @@ fun oneSaveFile(var services: OneServices, file: OneFile, name: string, mime: st
     services.effect("saveFile", oneFileExportPayload(file, name, mime))
 fun oneShareFile(var services: OneServices, file: OneFile, name: string, mime: string): bool =
     services.effect("shareFile", oneFileExportPayload(file, name, mime))
+
+// Direct uploads' bounds: a handle the host made, a part URL it may PUT to.
+val oneDirectFileMax = 68719476736
+val oneDirectPartsMax = 100
+fun oneDirectHandle(handle: string): bool {
+    if (handle.size != 39 || !handle.startsWith("direct-")) return false
+    for (c in handle.slice(7, handle.size)) if (!((c >= 48 && c <= 57) || (c >= 97 && c <= 102))) return false
+    true
+}
+fun oneDirectUrl(url: string): bool =
+    url.size <= 8192 && (url.startsWith("https://") || url.startsWith("http://127.0.0.1:") || url.startsWith("http://localhost:")) && !url.contains("\"") && !url.contains("\n")

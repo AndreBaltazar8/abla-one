@@ -1,0 +1,56 @@
+import "../port.ab"
+import "abla/http"
+import "abla/net"
+import "abla/process"
+import "abla/text"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+
+// Direct uploads in a real browser (tests/ui/web_direct.mjs): a picked file's parts go from the page to the storage the
+// test runs at ONE_DIRECT_STORAGE, never through this server.
+val directPartBytes = 1048576
+class DirectApp(val services: OneServices, var pending: int by State(0), var stage: int by State(0), var message: string by State(""), var file: OneFile = OneFile("", "", 0, "")) : OneApp {
+    fun render(var ui: Ui): Node = column(style(), [
+        button(ui, "Pick big file", "secondary", ui.press { stage = 1; message = ""; pending = services.pickDirectFile(["application/zip"], 5242880) }, style()),
+        button(ui, "Forget file", "secondary", ui.press { services.releaseDirectFile(file); message = "released"; return }, style()),
+        button(ui, "Send again", "secondary", ui.press { send(); return }, style()),
+        text(message, style())
+    ])
+    fun send(): void {
+        val urls: array<string> = []
+        var part = 1
+        while ((part - 1) * directPartBytes < file.size) {
+            urls.append("${processEnvironmentOr("ONE_DIRECT_STORAGE", "")}/object?partNumber=$part")
+            part = part + 1
+        }
+        stage = 2
+        pending = services.uploadDirectParts(file, 1, directPartBytes, urls)
+        return
+    }
+    fun receive(kind: string, value: string): void {
+        if (kind != "result") return
+        val r = oneResponse(value)
+        if (r.requestId != pending) return
+        pending = 0
+        if (!r.ok()) { message = "error: ${r.error}"; return }
+        if (stage == 1) {
+            val files = r.files()
+            if (files.size == 0) { message = "cancelled"; return }
+            file = files[0]
+            message = "picked ${file.name} ${file.size}"
+            send()
+        } else {
+            val parts: array<string> = []
+            for (p in r.json().get("parts").values) parts.append("${p.getInt("part")}=${p.getString("etag")}")
+            message = "parts ${textJoin(parts, " ")}"
+        }
+        return
+    }
+}
+fun directApp(request: HttpRequest, session: string): OneApp = DirectApp(oneLiveServices(session))
+fun main: int {
+    var server = oneLiveServer(Ipv4SocketAddress("127.0.0.1", testPort()), { r -> httpText("not found", 404) }, oneLivePaths(["/"]), directApp, oneDefaultTheme(), OneLiveOptions("Direct", "en", "#fff", "", "src/backends/web/host.js", ""))
+    if (!server.listening()) return 1
+    testPublishPort(server.listener.localPort())
+    server.run()
+}

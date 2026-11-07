@@ -98,6 +98,8 @@ ui-web-live: gallery-live
 	tests/ui/live.sh
 	$(NIX) '$(ABLAC) build tests/ui/readfile_live.ab -o build/readfile-live --fast'
 	tests/ui/readfile-live.sh
+	$(NIX) '$(ABLAC) build tests/ui/direct_live.ab -o build/direct-live --fast'
+	timeout --signal=TERM --kill-after=10s 120s node tests/ui/web_direct.mjs
 
 # Linux desktop (abla-graphics window, one-layout, one-raster) under Xvfb.
 gallery-desktop: gallery-web

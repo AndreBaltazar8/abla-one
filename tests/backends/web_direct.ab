@@ -1,0 +1,72 @@
+import "abla/test"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+
+// Direct uploads (NovaKind 598): the page keeps the file and PUTs its parts to signed URLs; the server only relays the
+// picker and the answers, and only for requests it is waiting on.
+class DirectTestApp() : OneApp {
+    fun render(var ui: Ui): Node = column(style(),[text("direct",style())])
+    fun receive(kind: string,value: string): void {return}
+}
+fun directAnswer(var q: OneLiveQueue, text: string): OneResponse {
+    expect(oneDirectAnswer(q,jsonParse(text).value),"the page's answer is a direct one: $text")
+    val done=q.takeCompletions()
+    if(done.size!=1)return oneResponse("{}")
+    oneResponse(done[0])
+}
+fun main: int {
+    val id="dddddddddddddddddddddddddddddddd"
+    val service=oneLiveServices(id);val q=oneLiveQueueList[oneLiveQueueIndex(id)]
+    expectEqual(service.pickDirectFile(["application/zip"],1000),0,"no page yet: unsupported, so the app keeps its ordinary path")
+    q.browser=true
+    val handle="direct-0123456789abcdef0123456789abcdef"
+    val pick=service.pickDirectFile(["application/zip","application/pdf"],1000)
+    expect(pick>0 && q.directPickers.get(pick)==1000 && q.directOutbox.size==1 && q.outbox.size==0,"a direct picker goes to the page, outside recovery's effects")
+    expect(q.directOutbox[0].contains("\"kind\":\"files-direct\"") && q.directOutbox[0].contains("\"maximumBytes\":1000"),"with its kind and limit: ${q.directOutbox[0]}")
+    q.directOutbox.clear()
+    val chosen=directAnswer(q,"{\"t\":\"pick-direct\",\"id\":$pick,\"files\":[{\"handle\":\"$handle\",\"name\":\"big.zip\",\"size\":900,\"mime\":\"application/zip\"}]}")
+    val files=chosen.files()
+    expect(chosen.requestId==pick && chosen.status==200 && files.size==1 && files[0].handle==handle && files[0].name=="big.zip" && files[0].size==900,"the chosen file arrives as files(), nothing read")
+    expect(q.directPickers.keys().size==0,"the picker is done")
+    expect(oneDirectAnswer(q,jsonParse("{\"t\":\"pick-direct\",\"id\":$pick,\"files\":[]}").value) && q.takeCompletions().size==0,"an answer for a picker no longer waited on is dropped")
+    val over=service.pickDirectFile([],1000)
+    val tooBig=directAnswer(q,"{\"t\":\"pick-direct\",\"id\":$over,\"files\":[{\"handle\":\"$handle\",\"name\":\"big.zip\",\"size\":1001,\"mime\":\"\"}]}")
+    expect(tooBig.status==0 && tooBig.error!="","a file over the picker's limit fails, whatever the page says")
+    val forged=service.pickDirectFile([],1000)
+    expect(directAnswer(q,"{\"t\":\"pick-direct\",\"id\":$forged,\"files\":[{\"handle\":\"ephemeral-file-x\",\"name\":\"a\",\"size\":1,\"mime\":\"\"}]}").status==0,"only a direct handle is taken")
+    val cancelled=service.pickDirectFile([],1000)
+    val none=directAnswer(q,"{\"t\":\"pick-direct\",\"id\":$cancelled,\"files\":[]}")
+    expect(none.status==200 && none.files().size==0,"a cancelled pick completes empty")
+    q.directOutbox.clear()
+    expect(service.pickDirectFile([],0)>0 && oneResponse(q.takeCompletions()[0]).status==400,"a limit under one byte is refused")
+
+    val urls=["https://storage.example.test/b/k?partNumber=1&X-Amz-Signature=a","https://storage.example.test/b/k?partNumber=2&X-Amz-Signature=b"]
+    val upload=service.uploadDirectParts(files[0],1,500,urls)
+    expect(upload>0 && q.directUploads.has(upload) && q.directOutbox.size==1 && q.directOutbox[0].contains("\"t\":\"direct-parts\"") && q.directOutbox[0].contains("\"partBytes\":500"),"the part URLs go to the page")
+    q.directOutbox.clear()
+    val sent=directAnswer(q,"{\"t\":\"direct-parts\",\"id\":$upload,\"parts\":[{\"part\":1,\"etag\":\"\\\"e1\\\"\"},{\"part\":2,\"etag\":\"\\\"e2\\\"\"}]}")
+    val parts=sent.json().get("parts")
+    expect(sent.status==200 && parts.values.size==2 && parts.values[1].getInt("part")==2 && parts.values[1].getString("etag")=="\"e2\"","the parts' ETags come back for the app to complete the upload")
+    val failing=service.uploadDirectParts(files[0],3,500,[urls[0]])
+    val failed=directAnswer(q,"{\"t\":\"direct-parts\",\"id\":$failing,\"error\":\"Direct upload failed (403)\"}")
+    expect(failed.status==502 && failed.error=="Direct upload failed (403)","a failed part says so")
+    q.directOutbox.clear()
+    for (bad in [OneFile("ephemeral-file-1","a",1,""), OneFile("direct-XYZ","a",1,"")]) {
+        service.uploadDirectParts(bad,1,500,urls)
+        expect(oneResponse(q.takeCompletions()[0]).status==400 && q.directOutbox.size==0,"a handle the host didn't make is refused: ${bad.handle}")
+    }
+    for (url in ["http://storage.example.test/plain","javascript:alert(1)","https://storage.example.test/\"x"]) {
+        service.uploadDirectParts(files[0],1,500,[url])
+        expect(oneResponse(q.takeCompletions()[0]).status==400 && q.directOutbox.size==0,"a URL that isn't https (or local) is refused: $url")
+    }
+    val tooMany: array<string> = []
+    while (tooMany.size < 101) tooMany.append(urls[0])
+    service.uploadDirectParts(files[0],1,500,tooMany)
+    expect(oneResponse(q.takeCompletions()[0]).status==400,"at most 100 parts a call")
+    service.releaseDirectFile(files[0])
+    expect(q.directOutbox.size==1 && q.directOutbox[0].contains("direct-release"),"releasing tells the page to forget the file")
+    expectEqual(OneNoServices().pickDirectFile([],1),0,"unsupported adapters return 0")
+    expectEqual(oneLiveServices("client").pickDirectFile([],1),0,"the Wasm client has no direct transport yet")
+    oneLiveForget(id)
+    testsPassed()
+}

@@ -69,7 +69,12 @@ class OneLiveQueue(
     val ephemeralRequests: Map<int, int> = Map(),
     val ephemeralCancelled: Map<int, bool> = Map(),
     var ephemeralDeadline: int = 0,
-    var ephemeralExpired: bool = false
+    var ephemeralExpired: bool = false,
+    // Direct uploads waiting on the page: pickers by request (their limit) and
+    // part uploads. Neither holds bytes; the page keeps the file.
+    val directPickers: Map<int, int> = Map(),
+    val directUploads: Map<int, bool> = Map(),
+    val directOutbox: array<string> = []
 ) {
     fun clearEphemeral(): void {
         for(id in ephemeralRequests.keys())ephemeralCancelled.set(id,true)
@@ -416,6 +421,36 @@ class OneLiveServices(val session: string) : OneServices {
         val id = nextId()
         oneLiveQueueList[oneLiveQueueIndex(session)].complete(jsonStringify(jsonObject(["requestId", "status", "body", "error", "bodyBase64"], [jsonInteger(id), jsonInteger(200), jsonString(""), jsonString(""), jsonString(base64Encode(bytes.slice(start, end)))])))
         id
+    }
+    // The page keeps a direct file and PUTs its parts; nothing passes through here.
+    fun pickDirectFile(mime: array<string>, maximumBytes: int): int {
+        val q=oneLiveQueueList[oneLiveQueueIndex(session)]
+        if(session=="client" || !q.browser)return 0
+        val id=nextId()
+        if(maximumBytes<1 || maximumBytes>oneDirectFileMax || mime.size>64)return complete(id,400,"","Invalid direct picker bounds")
+        if(q.directPickers.keys().size>=4)return complete(id,429,"","Too many direct pickers")
+        val types: array<Json> = []
+        for(item in mime){if(item.size>128)return complete(id,400,"","Invalid direct picker type");types.append(jsonString(item))}
+        q.directPickers.set(id,maximumBytes)
+        q.directOutbox.append(jsonStringify(jsonObject(["t","id","kind","accept","multiple","maximumBytes"],[jsonString("pick"),jsonInteger(id),jsonString("files-direct"),jsonArray(types),jsonBoolean(false),jsonInteger(maximumBytes)])))
+        id
+    }
+    fun uploadDirectParts(file: OneFile, firstPart: int, partBytes: int, urls: array<string>): int {
+        val q=oneLiveQueueList[oneLiveQueueIndex(session)]
+        if(session=="client" || !q.browser)return 0
+        val id=nextId()
+        if(!oneDirectHandle(file.handle) || firstPart<1 || firstPart>10000 || partBytes<1 || urls.size<1 || urls.size>oneDirectPartsMax)return complete(id,400,"","Invalid direct upload")
+        val list: array<Json> = []
+        for(url in urls){if(!oneDirectUrl(url))return complete(id,400,"","Invalid direct upload URL");list.append(jsonString(url))}
+        if(q.directUploads.keys().size>=4)return complete(id,429,"","Too many direct uploads")
+        q.directUploads.set(id,true)
+        q.directOutbox.append(jsonStringify(jsonObject(["t","id","handle","first","partBytes","urls"],[jsonString("direct-parts"),jsonInteger(id),jsonString(file.handle),jsonInteger(firstPart),jsonInteger(partBytes),jsonArray(list)])))
+        id
+    }
+    fun releaseDirectFile(file: OneFile): void {
+        val q=oneLiveQueueList[oneLiveQueueIndex(session)]
+        if(session!="client" && q.browser && oneDirectHandle(file.handle))q.directOutbox.append(jsonStringify(jsonObject(["t","handle"],[jsonString("direct-release"),jsonString(file.handle)])))
+        return
     }
     fun cancelEphemeralFiles(): void {
         val q=oneLiveQueueList[oneLiveQueueIndex(session)]
@@ -784,4 +819,40 @@ fun oneSessionUpdate(var session: OneLiveSession, theme: Theme, iconBase: string
 
 fun oneSession(id: string, app: OneApp, queue: OneLiveQueue): OneLiveSession {
     OneLiveSession(id, app, queue, oneCss(), 0, 0, "", "", [], -1, oneLiveNow(), true, 0, false, 0, Map(), Map(), "", "", "", false, oneRouteFence(), onePresses(), 0, oneRouteScrolls(), false, 0, false, 0)
+}
+
+// The page's answer to a direct picker or part upload. Only a request this queue
+// is waiting on completes, once; anything malformed completes it as failed.
+fun oneDirectAnswer(var q: OneLiveQueue, m: Json): bool {
+    val kind=m.getString("t")
+    if((kind!="pick-direct" && kind!="direct-parts") || !m.get("id").intAvailable())return false
+    val id=m.getInt("id")
+    if(kind=="pick-direct"){
+        val limit=q.directPickers.get(id)
+        if(limit==null)return true
+        q.directPickers.remove(id)
+        if(m.get("error").isString()){q.complete(oneResponsePayload(id,0,"",if(m.getString("error").size<=200)m.getString("error")else "File unavailable"));return true}
+        val files: array<Json> = []
+        val given=m.get("files")
+        if(!given.isArray() || given.values.size>1){q.complete(oneResponsePayload(id,0,"","Invalid direct file"));return true}
+        for(f in given.values){
+            val size=f.get("size")
+            if(!oneDirectHandle(f.getString("handle")) || f.getString("name").size<1 || f.getString("name").size>1024 || f.getString("mime").size>128 || !size.intAvailable() || size.asInt()<0 || size.asInt()>limit){q.complete(oneResponsePayload(id,0,"","Invalid direct file"));return true}
+            files.append(jsonObject(["handle","name","size","mime"],[jsonString(f.getString("handle")),jsonString(f.getString("name")),jsonInteger(size.asInt()),jsonString(f.getString("mime"))]))
+        }
+        q.complete(oneResponsePayload(id,200,jsonStringify(jsonArray(files)),""))
+        return true
+    }
+    if(!q.directUploads.has(id))return true
+    q.directUploads.remove(id)
+    if(m.get("error").isString()){q.complete(oneResponsePayload(id,502,"",if(m.getString("error").size<=200)m.getString("error")else "Direct upload failed"));return true}
+    val parts: array<Json> = []
+    val given=m.get("parts")
+    if(!given.isArray() || given.values.size<1 || given.values.size>oneDirectPartsMax){q.complete(oneResponsePayload(id,502,"","Invalid direct upload answer"));return true}
+    for(p in given.values){
+        if(!p.get("part").intAvailable() || p.get("part").asInt()<1 || p.get("part").asInt()>10000 || p.getString("etag").size<1 || p.getString("etag").size>256){q.complete(oneResponsePayload(id,502,"","Invalid direct upload answer"));return true}
+        parts.append(jsonObject(["part","etag"],[jsonInteger(p.get("part").asInt()),jsonString(p.getString("etag"))]))
+    }
+    q.complete(oneResponsePayload(id,200,jsonStringify(jsonObject(["parts"],[jsonArray(parts)])),""))
+    true
 }

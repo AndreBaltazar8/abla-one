@@ -97,6 +97,19 @@ class OneAndroidServices() : OneServices {
     // Android HTTP completions and URI handles are already process-local;
     // the application owns scope/nonce validation and its absolute timer.
     fun trackEphemeralRequest(requestId: int): bool = requestId>0
+    // Direct uploads: a picked document stays a content URI here, and abla-mobile's
+    // FILEPUT streams its parts to the signed URLs. The phone has no limit of its
+    // own to apply: the caller checks the picked size against maximumBytes.
+    fun pickDirectFile(mime: array<string>, maximumBytes: int): int = if (maximumBytes < 1) 0 else pickFiles(mime, false)
+    fun uploadDirectParts(file: OneFile, firstPart: int, partBytes: int, urls: array<string>): int {
+        val list: array<Json> = []
+        for (url in urls) list.append(jsonString(url))
+        mobileHttpRequest("FILEPUT", file.handle, jsonStringify(jsonObject(["first", "partBytes", "urls"], [jsonInteger(firstPart), jsonInteger(partBytes), jsonArray(list)])))
+    }
+    fun releaseDirectFile(file: OneFile): void {
+        mobileHttpRequest("FILEDEL", file.handle, "")
+        return
+    }
     fun readFile(file: OneFile, offset: int, length: int): int =
         mobileHttpRequest("FILEREAD", file.handle, jsonStringify(jsonObject(["offset", "length"], [jsonInteger(offset), jsonInteger(length)])))
     fun deleteFile(file: OneFile): int = mobileHttpRequest("FILEDEL", file.handle, "")
