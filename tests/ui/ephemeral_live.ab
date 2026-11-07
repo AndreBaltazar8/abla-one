@@ -10,7 +10,8 @@ class EphemeralBrowserApp(val services: OneServices,var picking: int=0,var readi
         text(if(content=="")"No private content" else content,style())])
     fun receive(kind: string,value: string): void {
         if(kind=="checkpoint")services.effect("live-checkpoint","{\"v\":1}")
-        else if(kind=="restore" || kind=="ephemeral-expired")discard()
+        else if(kind=="restore"){discard();services.effect("live-restored","")}
+        else if(kind=="ephemeral-expired")discard()
         else if(kind=="result"){
             val response=oneResponse(value)
             if(picking>0 && response.requestId==picking){picking=0;val files=response.files();if(files.size==1){file=files[0];reading=services.readFile(file,0,4096)}}

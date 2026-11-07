@@ -5,7 +5,9 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {chromium} from '/home/andre/Desktop/projects/dualkind/node_modules/playwright/index.mjs';
 
-const directory=fs.mkdtempSync(path.join(os.tmpdir(),'one-private593-'));
+const evidenceRoot=path.resolve(process.env.ONE_EPHEMERAL_TEST_ROOT||'build/ephemeral-evidence');
+fs.mkdirSync(evidenceRoot,{recursive:true,mode:0o700});
+const directory=fs.mkdtempSync(path.join(evidenceRoot,'one-private593-'));
 const executable=fs.realpathSync('build/ephemeral-live');
 const secret='SYNTHETIC_PRIVATE_BANK_BYTES_593';
 const filename='SYNTHETIC_PRIVATE_FILE_593.txt';
