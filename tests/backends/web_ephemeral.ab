@@ -45,6 +45,12 @@ fun main: int {
     state.epoch=7;ephemeralInspectStatus=202
     expect(server.ephemeralUpload(ephemeralRequest(id,pick,pending.nonce,proof,"BANK_BYTES")).status==202 && q.fileBytes.keys().size==0,"pending authority does not store file bytes")
     ephemeralInspectStatus=200
+    state.status=202
+    expect(server.ephemeralUpload(ephemeralRequest(id,pick,pending.nonce,proof,"BANK_BYTES")).status==202 && q.fileBytes.keys().size==0,"an in-flight recovery fence defers private upload without accepting bytes")
+    expect(server.ephemeralUpload(ephemeralRequest(id,pick,pending.nonce,"cccccccccccccccccccccccccccccccc","BANK_BYTES")).status==403,"pending recovery never bypasses picker proof checks")
+    state.status=403
+    expect(server.ephemeralUpload(ephemeralRequest(id,pick,pending.nonce,proof,"BANK_BYTES")).status==403 && q.fileBytes.keys().size==0,"a refused recovery fence still rejects private upload")
+    state.status=200
     val response=server.ephemeralUpload(ephemeralRequest(id,pick,pending.nonce,proof,"BANK_BYTES"))
     expect(response.status==200 && response.header("Cache-Control")=="no-store","authorized private upload is not cacheable")
     val picked=oneResponse(q.takeCompletions()[0]).files()
