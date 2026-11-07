@@ -186,6 +186,13 @@
   let typed = 0;
   let typedSeen = 0;
   let held = null;
+  // A natively disabled button gets no click at all, so while typing is unanswered the
+  // pressables it may bring alive drop `disabled` and keep aria-disabled: a press then
+  // waits in `held`. The session's answer to the typing puts `disabled` back.
+  const unseenTyping = () => {
+    typed++;
+    for (const target of root.querySelectorAll('[data-one-press][disabled][aria-disabled="true"]')) target.removeAttribute('disabled');
+  };
   const change = (id, value, target) => {
     if (manualRecovery) return;
     held = null;
@@ -230,7 +237,7 @@
       notice(new TextEncoder().encode(JSON.stringify(message)).length + 64 > pendingByteLimit);
       return;
     }
-    typed++;
+    unseenTyping();
     send(message);
   };
   const live = (target) => {
@@ -337,6 +344,7 @@
     if (from.nodeType !== 1) return;
     for (const attr of Array.from(from.attributes)) if (!to.hasAttribute(attr.name) && attr.name !== 'style') from.removeAttribute(attr.name);
     for (const attr of Array.from(to.attributes)) {
+      if (attr.name === 'disabled' && typedSeen !== typed && to.hasAttribute('data-one-press')) continue;
       if (from.getAttribute(attr.name) !== attr.value) from.setAttribute(attr.name, attr.value);
     }
     // Keep what the person is typing: a focused field keeps its value unless the
@@ -551,7 +559,7 @@
         Object.defineProperty(candidate, '_field', {value: pending.field});
         Object.defineProperty(candidate, '_entry', {value: pending.entry});
         deferredEdit = deferredRest.shift() || null;
-        typed++;
+        unseenTyping();
         send(candidate, true, pending.order);
       } else if (first === 'navigation') {
         const next = deferredNavigation;
