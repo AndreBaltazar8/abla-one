@@ -57,7 +57,7 @@ fun oneDesktopExecute(item: OneLiveRequest): string {
         q = q + 1
     }
     val headers: array<HttpHeader> = []
-    for (h in r.headers) headers.append(HttpHeader(h.name, h.value))
+    for (h in r.effectiveHeaders()) headers.append(HttpHeader(h.name, h.value))
     var body = r.body
     if (r.bodyBase64 != "") body = base64Decode(r.bodyBase64)
     if (r.bodyFile != "") {

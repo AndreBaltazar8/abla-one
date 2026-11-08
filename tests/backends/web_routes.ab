@@ -205,6 +205,11 @@ fun main: int {
     val ownerQueue=oneLiveQueueList[oneLiveQueueIndex("file-owner")]
     ownerQueue.addFile("opaque-foreign-handle","private bytes","{}")
     val foreignFile=OneFile("opaque-foreign-handle","synthetic.txt",13,"text/plain")
+    val mimeFile=OneFile("opaque-foreign-handle","synthetic.txt",13,"text/plain")
+    expectEqual(oneResponse(oneLiveExecute({ request -> httpText(request.header("content-type")) },OneLiveRequest(1,oneRequest("POST","/files").file(mimeFile),session="file-owner"))).body,"text/plain","a live handler sees the file's type as Content-Type")
+    expectEqual(oneResponse(oneLiveExecute({ request -> httpText(request.header("content-type")) },OneLiveRequest(1,oneRequest("POST","/files").header("Content-Type","application/x-a").file(mimeFile),session="file-owner"))).body,"application/x-a","a Content-Type set before file() reaches the handler")
+    expectEqual(oneResponse(oneLiveExecute({ request -> httpText(request.header("content-type")) },OneLiveRequest(1,oneRequest("POST","/files").file(mimeFile).header("Content-Type","application/x-b"),session="file-owner"))).body,"application/x-b","a Content-Type set after file() reaches the handler")
+    expectEqual(oneResponse(oneLiveExecute({ request -> httpText(request.header("content-type")) },OneLiveRequest(1,oneRequest("POST","/files").file(OneFile("opaque-foreign-handle","synthetic.txt",13,"")),session="file-owner"))).body,"","a file without a type sends no Content-Type")
     val foreignBody=oneLiveExecute({ request -> httpText("handler called") },OneLiveRequest(1,oneRequest("POST","/files").file(foreignFile),session="chain"))
     expect(oneResponse(foreignBody).status==0,"a live session cannot read another session's bodyFile cache")
     val foreignPart=oneLiveExecute({ request -> httpText("handler called") },OneLiveRequest(1,oneRequest("POST","/files").multipart([oneFilePart("file",foreignFile)]),session="chain"))

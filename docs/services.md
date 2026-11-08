@@ -61,6 +61,14 @@ retargeting replay or a result callback from deleting replay bytes too early.
 Multipart disposition quotes use `%22`, matching [HTML multipart serialization](https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#multipart-form-data); control bytes are refused,
 and the generated boundary replaces a stale `Content-Type` header.
 
+`OneRequest.file(value)` streams the file's bytes as the body and sends the file's
+`mime` as `Content-Type` unless the request sets one: a header set before or after
+`file()` wins, a file without a type (or one whose type has control characters or is
+longer than 255 bytes) sends none, and `OneRequest.effectiveHeaders()` is what every
+backend sends (the JSON envelope, the browser fetch, the desktop and live executors,
+and the recovery materialization). A later `text`, `json`, `bytes` or `multipart`
+replaces the file, its type included.
+
 Materialization uses the request timeout (15 seconds by default), capped at 60
 seconds per attempt. An incomplete or undrained request completes with 504 at its
 deadline; late shared-store reads cannot invoke its HTTP handler. Storage that is

@@ -116,7 +116,7 @@ fun oneClientPump(var out: array<string>): bool {
 fun oneClientRequestJson(r: OneRequest): Json {
     val index = oneLiveQueueIndex("client")
     val headers: array<Json> = []
-    for (h in r.headers) headers.append(jsonArray([jsonString(h.name), jsonString(h.value)]))
+    for (h in r.effectiveHeaders()) headers.append(jsonArray([jsonString(h.name), jsonString(h.value)]))
     var bodyBase64 = r.bodyBase64
     var body = r.body
     if (r.bodyFile != "") {

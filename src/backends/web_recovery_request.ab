@@ -109,7 +109,7 @@ fun oneRecoveryRawRequest(raw: OneRecoveryRawRequest): OneRequest? {
     if(!raw.done || raw.status!=200)return null
     val request=raw.item.request
     val headers: array<OneHeader> = []
-    for(header in request.headers)headers.append(OneHeader(header.name,header.value))
+    for(header in request.effectiveHeaders())headers.append(OneHeader(header.name,header.value))
     if(request.bodyFile!="")return OneRequest(request.method,request.url,headers,raw.bytes.get(request.bodyFile)??"","","",[],request.timeoutMs,request.binaryResponse,request.saveResponse)
     val parts: array<OnePart> = []
     var size=oneRecoveryPartOverhead

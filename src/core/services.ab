@@ -25,6 +25,17 @@ fun oneFilePart(name: string, file: OneFile): OnePart = OnePart(name, "", "", fi
 
 // An HTTP request. Build with `oneRequest(method, url)` and the methods below;
 // each returns a new request. The body is text or base64-encoded bytes.
+// A file's type that may become a header value: short, with no control characters.
+fun oneMimeUsable(mime: string): bool {
+    if (mime.size == 0 || mime.size > 255) return false
+    var index = 0
+    while (index < mime.size) {
+        if (mime[index] < 32 || mime[index] == 127) return false
+        index = index + 1
+    }
+    true
+}
+
 class OneRequest(
     val method: string,
     val url: string,
@@ -35,7 +46,9 @@ class OneRequest(
     val parts: array<OnePart>,
     val timeoutMs: int,
     val binaryResponse: bool,
-    val saveResponse: bool
+    val saveResponse: bool,
+    // The type of the file `file()` streams: the Content-Type unless a header sets one.
+    val bodyMime: string = ""
 ) {
     fun copy(body: string, bodyBase64: string, bodyFile: string, parts: array<OnePart>): OneRequest =
         OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, timeoutMs, binaryResponse, saveResponse)
@@ -43,7 +56,19 @@ class OneRequest(
         val out: array<OneHeader> = []
         for (item in headers) if (oneLowerAscii(item.name) != oneLowerAscii(name)) out.append(item)
         out.append(OneHeader(name, value))
-        OneRequest(method, url, out, body, bodyBase64, bodyFile, parts, timeoutMs, binaryResponse, saveResponse)
+        OneRequest(method, url, out, body, bodyBase64, bodyFile, parts, timeoutMs, binaryResponse, saveResponse, bodyMime)
+    }
+    // The headers a backend sends: the request's own, plus the streamed file's type as
+    // Content-Type when none is set (an explicit header, set before or after `file()`, wins).
+    fun effectiveHeaders(): array<OneHeader> {
+        val out: array<OneHeader> = []
+        var typed = false
+        for (item in headers) {
+            out.append(item)
+            if (oneLowerAscii(item.name) == "content-type") typed = true
+        }
+        if (!typed && bodyFile != "" && oneMimeUsable(bodyMime)) out.append(OneHeader("Content-Type", bodyMime))
+        out
     }
     // Bodies: each replaces any previous body.
     fun text(value: string, contentType: string): OneRequest = copy(value, "", "", []).header("Content-Type", contentType)
@@ -52,21 +77,22 @@ class OneRequest(
     // Streams a platform file as the body; its type is used unless a
     // Content-Type header is set. Any size on streaming backends; server live
     // recovery materializes at most16MiB/request (see docs/services.md).
-    fun file(value: OneFile): OneRequest = copy("", "", value.handle, [])
+    fun file(value: OneFile): OneRequest =
+        OneRequest(method, url, headers, "", "", value.handle, [], timeoutMs, binaryResponse, saveResponse, value.mime)
     // multipart/form-data; the platform sets the boundary header.
     fun multipart(value: array<OnePart>): OneRequest = copy("", "", "", value)
-    fun timeout(milliseconds: int): OneRequest = OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, milliseconds, binaryResponse, saveResponse)
+    fun timeout(milliseconds: int): OneRequest = OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, milliseconds, binaryResponse, saveResponse, bodyMime)
     // Ask for the response body as base64 bytes instead of UTF-8 text.
-    fun binary(): OneRequest = OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, timeoutMs, true, saveResponse)
+    fun binary(): OneRequest = OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, timeoutMs, true, saveResponse, bodyMime)
     // Write a successful response to a new platform file instead of memory,
     // for downloads of any size; the response carries it as `file`.
-    fun saveToFile(): OneRequest = OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, timeoutMs, binaryResponse, true)
+    fun saveToFile(): OneRequest = OneRequest(method, url, headers, body, bodyBase64, bodyFile, parts, timeoutMs, binaryResponse, true, bodyMime)
 
     // The JSON envelope backends receive.
     fun envelope(): string {
         val names: array<string> = []
         val values: array<Json> = []
-        for (item in headers) {
+        for (item in effectiveHeaders()) {
             names.append(item.name)
             values.append(jsonString(item.value))
         }

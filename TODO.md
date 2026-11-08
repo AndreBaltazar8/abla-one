@@ -18,8 +18,6 @@ PaperMono is parked (owner, 2026-11-02): its tasks are in `TODO_PARKED.md`, not 
 
 - [x] Server/lock scaling (NovaKind523): official048 default44 plus auxiliary and complete remote checks passed, including exact legacy/indexed generation parity, 1280 records below16M and four512-field DTOs below8M. All18 measured record/order cases retained exact bytes. At1280 records writer26.96M→10.86M and imported generator23.99M→9.29M; field512 writer10.68M→5.92M. Small-input overhead remains explicit; normal50M unchanged. Historical717/042 failure attribution stays qualified.
 
-- [ ] Audit the live `.file()` MIME contract: OneRequest.file documents using OneFile.mime unless a Content-Type header is already set, but its builder retains only the handle and oneLiveExecute reads bytes without restoring the MIME. Add an actual handler-header control for default MIME and an explicit override before fixing across backends. No MIME behavior change is included in451.
-
 ## ablac bugs seen (worked around, not confirmed fixed)
 
 - ablac0.2.35 rejects the function-valued class default `val participates: (HttpRequest)->bool = oneRecoveryAllPages()` with repeated `constructor.argument:OneLiveRecoveryStore`; requiring and passing the policy explicitly compiles. Original case is in commit7f51fb3, fixed at the call sites in9358303.

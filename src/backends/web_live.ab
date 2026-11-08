@@ -842,7 +842,7 @@ fun oneLiveExecute(handler: (HttpRequest) -> HttpResponse, item: OneLiveRequest,
         i = i + 1
     }
     val headers: array<HttpHeader> = []
-    for (h in r.headers) {
+    for (h in r.effectiveHeaders()) {
         val name = oneLowerAscii(h.name)
         if (!name.startsWith("x-one-live-") && !(r.parts.size>0 && name=="content-type")) headers.append(HttpHeader(name, h.value))
     }
