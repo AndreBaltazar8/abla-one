@@ -10,7 +10,7 @@ import "../one.ab"
 
 // Also keeps the HTML of memo subtrees (`ui.memo`), by build and place: a
 // subtree that wasn't rebuilt isn't written again either.
-class OneCss(val classes: Map<string, string>, val rules: array<string>, val media: array<string>, val mediaOrder: array<int>, var mediaSent: int, val html: Map<string, string>) {
+class OneCss(val classes: Map<string, string>, val rules: array<string>, val media: array<string>, val mediaOrder: array<int>, var mediaSent: int, val html: Map<string, string>, val styled: Map<string, string> = Map()) {
     fun use(state: string, declaration: string): string {
         val id = "$state|$declaration"
         val found = classes.get(id)
@@ -184,14 +184,15 @@ fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string,
     val theme = if (node.attr("theme") != "") outer.scoped(node.attr("theme")) else outer
     if (node.kind == "native") return oneWebNative(node, theme, css, iconBase, path, parentKind)
     val resolved = oneResolve(theme, node.kind, node.style, "web-document")
-    var classes = "k-${node.kind}"
+    // Many nodes share a resolved style: their atomic classes are computed once per page registry.
+    val styleKey = oneWebStyleKey(node.kind, parentKind, resolved)
+    val known = css.styled.get(styleKey)
+    var classes = if (known != null) known else oneWebStyleClasses(node, resolved, parentKind, css)
+    if (known == null) {
+        if (css.styled.size > 4096) css.styled.clear()
+        css.styled.set(styleKey, classes)
+    }
     if (path == "0") classes = "one $classes"
-    for (state in oneWebStates) {
-        for (declaration in oneWebDeclarations(node, resolved, state, parentKind)) classes = "$classes ${css.use(state, declaration)}"
-    }
-    for (state in oneWebViewports(resolved)) {
-        for (declaration in oneWebDeclarations(node, resolved, state, parentKind)) classes = "$classes ${css.use(state, declaration)}"
-    }
     // A spacer's size runs along its parent's axis.
     if (node.kind == "spacer" && oneParseInt(node.attr("size"), 0) > 0) classes = "$classes ${css.use("", "flex:0 0 ${node.attr("size")}px")}"
     val own = if (node.key != "") node.key else path
@@ -236,6 +237,27 @@ fun oneWebPopover(node: Node, theme: Theme, var css: OneCss, iconBase: string, o
     val anchor = oneWebNode(node.children[0], theme, css, iconBase, "$own.0", node.kind)
     if (node.children.size < 2) return anchor
     "$anchor<div class=\"one-scrim\" data-one-press=\"${node.attr("onDismiss")}\"></div><div class=\"one-panel\" data-side=\"${oneHtmlEscape(node.attr("side"))}\">${oneWebNode(node.children[1], theme, css, iconBase, "$own.1", node.kind)}</div>"
+}
+
+// Declarations depend only on the node's kind, its parent's kind and the resolved properties.
+fun oneWebStyleKey(kind: string, parentKind: string, r: Resolved): string {
+    val parts: array<string> = [kind, parentKind]
+    for (name in r.props.keys()) {
+        parts.append(name)
+        parts.append(r.get(name))
+    }
+    textJoin(parts, "\n")
+}
+
+fun oneWebStyleClasses(node: Node, resolved: Resolved, parentKind: string, var css: OneCss): string {
+    var classes = "k-${node.kind}"
+    for (state in oneWebStates) {
+        for (declaration in oneWebDeclarations(node, resolved, state, parentKind)) classes = "$classes ${css.use(state, declaration)}"
+    }
+    for (state in oneWebViewports(resolved)) {
+        for (declaration in oneWebDeclarations(node, resolved, state, parentKind)) classes = "$classes ${css.use(state, declaration)}"
+    }
+    classes
 }
 
 fun oneWebTag(tag: string): string =
