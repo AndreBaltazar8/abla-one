@@ -5,8 +5,17 @@ TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab t
 
 .PHONY: test-recovery-raw test-recovery test-remote papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-thin ui-thin ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
 
+# What abla.lock names, under .abla/, which a fresh clone hasn't got and the targets that build
+# programs of this tree read (without it: E_PACKAGE_IMPORT, `locked package abla-mobile could not
+# be resolved`). The compiler prepares it along with a vendor/ copy, which nothing reads here.
+.abla/packages: abla.lock
+	$(NIX) '$(ABLAC) package vendor --project .'
+	rm -rf vendor
+	mkdir -p .abla
+	touch .abla/packages
+
 # Unit, backend and integration tests (host only).
-test:
+test: .abla/packages
 	mkdir -p build
 	$(NIX) '$(ABLAC) build tools/check-native-build-roots.ab -o build/check-native-build-roots --fast'
 	./build/check-native-build-roots "$(CURDIR)" --self-test
@@ -16,30 +25,30 @@ test:
 	$(NIX) 'ABLAC=$(ABLAC) tests/layout_size.sh'
 
 # @server over real HTTP: the routes, server.lock, client binaries.
-test-remote:
+test-remote: .abla/packages
 	$(NIX) 'ABLAC=$(ABLAC) tests/remote/check.sh'
 
 # Two independent live processes, shared synthetic persistence, node loss and
 # a real browser. No production database, external storage or credentials.
-test-recovery:
+test-recovery: .abla/packages
 	mkdir -p build
 	$(NIX) '$(ABLAC) build tests/ui/recovery_live.ab -o build/recovery-live --fast'
 	timeout --signal=TERM --kill-after=10s 180s node tests/ui/web_live_recovery.mjs
 	timeout --signal=TERM --kill-after=10s 240s node tests/ui/web_live_raw_recovery.mjs
 
 # Focused raw file/materialization proof, including a real sixty-second deadline.
-test-recovery-raw:
+test-recovery-raw: .abla/packages
 	mkdir -p build
 	$(NIX) '$(ABLAC) build tests/ui/recovery_live.ab -o build/recovery-live --fast'
 	timeout --signal=TERM --kill-after=10s 240s node tests/ui/web_live_raw_recovery.mjs
 
 # Server-rendered gallery pages and their icons.
-gallery-web:
+gallery-web: .abla/packages
 	$(NIX) '$(ABLAC) build examples/gallery/web.ab -o build/gallery-web --fast'
 	./build/gallery-web
 	tools/vector2svg build/gallery/icons --tint examples/gallery/icons/*.xml
 
-gallery-android:
+gallery-android: .abla/packages
 	tools/build-android.sh gallery
 
 ui-web: gallery-web
@@ -55,7 +64,7 @@ ui-android: gallery-android
 
 # Real requests, uploads, downloads, storage and timers on the emulator,
 # against tests/ui/echo.py behind a temporary HTTPS tunnel.
-ui-android-services:
+ui-android-services: .abla/packages
 	mkdir -p build/ui
 	flock $(ANDROID_LOCK) python3 tests/ui/android_services.py
 
@@ -67,7 +76,7 @@ gallery-client: gallery-web
 	cp examples/gallery/build/client/gallery.wasm build/gallery/gallery.wasm
 	cp src/backends/web/host.js build/gallery/one/host.js
 
-services-client:
+services-client: .abla/packages
 	$(NIX) '$(ABLAC) build examples/services/web.ab -o build/services-web --fast'
 	./build/services-web
 	cd examples/services && nix-shell $(abspath ../ablac/shell.nix) --run '$(ABLAC) build client_build.ab -o build/client-build --no-cache'
@@ -82,7 +91,7 @@ ui-web-client: gallery-client services-client
 	node tests/ui/web_client_services.mjs
 
 # The gallery's app for thin devices and a device's requests.
-gallery-thin:
+gallery-thin: .abla/packages
 	$(NIX) '$(ABLAC) build examples/gallery/thin.ab -o build/gallery-thin --fast'
 
 ui-thin: gallery-thin
@@ -113,7 +122,7 @@ PORT ?= /dev/ttyACM0
 # MODE=thin ONE_HOST=a.b.c.d: the app runs on `make gallery-thin`; the device gets its
 # tree, and does layout, scrolling and drawing.
 MODE ?= full
-papermono-gallery:
+papermono-gallery: .abla/packages
 	ONE_MODE=$(MODE) ONE_HOST=$(ONE_HOST) tools/build-papermono examples/gallery/papermono build
 
 flash-papermono:
