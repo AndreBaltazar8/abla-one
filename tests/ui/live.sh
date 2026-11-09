@@ -24,6 +24,7 @@ node tests/ui/web_live_gallery.mjs
 node tests/ui/web_live_routes.mjs
 node tests/ui/web_live_events.mjs
 node tests/ui/web_live_backpressure.mjs
+node tests/ui/web_live_keepalive.mjs
 node tests/ui/web_canvas_gallery.mjs
 # Last: it restarts the server.
 stop_server

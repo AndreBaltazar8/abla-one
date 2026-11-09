@@ -44,7 +44,10 @@ class OneLiveSlot(
     var recoveryRequest: HttpRequest? = null,
     var awaitingRecovery: bool = false,
     var recoveryMessage: string = "",
-    var recoveryStarted: int = 0
+    var recoveryStarted: int = 0,
+    // Plain HTTP/1.1 keep-alive: how many requests this connection has served, and since when it has sat idle.
+    var served: int = 0,
+    var idleSince: int = 0
 )
 
 class OneLiveOptions(
@@ -329,6 +332,8 @@ fun OneLiveServer.closeSlot(slot: int): void {
     slots[slot].awaitingRecovery = false
     slots[slot].recoveryMessage = ""
     slots[slot].recoveryStarted = 0
+    slots[slot].served = 0
+    slots[slot].idleSince = 0
     return
 }
 
@@ -420,7 +425,10 @@ fun OneLiveServer.write(slot: int): void {
         slots[slot].output = ""
         slots[slot].outputOffset = 0
         if (slots[slot].closing) closeSlot(slot)
-        else poller.modifyDescriptor(slots[slot].descriptor, true, false)
+        else {
+            slots[slot].idleSince = oneLiveNow()
+            poller.modifyDescriptor(slots[slot].descriptor, true, false)
+        }
     }
     return
 }
@@ -554,9 +562,37 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
         recoveryWaitHttp(slot, request, response)
         return
     }
+    // An immediate answer to an HTTP/1.1 request that didn't ask to close keeps the connection for the
+    // next one (Cloudflare's edge and the Android client reuse it). Deferred and recovery answers,
+    // pipelined bytes and the 100th request still close.
+    if (oneLiveKeepAlive(input.slice(0, end), request) && slots[slot].input.size == 0 && slots[slot].served < oneLiveKeepAliveRequests) {
+        val kept = HttpResponse(response.status, oneLiveKeepAliveHeaders(response.headers), response.body)
+        queue(slot, if (request.method == "HEAD") kept.renderHead() else kept.render())
+        slots[slot].served = slots[slot].served + 1
+        return
+    }
     queue(slot, rendered)
     slots[slot].closing = true
     return
+}
+
+val oneLiveKeepAliveRequests = 100
+val oneLiveKeepAliveIdleMilliseconds = 15000
+// HTTP/1.1 keeps the connection unless the request says "Connection: close".
+fun oneLiveKeepAlive(head: string, request: HttpRequest): bool {
+    var line = head
+    var i = 0
+    while (i < head.size) { if (head[i] == 13 || head[i] == 10) { line = head.slice(0, i); i = head.size } else i = i + 1 }
+    if (!line.endsWith(" HTTP/1.1")) return false
+    val connection = request.header("connection").lowercase()
+    !connection.contains("close") && !connection.contains("upgrade")
+}
+fun oneLiveKeepAliveHeaders(headers: array<HttpHeader>): array<HttpHeader> {
+    val out: array<HttpHeader> = []
+    for (header in headers) if (!httpAsciiEqualInsensitive(header.name, "Connection")) out.append(header)
+    out.append(HttpHeader("Connection", "keep-alive"))
+    out.append(HttpHeader("Keep-Alive", "timeout=${oneLiveKeepAliveIdleMilliseconds / 1000}, max=$oneLiveKeepAliveRequests"))
+    out
 }
 
 // Uploads from the page's file pickers. ?s=session&id=request&kind=...:
@@ -1164,6 +1200,7 @@ fun OneLiveServer.step(beforeSettle: (array<OneLiveSession>) -> array<OneLivePus
             }
         }
     }
+    closeIdleKeptAlive()
     for (push in beforeSettle(sessions)) {
         var i = 0
         while (i < sessions.size) {
@@ -1172,6 +1209,18 @@ fun OneLiveServer.step(beforeSettle: (array<OneLiveSession>) -> array<OneLivePus
         }
     }
     settle(timersReady)
+    return
+}
+
+// A kept-alive plain HTTP connection with nothing in flight closes after the idle limit.
+fun OneLiveServer.closeIdleKeptAlive(): void {
+    val now = oneLiveNow()
+    var i = 0
+    while (i < slots.size) {
+        val s = slots[i]
+        if (s.descriptor >= 0 && !s.upgraded && !s.closing && s.served > 0 && s.input.size == 0 && s.output.size == 0 && s.idleSince > 0 && now - s.idleSince >= oneLiveKeepAliveIdleMilliseconds) closeSlot(i)
+        i = i + 1
+    }
     return
 }
 
