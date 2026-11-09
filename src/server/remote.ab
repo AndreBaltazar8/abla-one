@@ -450,6 +450,12 @@ compile fun oneRemoteCodec(var source: OneRemoteSource, type: string, out: bool,
         return name
     }
     val declaration = compilerFindClass(head)
+    if (declaration < 0 && compilerFindType(head) >= 0) {
+        // The contract names the class, but its module isn't loaded for the contract: a module the contract
+        // imports only through another one doesn't carry its classes.
+        source.problems.append("$path: $type is declared in a module the contract does not import directly (import that module in the contract's own module)")
+        return name
+    }
     if (declaration < 0 || type.contains("->") || compiler.isResource(compilerFindType(head))) {
         source.problems.append("$path: $type can't cross the network (plain data only: no closures, resources or native handles)")
         return name
