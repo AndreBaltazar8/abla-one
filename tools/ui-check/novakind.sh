@@ -31,15 +31,22 @@ take() {
 	(
 		cd "$nk" || exit 2
 		{ echo "abla-one $commit"; echo "novakind $(git rev-parse HEAD)"; grep '^abla-ui ' toolchain/sibling-revisions || echo "abla-ui: not pinned in toolchain/sibling-revisions (the live checkout is used)"; echo "load $(cut -d' ' -f1-3 /proc/loadavg)"; } > "$out/ABOUT"
-		for program in tools/claro_landing_preview tools/claro_preview tools/ui_check_boxes tests/native-render; do
+		# The signed-in previews and the app itself first: NovaKind must compile unchanged (2c's requirement), so fail fast there.
+		for program in tools/claro_preview app tools/claro_landing_preview tools/ui_check_boxes tests/native-render; do
 			name=$(basename "$program")
-			ABLA_ONE_REV=$commit ABLA_ONE_REPO=$repo "$slot" nix-shell toolchain/shell.nix --run "build/novakind-tool pinned-build $program.ab -o build/ui-check-$name --fast" > "$out/$name.build.log" 2>&1 || { echo "$program does not build against $1:" >&2; grep -m 6 -A 3 'error' "$out/$name.build.log" >&2; exit 2; }
+			ABLA_ONE_REV=$commit ABLA_ONE_REPO=$repo "$slot" nix-shell toolchain/shell.nix --run "build/novakind-tool pinned-build $program.ab -o build/ui-check-$name --fast" > "$out/$name.build.log" 2>&1 || { echo "$program does not build against $1: $(grep -c '^error' "$out/$name.build.log") errors, the first:" >&2; grep -m 3 -A 3 '^error' "$out/$name.build.log" >&2; exit 2; }
 			echo "$name $(stat -c %s "build/ui-check-$name")" >> "$out/SIZES"
 		done
 		rm -rf build/claro-landing build/claro-preview build/ui-check-boxes
 		./build/ui-check-claro_landing_preview > /dev/null 2>&1 && ./build/ui-check-claro_preview > /dev/null 2>&1 && ./build/ui-check-ui_check_boxes > /dev/null 2>&1 || { echo "a preview program failed against $1" >&2; exit 2; }
 		cp -r build/claro-landing build/claro-preview build/ui-check-boxes "$out/"
 		./build/ui-check-native-render > "$out/native-render.txt" 2>&1; echo "exit $?" >> "$out/native-render.txt"
+		# What rendering the 300 preview pages costs: wall time, and instructions where perf is to be had; 5 runs, the load beside them.
+		for run in 1 2 3 4 5; do
+			start=$(date +%s%N)
+			if command -v perf > /dev/null 2>&1; then instructions=$(perf stat -x, -e instructions:u ./build/ui-check-claro_preview 2>&1 > /dev/null | grep instructions | cut -d, -f1); else ./build/ui-check-claro_preview > /dev/null 2>&1; instructions=-; fi
+			echo "run $run: $(( ($(date +%s%N) - start) / 1000000 )) ms, instructions ${instructions:--}, load $(cut -d' ' -f1 /proc/loadavg)" >> "$out/COST"
+		done
 	) || return 2
 	touch "$out/DONE"
 	echo "$out"
@@ -64,6 +71,7 @@ for set in claro-landing claro-preview ui-check-boxes; do
 done
 if [ "$(tail -2 "$now/native-render.txt")" = "$(tail -2 "$was/native-render.txt")" ] && tail -1 "$now/native-render.txt" | grep -q 'exit 0'; then echo "same    native-render: $(tail -2 "$now/native-render.txt" | head -1), goldens $(cat "$nk/tests/native-render.golden" "$nk/tests/native-render-pay.golden" | wc -c) bytes"
 else failed=1; echo "DIFFERS native-render: was $(tail -2 "$was/native-render.txt" | tr '\n' ' '), now $(tail -2 "$now/native-render.txt" | tr '\n' ' ')"; grep -m 5 -i 'fail' "$now/native-render.txt" | cut -c1-200 | sed 's/^/          /'; fi
+echo "rendering the 300 preview pages, was:"; sed 's/^/  /' "$was/COST" 2>/dev/null; echo "now:"; sed 's/^/  /' "$now/COST" 2>/dev/null
 echo "sizes (bytes, --fast)   was → now"; paste "$was/SIZES" "$now/SIZES" | awk '{ printf "  %-24s %9s → %9s (%+d)\n", $1, $2, $4, $4 - $2 }'
 [ $failed = 0 ] && echo "novakind: identical" || echo "novakind: NOT identical"
 exit $failed
