@@ -341,32 +341,71 @@ val oneMeasureInput = 2
 val oneMeasureInputLines = 3
 
 // Measures text and inputs for flex, as abla-one always has: lines by oneWrap, line height by
-// oneLineHeight. The lines of each node's last measurement are kept (start and count into `lines`).
+// oneLineHeight. Only measured nodes have a slot (`at`, by flex node; -1 for none), holding what
+// it measures and its last measurement's lines (start and count into `lines`).
 class OneFlexMeasure(
+    var at: array<int>, var owner: array<int>, var freeSlots: array<int>,
     var what: array<int>, var texts: array<string>, var sizes: array<int>, var weights: array<string>,
     var maxLines: array<int>, var lineHeights: array<int>,
     var lineStart: array<int>, var lineCount: array<int>, var lines: array<string>, var widths: array<int>,
     var wraps: Map<int, OneWrapEntry>
 ) : FlexMeasure {
     fun measure(node: int, maxWidth: f64, maxHeight: f64): FlexSize {
+        val j = at[node]
         val room = f64ToInt(maxWidth)
-        val kind = what[node]
+        val kind = what[j]
         if (kind == oneMeasureInput || kind == oneMeasureInputLines) {
             var rows = 1
-            if (kind == oneMeasureInputLines) rows = oneWrap(texts[node], sizes[node], weights[node], room, maxLines[node]).size
-            return FlexSize(0.0, f64FromInt(rows * lineHeights[node]))
+            if (kind == oneMeasureInputLines) rows = oneWrap(texts[j], sizes[j], weights[j], room, maxLines[j]).size
+            return FlexSize(0.0, f64FromInt(rows * lineHeights[j]))
         }
-        lineStart[node] = lines.size
-        oneWrapInto(wraps, texts[node], sizes[node], weights[node], room, maxLines[node], lines, widths)
-        lineCount[node] = lines.size - lineStart[node]
+        lineStart[j] = lines.size
+        oneWrapInto(wraps, texts[j], sizes[j], weights[j], room, maxLines[j], lines, widths)
+        lineCount[j] = lines.size - lineStart[j]
         var widest = 0
-        var i = lineStart[node]
+        var i = lineStart[j]
         while (i < lines.size) {
             if (widths[i] > widest) widest = widths[i]
             i = i + 1
         }
-        FlexSize(f64FromInt(widest), f64FromInt(lineCount[node] * lineHeights[node]))
+        FlexSize(f64FromInt(widest), f64FromInt(lineCount[j] * lineHeights[j]))
     }
+}
+
+// Flex node `n`'s measuring slot, taken when it has none.
+fun oneFlexTextSlot(var m: OneFlexMeasure, n: int): int {
+    if (m.at[n] >= 0) return m.at[n]
+    var j = -1
+    if (m.freeSlots.size > 0) {
+        j = m.freeSlots[m.freeSlots.size - 1]
+        m.freeSlots.truncate(m.freeSlots.size - 1)
+        m.owner[j] = n
+        m.what[j] = oneMeasureNone
+        m.lineCount[j] = 0
+    } else {
+        j = m.what.size
+        m.owner.append(n)
+        m.what.append(oneMeasureNone)
+        m.texts.append("")
+        m.sizes.append(0)
+        m.weights.append("")
+        m.maxLines.append(0)
+        m.lineHeights.append(0)
+        m.lineStart.append(0)
+        m.lineCount.append(0)
+    }
+    m.at[n] = j
+    j
+}
+
+// Flex node `n` measures nothing now: its slot is free for another.
+fun oneFlexTextFree(var m: OneFlexMeasure, n: int): void {
+    val j = m.at[n]
+    if (j < 0) return
+    m.freeSlots.append(j)
+    m.owner[j] = -1
+    m.at[n] = -1
+    return
 }
 
 // What a layout keeps for the next: the flex tree and, per flex node, the node it lays out, its
@@ -378,7 +417,7 @@ class OneFlexKeep(
 )
 
 fun oneFlexKeep(wraps: Map<int, OneWrapEntry>): OneFlexKeep =
-    OneFlexKeep(flexTree(), OneFlexMeasure([], [], [], [], [], [], [], [], [], [], wraps), [], [], [], [], [], [], [], -1)
+    OneFlexKeep(flexTree(), OneFlexMeasure([], [], [], [], [], [], [], [], [], [], [], [], [], wraps), [], [], [], [], [], [], [], -1)
 
 fun oneFlexAlign(word: string): int =
     if (word == "") FLEX_AUTO else if (word == "center") FLEX_CENTER else if (word == "end") FLEX_END else if (word == "stretch") FLEX_STRETCH else FLEX_START
@@ -404,19 +443,11 @@ fun oneFlexSlot(var k: OneFlexKeep, n: int, node: Node, r: Resolved): void {
         k.boxes.append(null)
         k.builtAt.append(0)
         k.sub.append(0)
-        k.m.what.append(oneMeasureNone)
-        k.m.texts.append("")
-        k.m.sizes.append(0)
-        k.m.weights.append("")
-        k.m.maxLines.append(0)
-        k.m.lineHeights.append(0)
-        k.m.lineStart.append(0)
-        k.m.lineCount.append(0)
+        k.m.at.append(-1)
     }
     k.hashes[n] = 0
     k.boxes[n] = null
-    k.m.what[n] = oneMeasureNone
-    k.m.lineCount[n] = 0
+    oneFlexTextFree(k.m, n)
     return
 }
 
@@ -541,14 +572,18 @@ fun oneFlexConfigure(var k: OneFlexKeep, n: int, node: Node, r: Resolved): void 
     k.t.setIntrinsic(n, iw, ih)
     k.t.setScroll(n, scrollX, scrollY)
     k.t.setWrap(n, wrap)
-    if (k.m.what[n] != what || k.m.texts[n] != text || k.m.sizes[n] != size || k.m.weights[n] != weight || k.m.maxLines[n] != lines || k.m.lineHeights[n] != lineH) {
-        k.m.what[n] = what
-        k.m.texts[n] = text
-        k.m.sizes[n] = size
-        k.m.weights[n] = weight
-        k.m.maxLines[n] = lines
-        k.m.lineHeights[n] = lineH
-        if (measured) k.t.remeasure(n)
+    if (!measured) oneFlexTextFree(k.m, n)
+    else {
+        val j = oneFlexTextSlot(k.m, n)
+        if (k.m.what[j] != what || k.m.texts[j] != text || k.m.sizes[j] != size || k.m.weights[j] != weight || k.m.maxLines[j] != lines || k.m.lineHeights[j] != lineH) {
+            k.m.what[j] = what
+            k.m.texts[j] = text
+            k.m.sizes[j] = size
+            k.m.weights[j] = weight
+            k.m.maxLines[j] = lines
+            k.m.lineHeights[j] = lineH
+            k.t.remeasure(n)
+        }
     }
     return
 }
@@ -566,23 +601,29 @@ fun oneFlexStamp(var k: OneFlexKeep, n: int): int {
     newest
 }
 
+// Does measuring slot `j` hold a live text node's lines?
+fun oneFlexTextLive(k: OneFlexKeep, j: int): bool {
+    val n = k.m.owner[j]
+    n >= 0 && k.m.what[j] == oneMeasureText && k.t.has(n, FLEX_F_LIVE)
+}
+
 // The measurer appends each measurement's lines; past a size, keep only the live ones.
 fun oneFlexCompactLines(var k: OneFlexKeep): void {
     if (k.m.lines.size < 4096) return
     var live = 0
-    for (n in 0 until k.m.lineCount.size) if (k.m.what[n] == oneMeasureText && k.t.has(n, FLEX_F_LIVE)) live = live + k.m.lineCount[n]
+    for (j in 0 until k.m.lineCount.size) if (oneFlexTextLive(k, j)) live = live + k.m.lineCount[j]
     if (k.m.lines.size < live * 4) return
     val lines: array<string> = []
     val widths: array<int> = []
-    for (n in 0 until k.m.lineCount.size) {
-        if (k.m.what[n] == oneMeasureText && k.t.has(n, FLEX_F_LIVE)) {
+    for (j in 0 until k.m.lineCount.size) {
+        if (oneFlexTextLive(k, j)) {
             val start = lines.size
-            for (i in k.m.lineStart[n] until k.m.lineStart[n] + k.m.lineCount[n]) {
+            for (i in k.m.lineStart[j] until k.m.lineStart[j] + k.m.lineCount[j]) {
                 lines.append(k.m.lines[i])
                 widths.append(k.m.widths[i])
             }
-            k.m.lineStart[n] = start
-        } else k.m.lineCount[n] = 0
+            k.m.lineStart[j] = start
+        } else k.m.lineCount[j] = 0
     }
     k.m.lines.clear()
     k.m.widths.clear()
@@ -614,8 +655,9 @@ fun oneFlexBox(var ctx: OneLayoutContext, var k: OneFlexKeep, n: int, path: stri
     }
     val lines: array<string> = []
     val lineWidths: array<int> = []
-    if (k.m.what[n] == oneMeasureText) {
-        for (i in k.m.lineStart[n] until k.m.lineStart[n] + k.m.lineCount[n]) {
+    val j = k.m.at[n]
+    if (j >= 0 && k.m.what[j] == oneMeasureText) {
+        for (i in k.m.lineStart[j] until k.m.lineStart[j] + k.m.lineCount[j]) {
             lines.append(k.m.lines[i])
             lineWidths.append(k.m.widths[i])
         }
