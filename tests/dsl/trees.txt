@@ -1,0 +1,240 @@
+== android
+column#root {background=#ffffff font=sans gap=8 padding=16 radius=14}
+  pressable#root.0 {height=48 paddingLeft=16 paddingRight=16 pressed:background=#000000} label="Add" onPress="1"
+    text#root.0.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Count 0 of 2"
+  input#root.1 {caretColor=#1f2328 color=#16181a font=sans grow=1 lineHeight=21 placeholderColor=#9aa0a6 size=15} keyboard="email" onChange="1000001" placeholder="Pesquisar" submitName="draft-confirmation" value=""
+  input#root.2 {caretColor=#1f2328 color=#16181a font=sans lineHeight=21 placeholderColor=#9aa0a6 size=15} maxLength="40" multiline="true" onChange="0" onSubmit="2" placeholder="Notas" secure="false" value=""
+  pressable#root.3 {align=center background=#f3f4f5 height=48 justify=center paddingLeft=18 paddingRight=18 pressed:background=#eceef0 radius=12} label="Toggle" onPress="3"
+    text#root.3.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Toggle"
+  text#root.4 {color=#16181a font=sans lineHeight=21 size=15} text="Fechado"
+  row#u1 {gap=12}
+    stack#u1.0 {align=center background=#e3f2f3 clip=true height=32 radius=16 width=32}
+      text#u1.0.0 {color=#22656b font=sans lineHeight=16 size=12 weight=semibold} text="SC"
+    text#u1.1 {color=#16181a font=sans lineHeight=21 size=15} text="Sofia Costa"
+  row#u2 {gap=12}
+    stack#u2.0 {align=center background=#e3ecf9 clip=true height=32 radius=16 width=32}
+      text#u2.0.0 {color=#2b4f86 font=sans lineHeight=16 size=12 weight=semibold} text="AS"
+    text#u2.1 {color=#16181a font=sans lineHeight=21 size=15} text="André Silva"
+  text#root.7 {color=#16181a font=sans lineHeight=22 size=17 tracking=-10 weight=regular} text="Olá, Sofia!"
+  column#root.8 {background=@callout font=sans padding=12 radius=10}
+    text#root.8.0 {color=@callout-ink font=sans lineHeight=20 size=15 weight=semibold} text="Hello"
+  column#root.9 {font=sans gap=4}
+    text#root.9.0 {color=#16181a font=sans lineHeight=21 size=15} text="framed"
+    text#root.9.1 {color=#16181a font=sans lineHeight=21 size=15} text="inside"
+    spacer#root.9.2 size="8"
+  row#root.10 {gap=6 width=100 wrap=true}
+    icon#root.10.0 {height=24 size=20 tint=#16181a width=24} label="Star" name="star"
+    image#root.10.1 authorization="token" fallback="/b.png" label="A" src="/a.png"
+    pressable#root.10.2 {background=#f3f4f5 height=32 justify=center paddingLeft=14 paddingRight=14 pressed:background=#eceef0 radius=16} onPress="4" selected="false"
+      text#root.10.2.0 {color=#6b7178 font=sans lineHeight=16 maxLines=1 size=13 weight=medium} text="Chip"
+    row#root.10.3 {align=center background=#1f2328 height=20 justify=center minWidth=20 paddingLeft=6 paddingRight=6 radius=10}
+      text#root.10.3.0 {color=#ffffff font=sans lineHeight=14 size=12 weight=semibold} text="3"
+  stack#root.11 {align=center}
+    divider#root.11.0 {background=#e6e8ea}
+  scroll#root.12 {height=200} enabled="false" item="row"
+    text#root.12.0 {color=#16181a font=sans lineHeight=21 size=15} selected="true" text="spaced out 0 text"
+  scrollRow#root.13 {gap=4}
+    text#root.13.0 {color=#16181a font=sans lineHeight=21 size=15} text="a"
+    text#root.13.1 {color=#16181a font=sans lineHeight=21 size=15} text="b"
+  divider#root.14 {background=#e6e8ea}
+
+column#root {background=#ffffff font=sans gap=8 padding=16 radius=14}
+  pressable#root.0 {height=48 paddingLeft=16 paddingRight=16 pressed:background=#000000} label="Add" onPress="1"
+    text#root.0.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Count 3 of 2"
+  input#root.1 {caretColor=#1f2328 color=#16181a font=sans grow=1 lineHeight=21 placeholderColor=#9aa0a6 size=15} keyboard="email" onChange="1000001" placeholder="Pesquisar" submitName="draft-confirmation" value=""
+  input#root.2 {caretColor=#1f2328 color=#16181a font=sans lineHeight=21 placeholderColor=#9aa0a6 size=15} maxLength="40" multiline="true" onChange="0" onSubmit="2" placeholder="Notas" secure="false" value=""
+  pressable#root.3 {align=center background=#f3f4f5 height=48 justify=center paddingLeft=18 paddingRight=18 pressed:background=#eceef0 radius=12} label="Toggle" onPress="3"
+    text#root.3.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Toggle"
+  text#root.4 {color=#16181a font=sans lineHeight=21 size=15} text="Aberto"
+  text#root.5 {color=#16181a font=sans lineHeight=21 size=15} text="many"
+  row#u1 {gap=12}
+    stack#u1.0 {align=center background=#e3f2f3 clip=true height=32 radius=16 width=32}
+      text#u1.0.0 {color=#22656b font=sans lineHeight=16 size=12 weight=semibold} text="SC"
+    text#u1.1 {color=#16181a font=sans lineHeight=21 size=15} text="Sofia Costa"
+  row#u2 {gap=12}
+    stack#u2.0 {align=center background=#e3ecf9 clip=true height=32 radius=16 width=32}
+      text#u2.0.0 {color=#2b4f86 font=sans lineHeight=16 size=12 weight=semibold} text="AS"
+    text#u2.1 {color=#16181a font=sans lineHeight=21 size=15} text="André Silva"
+  text#root.8 {color=#16181a font=sans lineHeight=22 size=17 tracking=-10 weight=bold} text="Olá, Sofia!"
+  column#root.9 {background=@callout font=sans padding=12 radius=10}
+    text#root.9.0 {color=@callout-ink font=sans lineHeight=20 size=15 weight=semibold} text="Hello"
+  column#root.10 {font=sans gap=4}
+    text#root.10.0 {color=#16181a font=sans lineHeight=21 size=15} text="framed"
+    text#root.10.1 {color=#16181a font=sans lineHeight=21 size=15} text="inside"
+    spacer#root.10.2 size="8"
+  row#root.11 {gap=6 width=100 wrap=true}
+    icon#root.11.0 {height=24 size=20 tint=#16181a width=24} label="Star" name="star"
+    image#root.11.1 authorization="token" fallback="/b.png" label="A" src="/a.png"
+    pressable#root.11.2 {background=#1f2328 height=32 justify=center paddingLeft=14 paddingRight=14 pressed:background=#1f2328 radius=16} onPress="4" selected="true"
+      text#root.11.2.0 {color=#ffffff font=sans lineHeight=16 maxLines=1 size=13 weight=medium} text="Chip"
+    row#root.11.3 {align=center background=#1f2328 height=20 justify=center minWidth=20 paddingLeft=6 paddingRight=6 radius=10}
+      text#root.11.3.0 {color=#ffffff font=sans lineHeight=14 size=12 weight=semibold} text="3"
+  stack#root.12 {align=center}
+    divider#root.12.0 {background=#e6e8ea}
+  scroll#root.13 {height=200} enabled="false" item="row"
+    text#root.13.0 {color=#16181a font=sans lineHeight=21 size=15} selected="true" text="spaced out 3 text"
+  scrollRow#root.14 {gap=4}
+    text#root.14.0 {color=#16181a font=sans lineHeight=21 size=15} text="a"
+    text#root.14.1 {color=#16181a font=sans lineHeight=21 size=15} text="b"
+  divider#root.15 {background=#e6e8ea}
+
+== web-document
+column#root {background=#ffffff font=sans gap=8 hover:background=#f3f4f5 padding=16}
+  pressable#root.0 {cursor=pointer height=48 paddingLeft=16 paddingRight=16 pressed:background=#000000} label="Add" onPress="1"
+    text#root.0.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Count 0 of 2"
+  input#root.1 {caretColor=#1f2328 color=#16181a font=sans grow=1 lineHeight=21 placeholderColor=#9aa0a6 size=15} keyboard="email" onChange="1000001" placeholder="Pesquisar" submitName="draft-confirmation" value=""
+  input#root.2 {caretColor=#1f2328 color=#16181a font=sans lineHeight=21 placeholderColor=#9aa0a6 size=15} maxLength="40" multiline="true" onChange="0" onSubmit="2" placeholder="Notas" secure="false" value=""
+  pressable#root.3 {align=center background=#f3f4f5 cursor=pointer height=48 justify=center paddingLeft=18 paddingRight=18 pressed:background=#eceef0 radius=12 transition=background .12s width=hug} label="Toggle" onPress="3"
+    text#root.3.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Toggle"
+  text#root.4 {color=#16181a font=sans lineHeight=21 size=15} text="Fechado"
+  row#u1 {gap=12}
+    stack#u1.0 {align=center background=#e3f2f3 clip=true height=32 radius=16 width=32}
+      text#u1.0.0 {color=#22656b font=sans lineHeight=16 size=12 weight=semibold} text="SC"
+    text#u1.1 {color=#16181a font=sans lineHeight=21 size=15} text="Sofia Costa"
+  row#u2 {gap=12}
+    stack#u2.0 {align=center background=#e3ecf9 clip=true height=32 radius=16 width=32}
+      text#u2.0.0 {color=#2b4f86 font=sans lineHeight=16 size=12 weight=semibold} text="AS"
+    text#u2.1 {color=#16181a font=sans lineHeight=21 size=15} text="André Silva"
+  text#root.7 {color=#16181a font=sans lineHeight=22 size=17 tracking=-10 weight=regular} text="Olá, Sofia!"
+  column#root.8 {background=@callout font=sans padding=12 radius=10}
+    text#root.8.0 {color=@callout-ink font=sans lineHeight=20 size=15 weight=semibold} text="Hello"
+  column#root.9 {font=sans gap=4}
+    text#root.9.0 {color=#16181a font=sans lineHeight=21 size=15} text="framed"
+    text#root.9.1 {color=#16181a font=sans lineHeight=21 size=15} text="inside"
+    spacer#root.9.2 size="8"
+  row#root.10 {gap=-2 max760:gap=6 min1500:height=480 width=100 wrap=true}
+    icon#root.10.0 {height=24 size=20 tint=#16181a width=24} label="Star" name="star"
+    image#root.10.1 authorization="token" fallback="/b.png" label="A" src="/a.png"
+    pressable#root.10.2 {background=#f3f4f5 cursor=pointer height=32 justify=center paddingLeft=14 paddingRight=14 pressed:background=#eceef0 radius=16} onPress="4" selected="false"
+      text#root.10.2.0 {color=#6b7178 font=sans lineHeight=16 maxLines=1 size=13 weight=medium} text="Chip"
+    row#root.10.3 {align=center background=#1f2328 height=20 justify=center minWidth=20 paddingLeft=6 paddingRight=6 radius=10}
+      text#root.10.3.0 {color=#ffffff font=sans lineHeight=14 size=12 weight=semibold} text="3"
+  stack#root.11 {align=center}
+    divider#root.11.0 {background=#e6e8ea}
+  scroll#root.12 {height=200} enabled="false" item="row"
+    text#root.12.0 {color=#16181a font=sans lineHeight=21 size=15} selected="true" text="spaced out 0 text"
+  scrollRow#root.13 {gap=4}
+    text#root.13.0 {color=#16181a font=sans lineHeight=21 size=15} text="a"
+    text#root.13.1 {color=#16181a font=sans lineHeight=21 size=15} text="b"
+  divider#root.14 {background=#e6e8ea}
+
+column#root {background=#ffffff font=sans gap=8 hover:background=#f3f4f5 padding=16}
+  pressable#root.0 {cursor=pointer height=48 paddingLeft=16 paddingRight=16 pressed:background=#000000} label="Add" onPress="1"
+    text#root.0.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Count 3 of 2"
+  input#root.1 {caretColor=#1f2328 color=#16181a font=sans grow=1 lineHeight=21 placeholderColor=#9aa0a6 size=15} keyboard="email" onChange="1000001" placeholder="Pesquisar" submitName="draft-confirmation" value=""
+  input#root.2 {caretColor=#1f2328 color=#16181a font=sans lineHeight=21 placeholderColor=#9aa0a6 size=15} maxLength="40" multiline="true" onChange="0" onSubmit="2" placeholder="Notas" secure="false" value=""
+  pressable#root.3 {align=center background=#f3f4f5 cursor=pointer height=48 justify=center paddingLeft=18 paddingRight=18 pressed:background=#eceef0 radius=12 transition=background .12s width=hug} label="Toggle" onPress="3"
+    text#root.3.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Toggle"
+  text#root.4 {color=#16181a font=sans lineHeight=21 size=15} text="Aberto"
+  text#root.5 {color=#16181a font=sans lineHeight=21 size=15} text="many"
+  row#u1 {gap=12}
+    stack#u1.0 {align=center background=#e3f2f3 clip=true height=32 radius=16 width=32}
+      text#u1.0.0 {color=#22656b font=sans lineHeight=16 size=12 weight=semibold} text="SC"
+    text#u1.1 {color=#16181a font=sans lineHeight=21 size=15} text="Sofia Costa"
+  row#u2 {gap=12}
+    stack#u2.0 {align=center background=#e3ecf9 clip=true height=32 radius=16 width=32}
+      text#u2.0.0 {color=#2b4f86 font=sans lineHeight=16 size=12 weight=semibold} text="AS"
+    text#u2.1 {color=#16181a font=sans lineHeight=21 size=15} text="André Silva"
+  text#root.8 {color=#16181a font=sans lineHeight=22 size=17 tracking=-10 weight=bold} text="Olá, Sofia!"
+  column#root.9 {background=@callout font=sans padding=12 radius=10}
+    text#root.9.0 {color=@callout-ink font=sans lineHeight=20 size=15 weight=semibold} text="Hello"
+  column#root.10 {font=sans gap=4}
+    text#root.10.0 {color=#16181a font=sans lineHeight=21 size=15} text="framed"
+    text#root.10.1 {color=#16181a font=sans lineHeight=21 size=15} text="inside"
+    spacer#root.10.2 size="8"
+  row#root.11 {gap=-2 max760:gap=6 min1500:height=480 width=100 wrap=true}
+    icon#root.11.0 {height=24 size=20 tint=#16181a width=24} label="Star" name="star"
+    image#root.11.1 authorization="token" fallback="/b.png" label="A" src="/a.png"
+    pressable#root.11.2 {background=#1f2328 cursor=pointer height=32 justify=center paddingLeft=14 paddingRight=14 pressed:background=#1f2328 radius=16} onPress="4" selected="true"
+      text#root.11.2.0 {color=#ffffff font=sans lineHeight=16 maxLines=1 size=13 weight=medium} text="Chip"
+    row#root.11.3 {align=center background=#1f2328 height=20 justify=center minWidth=20 paddingLeft=6 paddingRight=6 radius=10}
+      text#root.11.3.0 {color=#ffffff font=sans lineHeight=14 size=12 weight=semibold} text="3"
+  stack#root.12 {align=center}
+    divider#root.12.0 {background=#e6e8ea}
+  scroll#root.13 {height=200} enabled="false" item="row"
+    text#root.13.0 {color=#16181a font=sans lineHeight=21 size=15} selected="true" text="spaced out 3 text"
+  scrollRow#root.14 {gap=4}
+    text#root.14.0 {color=#16181a font=sans lineHeight=21 size=15} text="a"
+    text#root.14.1 {color=#16181a font=sans lineHeight=21 size=15} text="b"
+  divider#root.15 {background=#e6e8ea}
+
+== desktop
+column#root {background=#ffffff font=sans gap=8 padding=16}
+  pressable#root.0 {height=48 paddingLeft=16 paddingRight=16 pressed:background=#000000} label="Add" onPress="1"
+    text#root.0.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Count 0 of 2"
+  input#root.1 {caretColor=#1f2328 color=#16181a font=sans grow=1 lineHeight=21 placeholderColor=#9aa0a6 size=15} keyboard="email" onChange="1000001" placeholder="Pesquisar" submitName="draft-confirmation" value=""
+  input#root.2 {caretColor=#1f2328 color=#16181a font=sans lineHeight=21 placeholderColor=#9aa0a6 size=15} maxLength="40" multiline="true" onChange="0" onSubmit="2" placeholder="Notas" secure="false" value=""
+  pressable#root.3 {align=center background=#f3f4f5 height=48 justify=center paddingLeft=18 paddingRight=18 pressed:background=#eceef0 radius=12} label="Toggle" onPress="3"
+    text#root.3.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Toggle"
+  text#root.4 {color=#16181a font=sans lineHeight=21 size=15} text="Fechado"
+  row#u1 {gap=12}
+    stack#u1.0 {align=center background=#e3f2f3 clip=true height=32 radius=16 width=32}
+      text#u1.0.0 {color=#22656b font=sans lineHeight=16 size=12 weight=semibold} text="SC"
+    text#u1.1 {color=#16181a font=sans lineHeight=21 size=15} text="Sofia Costa"
+  row#u2 {gap=12}
+    stack#u2.0 {align=center background=#e3ecf9 clip=true height=32 radius=16 width=32}
+      text#u2.0.0 {color=#2b4f86 font=sans lineHeight=16 size=12 weight=semibold} text="AS"
+    text#u2.1 {color=#16181a font=sans lineHeight=21 size=15} text="André Silva"
+  text#root.7 {color=#16181a font=sans lineHeight=22 size=17 tracking=-10 weight=regular} text="Olá, Sofia!"
+  column#root.8 {background=@callout font=sans padding=12 radius=10}
+    text#root.8.0 {color=@callout-ink font=sans lineHeight=20 size=15 weight=semibold} text="Hello"
+  column#root.9 {font=sans gap=4}
+    text#root.9.0 {color=#16181a font=sans lineHeight=21 size=15} text="framed"
+    text#root.9.1 {color=#16181a font=sans lineHeight=21 size=15} text="inside"
+    spacer#root.9.2 size="8"
+  row#root.10 {gap=6 width=100 wrap=true}
+    icon#root.10.0 {height=24 size=20 tint=#16181a width=24} label="Star" name="star"
+    image#root.10.1 authorization="token" fallback="/b.png" label="A" src="/a.png"
+    pressable#root.10.2 {background=#f3f4f5 height=32 justify=center paddingLeft=14 paddingRight=14 pressed:background=#eceef0 radius=16} onPress="4" selected="false"
+      text#root.10.2.0 {color=#6b7178 font=sans lineHeight=16 maxLines=1 size=13 weight=medium} text="Chip"
+    row#root.10.3 {align=center background=#1f2328 height=20 justify=center minWidth=20 paddingLeft=6 paddingRight=6 radius=10}
+      text#root.10.3.0 {color=#ffffff font=sans lineHeight=14 size=12 weight=semibold} text="3"
+  stack#root.11 {align=center}
+    divider#root.11.0 {background=#e6e8ea}
+  scroll#root.12 {height=200} enabled="false" item="row"
+    text#root.12.0 {color=#16181a font=sans lineHeight=21 size=15} selected="true" text="spaced out 0 text"
+  scrollRow#root.13 {gap=4}
+    text#root.13.0 {color=#16181a font=sans lineHeight=21 size=15} text="a"
+    text#root.13.1 {color=#16181a font=sans lineHeight=21 size=15} text="b"
+  divider#root.14 {background=#e6e8ea}
+
+column#root {background=#ffffff font=sans gap=8 padding=16}
+  pressable#root.0 {height=48 paddingLeft=16 paddingRight=16 pressed:background=#000000} label="Add" onPress="1"
+    text#root.0.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Count 3 of 2"
+  input#root.1 {caretColor=#1f2328 color=#16181a font=sans grow=1 lineHeight=21 placeholderColor=#9aa0a6 size=15} keyboard="email" onChange="1000001" placeholder="Pesquisar" submitName="draft-confirmation" value=""
+  input#root.2 {caretColor=#1f2328 color=#16181a font=sans lineHeight=21 placeholderColor=#9aa0a6 size=15} maxLength="40" multiline="true" onChange="0" onSubmit="2" placeholder="Notas" secure="false" value=""
+  pressable#root.3 {align=center background=#f3f4f5 height=48 justify=center paddingLeft=18 paddingRight=18 pressed:background=#eceef0 radius=12} label="Toggle" onPress="3"
+    text#root.3.0 {color=#16181a font=sans lineHeight=20 maxLines=1 size=15 weight=semibold} text="Toggle"
+  text#root.4 {color=#16181a font=sans lineHeight=21 size=15} text="Aberto"
+  text#root.5 {color=#16181a font=sans lineHeight=21 size=15} text="many"
+  row#u1 {gap=12}
+    stack#u1.0 {align=center background=#e3f2f3 clip=true height=32 radius=16 width=32}
+      text#u1.0.0 {color=#22656b font=sans lineHeight=16 size=12 weight=semibold} text="SC"
+    text#u1.1 {color=#16181a font=sans lineHeight=21 size=15} text="Sofia Costa"
+  row#u2 {gap=12}
+    stack#u2.0 {align=center background=#e3ecf9 clip=true height=32 radius=16 width=32}
+      text#u2.0.0 {color=#2b4f86 font=sans lineHeight=16 size=12 weight=semibold} text="AS"
+    text#u2.1 {color=#16181a font=sans lineHeight=21 size=15} text="André Silva"
+  text#root.8 {color=#16181a font=sans lineHeight=22 size=17 tracking=-10 weight=bold} text="Olá, Sofia!"
+  column#root.9 {background=@callout font=sans padding=12 radius=10}
+    text#root.9.0 {color=@callout-ink font=sans lineHeight=20 size=15 weight=semibold} text="Hello"
+  column#root.10 {font=sans gap=4}
+    text#root.10.0 {color=#16181a font=sans lineHeight=21 size=15} text="framed"
+    text#root.10.1 {color=#16181a font=sans lineHeight=21 size=15} text="inside"
+    spacer#root.10.2 size="8"
+  row#root.11 {gap=6 width=100 wrap=true}
+    icon#root.11.0 {height=24 size=20 tint=#16181a width=24} label="Star" name="star"
+    image#root.11.1 authorization="token" fallback="/b.png" label="A" src="/a.png"
+    pressable#root.11.2 {background=#1f2328 height=32 justify=center paddingLeft=14 paddingRight=14 pressed:background=#1f2328 radius=16} onPress="4" selected="true"
+      text#root.11.2.0 {color=#ffffff font=sans lineHeight=16 maxLines=1 size=13 weight=medium} text="Chip"
+    row#root.11.3 {align=center background=#1f2328 height=20 justify=center minWidth=20 paddingLeft=6 paddingRight=6 radius=10}
+      text#root.11.3.0 {color=#ffffff font=sans lineHeight=14 size=12 weight=semibold} text="3"
+  stack#root.12 {align=center}
+    divider#root.12.0 {background=#e6e8ea}
+  scroll#root.13 {height=200} enabled="false" item="row"
+    text#root.13.0 {color=#16181a font=sans lineHeight=21 size=15} selected="true" text="spaced out 3 text"
+  scrollRow#root.14 {gap=4}
+    text#root.14.0 {color=#16181a font=sans lineHeight=21 size=15} text="a"
+    text#root.14.1 {color=#16181a font=sans lineHeight=21 size=15} text="b"
+  divider#root.15 {background=#e6e8ea}
+
