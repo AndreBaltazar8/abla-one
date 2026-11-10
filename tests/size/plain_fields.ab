@@ -1,0 +1,481 @@
+// Generated pair for tests/state_size.sh: identical but for `by State(...)` (state_fields) and
+// plain fields (plain_fields). A State read must be a bare load, so the two stay the same size.
+import "../../src/one.ab"
+
+class A0(var f0: string = "s0", var f1: int = 1, var f2: string = "s2", var f3: int = 3, var f4: string = "s4", var f5: int = 5, var f6: string = "s6", var f7: int = 7, var f8: string = "s8", var f9: int = 9)
+class A1(var f0: string = "s0", var f1: int = 1, var f2: string = "s2", var f3: int = 3, var f4: string = "s4", var f5: int = 5, var f6: string = "s6", var f7: int = 7, var f8: string = "s8", var f9: int = 9)
+class A2(var f0: string = "s0", var f1: int = 1, var f2: string = "s2", var f3: int = 3, var f4: string = "s4", var f5: int = 5, var f6: string = "s6", var f7: int = 7, var f8: string = "s8", var f9: int = 9)
+class A3(var f0: string = "s0", var f1: int = 1, var f2: string = "s2", var f3: int = 3, var f4: string = "s4", var f5: int = 5, var f6: string = "s6", var f7: int = 7, var f8: string = "s8", var f9: int = 9)
+class A4(var f0: string = "s0", var f1: int = 1, var f2: string = "s2", var f3: int = 3, var f4: string = "s4", var f5: int = 5, var f6: string = "s6", var f7: int = 7, var f8: string = "s8", var f9: int = 9)
+class A5(var f0: string = "s0", var f1: int = 1, var f2: string = "s2", var f3: int = 3, var f4: string = "s4", var f5: int = 5, var f6: string = "s6", var f7: int = 7, var f8: string = "s8", var f9: int = 9)
+class A6(var f0: string = "s0", var f1: int = 1, var f2: string = "s2", var f3: int = 3, var f4: string = "s4", var f5: int = 5, var f6: string = "s6", var f7: int = 7, var f8: string = "s8", var f9: int = 9)
+class A7(var f0: string = "s0", var f1: int = 1, var f2: string = "s2", var f3: int = 3, var f4: string = "s4", var f5: int = 5, var f6: string = "s6", var f7: int = 7, var f8: string = "s8", var f9: int = 9)
+
+fun read0(a: A0): int {
+    var t = 0
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t
+}
+
+fun read1(a: A1): int {
+    var t = 0
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t
+}
+
+fun read2(a: A2): int {
+    var t = 0
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t
+}
+
+fun read3(a: A3): int {
+    var t = 0
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t
+}
+
+fun read4(a: A4): int {
+    var t = 0
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t
+}
+
+fun read5(a: A5): int {
+    var t = 0
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t
+}
+
+fun read6(a: A6): int {
+    var t = 0
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t
+}
+
+fun read7(a: A7): int {
+    var t = 0
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t = t + a.f0.size
+    t = t + a.f1
+    t = t + a.f2.size
+    t = t + a.f3
+    t = t + a.f4.size
+    t = t + a.f5
+    t = t + a.f6.size
+    t = t + a.f7
+    t = t + a.f8.size
+    t = t + a.f9
+    t
+}
+
+fun main: int {
+    var t = 0
+    var a0 = A0()
+    a0.f1 = 5
+    t = t + read0(a0)
+    var a1 = A1()
+    a1.f1 = 6
+    t = t + read1(a1)
+    var a2 = A2()
+    a2.f1 = 7
+    t = t + read2(a2)
+    var a3 = A3()
+    a3.f1 = 8
+    t = t + read3(a3)
+    var a4 = A4()
+    a4.f1 = 9
+    t = t + read4(a4)
+    var a5 = A5()
+    a5.f1 = 10
+    t = t + read5(a5)
+    var a6 = A6()
+    a6.f1 = 11
+    t = t + read6(a6)
+    var a7 = A7()
+    a7.f1 = 12
+    t = t + read7(a7)
+    t
+}
