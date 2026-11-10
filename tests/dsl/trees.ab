@@ -1,0 +1,78 @@
+import "abla/io"
+import "../../src/one_kit.ab"
+import "../../src/dsl/one.ab"
+import "../../src/backends/test.ab"
+
+// Every $one form the tests use, and the rest of the element table: the generated trees, dumped
+// (tests/dsl_trees.sh compares them with tests/dsl/trees.txt).
+
+class Person(val name: string, val seed: string)
+
+fun Greeting(var ui: Ui, name: string, emphasis: bool): Node = $one
+    <Text text="title" weight={if (emphasis) "bold" else "regular"}>Olá, {name}!</Text>
+
+fun Callout(var ui: Ui, title: string): Node = $one
+    <Column style={ui.part("Callout", "", style().padding(12).radius(10).background("@callout"))}>
+      <Text style={ui.part("Callout", "title", style().text("label").color("@callout-ink"))}>{title}</Text>
+    </Column>
+
+fun Frame(var ui: Ui, label: string, kids: array<Node>): Node = $one
+    <Column gap=4><Text>{label}</Text>{fragment(kids)}</Column>
+
+class Demo(var count: int by State(0), var query: string by State(""), var log: string by State(""), var open: bool by State(false)) {
+    fun people(): array<Person> = [Person("Sofia Costa", "u1"), Person("André Silva", "u2")]
+    fun note(entry: string): void {
+        log = "$log$entry;"
+        return
+    }
+    fun render(var ui: Ui): Node = $one
+        <Column padding=16 gap=8 background=@surface android:radius=14 web:hover:background=@surface-alt key="root">
+          <Pressable onPress={ count += 1; note("press") } paddingX=16 height=48 pressed:background="#000000" label="Add">
+            <Text text="label" color=@ink maxLines=1>Count {count} of {people().size}</Text>
+          </Pressable>
+          <Input value={query} placeholder="Pesquisar" submitName="draft-confirmation" onChange={ query = value } keyboard="email" grow=1 />
+          <Input value="" placeholder="Notas" multiline secure=false maxLength=40 onSubmit={ open = true } />
+          <Button variant="secondary" onPress={ open = !open }>Toggle</Button>
+          <If cond={open}>
+            <Text>Aberto</Text>
+          </If>
+          <Else>
+            <Text>Fechado</Text>
+          </Else>
+          <If cond={count > 2}><Text>many</Text></If>
+          <For each={people()} as="person">
+            <Row gap=12 key={person.seed}>
+              <Avatar name={person.name} seed={person.seed} diameter=32 />
+              <Text>{person.name}</Text>
+            </Row>
+          </For>
+          <Greeting name="Sofia" emphasis={count > 0} />
+          <Callout title="Hello" />
+          <Frame label="framed"><Text>inside</Text><Spacer amount=8 /></Frame>
+          <Row wrap=true width=100 gap=-2 max760:gap=6 min1500:height=480>
+            <Icon name="star" label="Star" size=20 />
+            <Image src="/a.png" label="A" authorization="token" fallback="/b.png" />
+            <Chip selected={open} onPress={ count = 0 }>Chip</Chip>
+            <Badge variant="info">3</Badge>
+          </Row>
+          <Stack align="center"><Divider /></Stack>
+          <Scroll height=200 enabled=false item="row"><Text selected>  spaced   out {count}  text  </Text></Scroll>
+          <ScrollRow gap=4><Text>a</Text><Text>b</Text></ScrollRow>
+          {divider(style())}
+        </Column>
+}
+
+fun main: int {
+    val t = oneDefaultTheme()
+    for (target in ["android", "web-document", "desktop"]) {
+        var app = Demo()
+        var ui = oneUi(target, t)
+        println("== $target")
+        println(oneTestDump(app.render(ui), t, target))
+        app.count = 3
+        app.open = true
+        var ui2 = oneUi(target, t)
+        println(oneTestDump(app.render(ui2), t, target))
+    }
+    0
+}

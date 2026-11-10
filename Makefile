@@ -15,6 +15,7 @@ test:
 	tests/android_shell.sh
 	$(NIX) 'ABLAC=$(ABLAC) tests/layout_size.sh'
 	$(NIX) 'ABLAC=$(ABLAC) tests/state_size.sh'
+	$(NIX) 'ABLAC=$(ABLAC) tests/dsl_trees.sh'
 
 # @server over real HTTP: the routes, server.lock, client binaries.
 test-remote:
