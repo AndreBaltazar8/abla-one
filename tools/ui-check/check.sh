@@ -77,7 +77,8 @@ capture() {
 		for t in tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab tests/remote/client.ab tests/remote/routes.ab; do
 			if compile test "$t" > "$out/test.log" 2>&1; then echo "ok   $t" >> "$out/TESTS"; else echo "FAIL $t" >> "$out/TESTS"; { echo "== $t"; tail -8 "$out/test.log"; } >> "$out/tests-failed.log"; fi
 		done
-		for script in tests/layout_size.sh tests/thin_config.sh; do
+		for script in tests/layout_size.sh tests/thin_config.sh tests/state_size.sh; do
+			[ -f "$script" ] || continue
 			if [ -n "$nix" ]; then run=($slot $nix "ABLAC=$ablac $script"); else run=(env "ABLAC=$ablac" "$script"); fi
 			if "${run[@]}" > "$out/test.log" 2>&1; then echo "ok   $script" >> "$out/TESTS"; else echo "FAIL $script" >> "$out/TESTS"; { echo "== $script"; tail -8 "$out/test.log"; } >> "$out/tests-failed.log"; fi
 		done
