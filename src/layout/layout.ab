@@ -3,6 +3,7 @@ import "abla/float"
 import "../one.ab"
 import "inter_metrics.ab"
 import "../../../abla-ui/src/text.ab"
+import "../../../abla-ui/src/flex.ab"
 
 // one-layout (SPEC §7, M3): lays out a node tree in logical pixels for the
 // backends that draw themselves (web-canvas, desktop, epaper). Containers
@@ -328,7 +329,190 @@ fun oneLayoutCached(root: Node, theme: Theme, target: string, width: int, height
 fun oneLayoutWith(root: Node, theme: Theme, target: string, width: int, height: int, scroll: Map<string, int>, var cache: OneLayoutCache): OneBox {
     oneViewportWidth = width
     var ctx = OneLayoutContext(theme, target, scroll, cache, width, height)
-    oneMeasure(ctx, root, oneResolveNode(ctx, root), width, height, width, height, "r")
+    // abla-ui's flex lays the tree out: its rules are this file's (see abla-ui's README, Layout).
+    var t = flexTree()
+    var m = OneFlexMeasure([], [], [], [], [], [], [], [], [], [], oneLayoutCache())
+    val nodes: array<Node> = []
+    val rs: array<Resolved> = []
+    val top = oneFlexAdd(ctx, t, m, nodes, rs, root, -1)
+    t.layout(top, f64FromInt(width), f64FromInt(height), m)
+    oneFlexBox(ctx, t, m, nodes, rs, top, "r")
+}
+
+// --- the tree as abla-ui flex nodes --------------------------------------------
+
+val oneMeasureNone = 0
+val oneMeasureText = 1
+val oneMeasureInput = 2
+val oneMeasureInputLines = 3
+
+// Measures text and inputs for flex, as oneMeasureFresh does: lines by oneWrap, line height by
+// oneLineHeight. The lines of each node's last measurement are kept (start and count into `lines`).
+class OneFlexMeasure(
+    var what: array<int>, var texts: array<string>, var sizes: array<int>, var weights: array<string>,
+    var maxLines: array<int>, var lineHeights: array<int>,
+    var lineStart: array<int>, var lineCount: array<int>, var lines: array<string>, var widths: array<int>,
+    var cache: OneLayoutCache
+) : FlexMeasure {
+    fun measure(node: int, maxWidth: f64, maxHeight: f64): FlexSize {
+        val room = f64ToInt(maxWidth)
+        val kind = what[node]
+        if (kind == oneMeasureInput || kind == oneMeasureInputLines) {
+            var rows = 1
+            if (kind == oneMeasureInputLines) rows = oneWrap(texts[node], sizes[node], weights[node], room, maxLines[node]).size
+            return FlexSize(0.0, f64FromInt(rows * lineHeights[node]))
+        }
+        lineStart[node] = lines.size
+        oneWrapCached(cache, texts[node], sizes[node], weights[node], room, maxLines[node], lines, widths)
+        lineCount[node] = lines.size - lineStart[node]
+        var widest = 0
+        var i = lineStart[node]
+        while (i < lines.size) {
+            if (widths[i] > widest) widest = widths[i]
+            i = i + 1
+        }
+        FlexSize(f64FromInt(widest), f64FromInt(lineCount[node] * lineHeights[node]))
+    }
+}
+
+fun oneFlexAlign(word: string): int =
+    if (word == "") FLEX_AUTO else if (word == "center") FLEX_CENTER else if (word == "end") FLEX_END else if (word == "stretch") FLEX_STRETCH else FLEX_START
+
+fun oneFlexJustify(word: string): int =
+    if (word == "center") FLEX_CENTER else if (word == "end") FLEX_END else if (word == "between") FLEX_BETWEEN else FLEX_START
+
+fun oneFlexSizeMode(word: string): int =
+    if (word == "") FLEX_CONTENT else if (word == "fill") FLEX_FILL else if (word == "hug") FLEX_HUG else FLEX_FIXED
+
+fun oneFlexBound(v: int, none: f64): f64 = if (v >= 0) f64FromInt(v) else none
+
+// Adds `node` and its subtree under `parent`; returns its flex index (== its place in `nodes`).
+fun oneFlexAdd(var ctx: OneLayoutContext, var t: FlexTree, var m: OneFlexMeasure, var nodes: array<Node>, var rs: array<Resolved>, node: Node, parent: int): int {
+    val n = t.add(parent)
+    val r = oneResolveNode(ctx, node)
+    nodes.append(node)
+    rs.append(r)
+    m.what.append(oneMeasureNone)
+    m.texts.append("")
+    m.sizes.append(0)
+    m.weights.append("")
+    m.maxLines.append(0)
+    m.lineHeights.append(0)
+    m.lineStart.append(0)
+    m.lineCount.append(0)
+    val kind = node.kind
+    t.setPadding(n, f64FromInt(onePad(r, "Left")), f64FromInt(onePad(r, "Top")), f64FromInt(onePad(r, "Right")), f64FromInt(onePad(r, "Bottom")))
+    val widthProp = r.get("width")
+    val heightProp = r.get("height")
+    t.setWidth(n, oneFlexSizeMode(widthProp), f64FromInt(oneParseInt(widthProp, 0)))
+    t.setHeight(n, oneFlexSizeMode(heightProp), f64FromInt(oneParseInt(heightProp, 0)))
+    t.setMinMax(n, oneFlexBound(r.int("minWidth", -1), 0.0), oneFlexBound(r.int("maxWidth", -1), FLEX_INF),
+        oneFlexBound(r.int("minHeight", -1), 0.0), oneFlexBound(r.int("maxHeight", -1), FLEX_INF))
+    val grow = r.int("grow", 0)
+    t.setFlex(n, if (grow > 0) f64FromInt(grow) else 0.0, 1.0)
+    t.setGap(n, f64FromInt(r.int("gap", 0)))
+    t.setAlign(n, oneFlexAlign(r.get("align")), oneFlexJustify(r.get("justify")))
+    val self = r.get("alignSelf")
+    t.setAlignSelf(n, if (self == "") FLEX_AUTO else oneFlexAlign(self))
+    if (kind == "text" || kind == "rich") {
+        t.setMeasured(n, true)
+        m.what[n] = oneMeasureText
+        m.texts[n] = if (kind == "text") node.attr("text") else oneRichPlain(node.attr("runs"))
+        m.sizes[n] = r.int("size", 15)
+        m.weights[n] = r.get("weight")
+        m.maxLines[n] = r.int("maxLines", 0)
+        m.lineHeights[n] = oneLineHeight(r)
+        // Cut lines end in an ellipsis fitted to the room.
+        if (m.maxLines[n] > 0) t.setMeasureExact(n, true)
+    } else if (kind == "icon" || kind == "image" || kind == "bitmap") {
+        val size = f64FromInt(r.int("size", if (kind == "icon") 24 else 40))
+        t.setIntrinsic(n, size, size)
+        t.setNoStretch(n, true)
+    } else if (kind == "input") {
+        t.setMeasured(n, true)
+        t.setIntrinsic(n, FLEX_INTRINSIC_ROOM, -1.0)
+        val value = node.attr("value")
+        m.what[n] = if (node.attr("multiline") == "true") oneMeasureInputLines else oneMeasureInput
+        m.texts[n] = if (value == "") node.attr("placeholder") else value
+        m.sizes[n] = r.int("size", 16)
+        m.weights[n] = r.get("weight")
+        m.maxLines[n] = r.int("maxLines", 5)
+        m.lineHeights[n] = oneLineHeight(r)
+        t.setMeasureExact(n, true)
+    } else if (kind == "divider") {
+        t.setIntrinsic(n, FLEX_INTRINSIC_ROOM, 1.0)
+    } else if (kind == "spacer") {
+        val amount = f64FromInt(oneParseInt(node.attr("size"), 0))
+        t.setIntrinsic(n, amount, amount)
+        t.setNoStretch(n, true)
+    } else if (kind == "row" || kind == "scrollRow") {
+        t.setDir(n, FLEX_ROW)
+        val across = kind == "scrollRow"
+        if (across || r.get("wrap") == "true") {
+            if ((across && oneScrollRowMeasure.size > 0) || (!across && oneWrapRowMeasure.size > 0)) {
+                if (across) t.setScroll(n, true, false) else t.setWrap(n, true)
+            } else println("one: plain row: make it with Style.wrap() or scrollRow()")
+        }
+    } else if (kind == "stack") {
+        t.setDir(n, FLEX_STACK)
+    } else if (kind == "popover") {
+        t.setDir(n, FLEX_POPOVER)
+    } else if (kind == "scroll" || kind == "feed") {
+        t.setScroll(n, false, true)
+    }
+    var count = node.children.size
+    if (kind == "popover" && count > 2) count = 2
+    if (kind == "text" || kind == "rich" || kind == "icon" || kind == "image" || kind == "bitmap" || kind == "input" || kind == "divider" || kind == "spacer") count = 0
+    for (i in 0 until count) {
+        val unused = oneFlexAdd(ctx, t, m, nodes, rs, node.children[i], n)
+    }
+    n
+}
+
+// The laid-out flex node `n` as abla-one's box: its children, its text's lines, contentH as
+// each kind keeps it, and scroll offsets (kept per node path; a feed opens at the bottom).
+fun oneFlexBox(var ctx: OneLayoutContext, t: FlexTree, m: OneFlexMeasure, nodes: array<Node>, rs: array<Resolved>, n: int, path: string): OneBox {
+    val node = nodes[n]
+    val kind = node.kind
+    val children: array<OneBox> = []
+    var c = t.first[n]
+    var index = 0
+    while (c >= 0) {
+        children.append(oneFlexBox(ctx, t, m, nodes, rs, c, oneChildPath(path, nodes[c], index)))
+        c = t.next[c]
+        index = index + 1
+    }
+    val lines: array<string> = []
+    val lineWidths: array<int> = []
+    if (m.what[n] == oneMeasureText) {
+        for (i in m.lineStart[n] until m.lineStart[n] + m.lineCount[n]) {
+            lines.append(m.lines[i])
+            lineWidths.append(m.widths[i])
+        }
+    }
+    val w = f64ToInt(t.w[n])
+    val h = f64ToInt(t.h[n])
+    var contentH = 0
+    var scrollY = 0
+    val leaf = kind == "text" || kind == "rich" || kind == "icon" || kind == "image" || kind == "bitmap" || kind == "input" || kind == "divider" || kind == "spacer"
+    if (kind == "row" || kind == "scrollRow") {
+        if (t.has(n, FLEX_F_SCROLL_X)) {
+            contentH = f64ToInt(t.contentW[n])
+            scrollY = oneScrollOffset(contentH, w, ctx.scroll.get(path), 0)
+            for (child in children) child.x = child.x - scrollY
+        } else if (!t.has(n, FLEX_F_WRAP)) contentH = h
+    } else if (!leaf && kind != "stack" && kind != "popover") {
+        contentH = f64ToInt(t.contentH[n])
+        if (kind == "scroll" || kind == "feed") {
+            val saved = ctx.scroll.get(path)
+            val maxScroll = if (contentH > h) contentH - h else 0
+            var offset = if (saved != null) saved else if (oneFeedFollows(node)) maxScroll else 0
+            if (offset > maxScroll) offset = maxScroll
+            if (offset < 0) offset = 0
+            scrollY = offset
+        }
+    }
+    OneBox(node, rs[n], f64ToInt(t.x[n]), f64ToInt(t.y[n]), w, h, children, lines, contentH, scrollY, lineWidths)
 }
 
 // Applies new scroll offsets to a finished layout, which is all a swipe changes.
