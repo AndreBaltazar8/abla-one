@@ -1,0 +1,58 @@
+import "abla/test"
+import "abla/http"
+import "../../src/backends/web_live.ab"
+
+// The live server's request from the head already parsed, against the request it used to build by parsing the head
+// and then the whole request again: the same method, path, query, headers (names, values, order, duplicates) and body.
+fun sameRequest(left: HttpRequest, right: HttpRequest): bool {
+    if (left.method != right.method || left.path != right.path || left.query != right.query || left.body != right.body) return false
+    if (left.headers.size != right.headers.size) return false
+    for (index in 0 until left.headers.size) {
+        if (left.headers[index].name != right.headers[index].name || left.headers[index].value != right.headers[index].value) return false
+    }
+    left.parameterNames.size == right.parameterNames.size && left.parameterValues.size == right.parameterValues.size
+}
+
+// Both ways for one request text; false if they differ. A head that is incomplete, one whose framing is refused
+// (oneLiveFraming, tests/backends/live_framing.ab) and a body not yet complete are not built.
+fun checkText(text: string): bool {
+    val end = httpHeaderEnd(text)
+    if (end < 0) return true
+    val head = httpParseRequest(text.slice(0, end))
+    val length = oneLiveFraming(head)
+    if (length < 0 || text.size < end + length) return true
+    val old = httpRequestWithAddress(httpParseRequest(text.slice(0, end + length)), null)
+    sameRequest(old, oneLiveRequestFrom(head, text, end, length, null))
+}
+
+fun main: int {
+    val texts = [
+        "GET / HTTP/1.1\r\nhost: a\r\n\r\n",
+        "GET /p?q=1&r=2 HTTP/1.1\r\nHost: a\r\nAccept: */*\r\nX-A: 1\r\nx-a: 2\r\n\r\n",
+        "POST /one/x HTTP/1.1\r\ncontent-length: 5\r\nhost: a\r\n\r\nhello",
+        "POST /one/x HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 3\r\n\r\nhelloEXTRA",
+        "POST /one/x HTTP/1.1\r\ncontent-length: 0\r\n\r\nbody-not-counted",
+        "POST /one/x HTTP/1.1\r\ncontent-length: -3\r\n\r\nabc",
+        "POST /one/x HTTP/1.1\r\ncontent-length: 12abc\r\n\r\n0123456789ab",
+        "POST /one/x HTTP/1.1\r\ncontent-length:  7 \r\n\r\n\r\n\r\nxyz",
+        "POST /one/x HTTP/1.1\r\ntransfer-encoding: chunked\r\n\r\n4\r\nwxyz\r\n0\r\n\r\n",
+        "POST / HTTP/1.1\r\ncontent-length: 4\r\nno-colon\r\n: empty-name\r\n\r\n\x00\xff\r\n\r",
+        "\r\n\r\nPOST / HTTP/1.1\r\n\r\n",
+        "GET / HTTP/1.1\r\n\r\n\r\n\r\n",
+        " GET / HTTP/1.1\r\nhost:a\r\n\r\n",
+        "GET /\x00 HTTP/1.1\r\nk: v\r\n\r\n"
+    ]
+    for (text in texts) {
+        // The text whole, and cut at every byte: a head or body not yet complete is not parsed, but every prefix that is must agree.
+        for (cut in 0 until text.size + 1) {
+            expect(checkText(text.slice(0, cut)), "prefix ${cut} of ${text.slice(0, if (text.size < 30) text.size else 30)} gives the same request")
+        }
+    }
+    // With a peer attached the request is the same and carries the peer.
+    val text = "POST /one/x HTTP/1.1\r\ncontent-length: 3\r\n\r\nabc"
+    val end = httpHeaderEnd(text)
+    val head = httpParseRequest(text.slice(0, end))
+    expectEqual(oneLiveRequestFrom(head, text, end, 3, null).body, "abc", "the body is the next length bytes")
+    expectEqual(oneLiveRequestFrom(head, text, end, 0, null).body, "", "no length, no body")
+    testsPassed()
+}

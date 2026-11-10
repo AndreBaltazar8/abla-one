@@ -442,6 +442,17 @@ fun oneLiveFraming(head: HttpRequest): int {
     length
 }
 
+// The request of `input`'s first `end + length` bytes, `head` being the parse of its first `end` (the head, through the
+// blank line): the same request as parsing all of them, without parsing the head a second time. Without a body the head
+// is the request; with one, only the body is new (the head ends at the blank line, so nothing before it changes). The
+// length is not negative (oneLiveFraming refuses those).
+fun oneLiveRequestFrom(head: HttpRequest, input: string, end: int, length: int, peer: SocketPeerAddress?): HttpRequest =
+    if (length == 0) httpRequestWithAddress(head, peer)
+    else HttpRequest(
+        head.method, head.path, head.query, head.headers, input.slice(end, end + length),
+        head.parameterNames, head.parameterValues, peer
+    )
+
 fun OneLiveServer.read(slot: int): void {
     val connection = TcpConnection(slots[slot].descriptor)
     val incoming = connection.readResult(65536)
@@ -500,7 +511,7 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
         if (length > 16777216) closeSlot(slot)
         return
     }
-    val request = httpRequestWithAddress(httpParseRequest(input.slice(0, end + length)), peer)
+    val request = oneLiveRequestFrom(head, input, end, length, peer)
     slots[slot].input = input.slice(end + length, input.size)
     val admission = this.admission
     if (admission != null) {
