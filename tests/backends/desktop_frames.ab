@@ -1,0 +1,51 @@
+import "abla/test"
+import "../../examples/gallery/gallery.ab"
+import "../../src/backends/desktop.ab"
+import "../../src/backends/test.ab"
+
+// The desktop backend keeps its layout from frame to frame (oneLayoutCached): every frame it
+// shows must be the frame a fresh layout of the same tree gives, through screen changes, scroll
+// offsets, a press, a text edit and a resize.
+
+fun fresh(var app: Gallery, theme: Theme, state: OneDesktopState): string {
+    var ui = oneUiSized("desktop", theme, state.width)
+    oneFrameJson(onePaintFrame(oneLayout(app.render(ui), theme, "desktop", state.width, state.height, state.scroll), state.width, state.height))
+}
+
+fun same(var app: Gallery, theme: Theme, var state: OneDesktopState, what: string): void {
+    val shown = oneFrameJson(oneDesktopFrame(app, theme, state))
+    expectEqual(shown, fresh(app, theme, state), what)
+    return
+}
+
+fun main: int {
+    val theme = oneDefaultTheme()
+    var app = Gallery(OneNoServices())
+    oneLiveQueueList[oneLiveQueueIndex("desktop-frames")].routes.start("/")
+    var state = OneDesktopState(1024, 700, 0, 0, 0, 0, false, "", 0, "", true, Map(), Map(), oneLiveQueueList[oneLiveQueueIndex("desktop-frames")].routes)
+    same(app, theme, state, "the first frame")
+    same(app, theme, state, "the same frame again, from the cache")
+    app.count = 3
+    same(app, theme, state, "after a change of state")
+    for (route in ["/people", "/form/1", "/"]) {
+        app.receive("route", route)
+        same(app, theme, state, "on $route")
+    }
+    var ui = oneUiSized("desktop", theme, state.width)
+    val press = onePressFor(app.render(ui), "Adicionar")
+    if (press > 0) {
+        val unused = oneDispatch(app, "desktop", theme, press, "", state.width)
+    }
+    same(app, theme, state, "after a press")
+    app.query = "an"
+    app.receive("route", "/people")
+    same(app, theme, state, "after a text edit")
+    state.scroll.set("r/0", 120)
+    same(app, theme, state, "with a scroll offset")
+    state.width = 800
+    state.height = 600
+    same(app, theme, state, "after a resize")
+    state.width = 1024
+    same(app, theme, state, "and back")
+    0
+}
