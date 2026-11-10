@@ -691,18 +691,21 @@ fun oneScrollOffset(content: int, size: int, saved: int?, current: int): int {
     offset
 }
 
-// Wrapping rows and scrollRow are turned on by what makes them (`Style.wrap`, `scrollRow`);
-// a row asking for one before that is laid out as a plain row, and says so.
+// Wrapping rows and scrollRow are turned on by what makes them (`Style.wrap`, `scrollRow`),
+// which also links flex's code for them; a row asking for one before that is laid out as a
+// plain row, and says so.
 var oneWrapRowsOn = false
 var oneScrollRowsOn = false
 
 fun oneUseWrapRows(): void {
     oneWrapRowsOn = true
+    flexUseWrapRows()
     return
 }
 
 fun oneUseScrollRows(): void {
     oneScrollRowsOn = true
+    flexUseScrollRows()
     return
 }
 
