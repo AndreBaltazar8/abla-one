@@ -51,3 +51,33 @@ flex then answers that subtree from its own per-node cache. A changed node is se
 setter that keeps a value marks nothing). The box of a subtree with no scroll area, where
 nothing was laid out (flex's `freshAt`) or synced since the box was built, is reused, as the
 pin's box cache did. Resolved styles and wrapped text are cached as before.
+
+## Cost
+
+A re-layout through `oneLayoutCached` (the same tree again, or after a tap) costs what it
+cost at the pin. A first layout costs more, because two trees are built: abla-one's nodes, and
+a flex node for each. This was measured with 9b's relayout harness (`tools/ui-check/relayout.ab`:
+the gallery on the e-paper target at 400 × 300, layout and paint frame, optimized, ablac
+0.2.48), alternating pin and branch runs, best of 40, µs:
+
+| Screen | Pin | Through flex |
+|---|---|---|
+| `/` | 352 | 394 (+11%) |
+| `/people` | 246 | 255 (+4%) |
+| `/form/1` | 77 | 93 (+21%, +16 µs) |
+
+Phase timers on a first layout place the difference. Resolving styles and wrapping text cost
+what they did. A new cache with an empty flex tree costs 1.5 µs. The rest is per node: about
+300 ns to build a flex node (its columns and the kept arrays) and about 250 ns to configure it
+(some 20 setters fed from the resolved style). It shows most on a small screen.
+
+Where a first layout happens: the desktop and e-paper backends once per screen (then cached),
+the web session only in canvas mode (`?render=canvas`, once per render, uncached), and tests.
+The web document backend and Android leave layout to the platform. NovaKind's requests are web
+documents: in NovaKind only tests/native-render.ab lays out.
+
+Not done, and why. Keeping one flex tree across uncached `oneLayout` calls would remove the
+node building, but it would put hidden state shared by every session behind a pure call on
+the server. Trimming flex's per-node columns would mean refactoring code that has just been
+checked identical. Either is a separate step with its own identity check, if canvas sessions
+ever matter.
