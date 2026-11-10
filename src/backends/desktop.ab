@@ -107,15 +107,27 @@ class OneDesktopState(
     var selecting: bool = false,
     // When the last press on a field was, and how many came quickly one after another.
     var clickAt: int = 0,
-    var clicks: int = 0
+    var clicks: int = 0,
+    // The layout kept from frame to frame (one per width: styles resolve by the viewport).
+    var layoutCache: OneLayoutCache = oneLayoutCache(),
+    var layoutWidth: int = -1
 )
+
+// Lays the frame's tree out through the kept cache: only what changed is laid out again.
+fun oneDesktopLayout(root: Node, theme: Theme, var state: OneDesktopState): OneBox {
+    if (state.layoutWidth != state.width) {
+        state.layoutCache = oneLayoutCache()
+        state.layoutWidth = state.width
+    }
+    oneLayoutCached(root, theme, "desktop", state.width, state.height, state.scroll, state.layoutCache)
+}
 
 // One frame: render, lay out, paint. Visible feed rows are delivered first.
 fun oneDesktopFrame(var app: OneApp, theme: Theme, var state: OneDesktopState): OneFrame {
     state.routeScrolls.moved("${state.routes.entry()}", state.scroll)
     state.routeEpoch = state.routes.epoch
     var ui = oneUiSized("desktop", theme, state.width)
-    val frame = onePaintFrame(oneLayout(app.render(ui), theme, "desktop", state.width, state.height, state.scroll), state.width, state.height)
+    val frame = onePaintFrame(oneDesktopLayout(app.render(ui), theme, state), state.width, state.height)
     var again = false
     for (v in frame.visible) {
         val last = state.delivered.get(v.event)
@@ -127,7 +139,7 @@ fun oneDesktopFrame(var app: OneApp, theme: Theme, var state: OneDesktopState): 
     }
     if (!again) return frame
     var ui2 = oneUiSized("desktop", theme, state.width)
-    onePaintFrame(oneLayout(app.render(ui2), theme, "desktop", state.width, state.height, state.scroll), state.width, state.height)
+    onePaintFrame(oneDesktopLayout(app.render(ui2), theme, state), state.width, state.height)
 }
 
 // An input event for the frame on screen; dropped when the route has moved since.
