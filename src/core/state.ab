@@ -1,5 +1,6 @@
-import "../ui_source.ab"
-export import oneUiState()
+// abla-ui is checked out beside abla-one and reached by relative path, as NovaKind's pinned
+// build reaches every library (its toolchain/sibling-revisions names the commit).
+export import "../../../abla-ui/src/state.ab"
 
 // Reactive state is abla-ui's State (https://github.com/AndreBaltazar8/abla-ui): application
 // state lives in ordinary classes whose properties are delegated to it, `var query: string by

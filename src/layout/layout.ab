@@ -2,8 +2,7 @@ import "abla/io"
 import "abla/float"
 import "../one.ab"
 import "inter_metrics.ab"
-import "../ui_source.ab"
-import oneUiText()
+import "../../../abla-ui/src/text.ab"
 
 // one-layout (SPEC §7, M3): lays out a node tree in logical pixels for the
 // backends that draw themselves (web-canvas, desktop, epaper). Containers
