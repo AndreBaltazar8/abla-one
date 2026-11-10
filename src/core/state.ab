@@ -1,26 +1,17 @@
-// Reactive state. Application state lives in ordinary classes whose properties
-// are delegated to State: `var query: string by State("")`. A write that changes
-// the value bumps the global revision, which the run loop uses to decide
-// whether to render again.
+import "../ui_source.ab"
+export import oneUiState()
 
-var oneStateRevision = 0
+// Reactive state is abla-ui's State (https://github.com/AndreBaltazar8/abla-ui): application
+// state lives in ordinary classes whose properties are delegated to it, `var query: string by
+// State("")`. A write that changes the value moves the global revision, which the run loop uses
+// to decide whether to render again; abla-ui also counts each value's version and the render
+// scopes that read it, which abla-one doesn't use yet.
 
-fun oneRevision(): int = oneStateRevision
-
-class State<T>(var current: T) {
-    fun getValue(): T = current
-    fun setValue(next: T): void {
-        if (next != current) {
-            current = next
-            oneStateRevision += 1
-        }
-        return
-    }
-}
+fun oneRevision(): int = stateRevision()
 
 // Marks the app dirty after an in-place change the State delegate can't see,
 // such as appending to an array held in state.
 fun oneInvalidate(): void {
-    oneStateRevision += 1
+    stateTouchAll()
     return
 }
