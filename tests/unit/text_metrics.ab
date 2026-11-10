@@ -1,0 +1,53 @@
+import "abla/test"
+import "../../src/one.ab"
+import "../../src/layout/layout.ab"
+
+// Text measurement goes through abla-ui's TableFont; it must give what abla-one's own sum
+// over the Inter tables gave, byte for byte: that sum is kept here as the reference.
+
+fun referenceMilli(text: string, size: int, weight: string): int {
+    val table = [oneInterWidths400, oneInterWidths500, oneInterWidths600, oneInterWidths700][oneWeightIndex(weight)]
+    var total = 0
+    var i = 0
+    while (i < text.size) {
+        val code = oneCodeAt(text, i)
+        var found = -1
+        var k = 0
+        while (k < oneInterCodes.size) {
+            if (oneInterCodes[k] == code) found = table[k]
+            k = k + 1
+        }
+        total = total + (if (found >= 0) found else if (code > 0x2000) 1000 else 560) * size
+        i = i + oneCodeLength(text[i])
+    }
+    total
+}
+
+fun main: int {
+    val texts = ["", "a", "Hello, world", "Olá, André — ça va?", "Ünïcödé ßtrasse", "emoji 😀👍🏽 and 🇵🇹",
+        "日本語のテキスト", "tabs\tand\nnewlines", "€ 1.234,56 · 100%", "x\u{0300}combining", "\u{2003}em space",
+        "long text that wraps across lines in a narrow column of a phone screen, with punctuation; and more!",
+        "truncated \u{E9}"]
+    val weights = ["", "regular", "400", "medium", "500", "semibold", "600", "bold", "700", "800", "900", "light"]
+    var compared = 0
+    var differ = 0
+    for (t in texts) {
+        for (w in weights) {
+            for (size in 1 until 49) {
+                val got = oneTextMilli(t, size, w)
+                val want = referenceMilli(t, size, w)
+                if (got != want) {
+                    if (differ < 5) println("differs: \"$t\" $size $w: $got vs $want")
+                    differ = differ + 1
+                }
+                if (oneTextWidth(t, size, w) != (want + 999) / 1000) differ = differ + 1
+                compared = compared + 1
+            }
+        }
+    }
+    // A string cut inside a multi-byte character reads as before too.
+    val cut = "é".slice(0, 1)
+    expectEqual(oneTextMilli("ab$cut", 15, ""), referenceMilli("ab$cut", 15, ""), "a truncated character")
+    expectEqual(differ, 0, "$compared measurements (texts × weights × sizes 1–48) the same as abla-one's own sum")
+    testsPassed()
+}
