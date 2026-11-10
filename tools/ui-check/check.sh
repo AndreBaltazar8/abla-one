@@ -165,6 +165,28 @@ gen)
 	diff <(one base "$drops") <(one new "$drops") | grep '^[<>]' | head -12 | sed 's/^</  was/; s/^>/  now/' | cut -c1-200
 	exit 1
 	;;
+cost)
+	# Laying a screen out again with a cache (relayout.ab), at <rev> and at <base>: µs, best of 40.
+	#   check.sh cost <rev> [<base>]
+	rev=${2:?a revision}; baseRev=${3:-$pin}
+	work=$(mktemp -d)
+	trap 'rm -rf "$work"' EXIT
+	for side in base new; do
+		commit=$(git -C "$repo" rev-parse --verify "$([ $side = new ] && echo "$rev" || echo "$baseRev")^{commit}") || exit 2
+		mkdir -p "$work/$side/abla-one"
+		git -C "$repo" archive "$commit" | tar -x -C "$work/$side/abla-one"
+		ln -s "$(realpath "$mobile")" "$work/$side/abla-mobile"
+		[ -d "$ui" ] && ln -s "$(realpath "$ui")" "$work/$side/abla-ui"
+		mkdir -p "$work/$side/abla-one/tools/ui-check" "$work/$side/abla-one/build"
+		cp "$here/relayout.ab" "$work/$side/abla-one/tools/ui-check/relayout.ab"
+		# Optimized: this is a cost, and a device runs an optimized build.
+		(cd "$work/$side/abla-one" && compile build tools/ui-check/relayout.ab -o build/ui-check-relayout > "$work/$side.log" 2>&1) || { echo "relayout.ab does not build at $side:"; head -12 "$work/$side.log"; exit 2; }
+	done
+	for run in 1 2 3; do
+		echo "run $run (load $(cut -d' ' -f1 /proc/loadavg)): was | now"
+		paste -d'|' <("$work/base/abla-one/build/ui-check-relayout") <("$work/new/abla-one/build/ui-check-relayout") | sed 's/^/  /; s/|/  |  /'
+	done
+	;;
 *) sed -n '2,27p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;
 esac
 exit

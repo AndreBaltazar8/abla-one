@@ -1,0 +1,46 @@
+// What laying a screen out again costs with a layout cache, as the e-paper backend does after
+// every tap (oneLayoutCached): the same tree again, and the tree with one text changed. Best of
+// the rounds, microseconds, per screen; tools/ui-check/check.sh `cost` runs it at two revisions.
+
+import "abla/io"
+import "abla/process/time"
+import "../../src/one.ab"
+import "../../src/layout/layout.ab"
+import "../../src/layout/paint.ab"
+import "../../examples/gallery/gallery.ab"
+
+fun tree(route: string, count: int): Node {
+    var app = Gallery(OneNoServices())
+    if (route != "/") app.receive("route", route)
+    // A tap's worth of change: the counter on the home screen.
+    app.count = count
+    var ui = oneUiSized("epaper", oneDefaultTheme(), 400)
+    app.render(ui)
+}
+
+fun main: int {
+    val theme = oneDefaultTheme()
+    for (route in ["/", "/people", "/form/1"]) {
+        var fresh = 0
+        var same = 0
+        var changed = 0
+        for (round in 0 until 40) {
+            var cache = oneLayoutCache()
+            val scroll: Map<string, int> = Map()
+            var start = monotonicNanoseconds()
+            val a = onePaintFrame(oneLayoutCached(tree(route, 0), theme, "epaper", 400, 300, scroll, cache), 400, 300)
+            var took = (monotonicNanoseconds() - start) / 1000
+            if (fresh == 0 || took < fresh) fresh = took
+            start = monotonicNanoseconds()
+            val b = onePaintFrame(oneLayoutCached(tree(route, 0), theme, "epaper", 400, 300, scroll, cache), 400, 300)
+            took = (monotonicNanoseconds() - start) / 1000
+            if (same == 0 || took < same) same = took
+            start = monotonicNanoseconds()
+            val c = onePaintFrame(oneLayoutCached(tree(route, 1), theme, "epaper", 400, 300, scroll, cache), 400, 300)
+            took = (monotonicNanoseconds() - start) / 1000
+            if (changed == 0 || took < changed) changed = took
+        }
+        println("$route first $fresh again $same after-a-tap $changed")
+    }
+    0
+}
