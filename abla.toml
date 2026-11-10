@@ -1,3 +1,7 @@
 name = "abla-one"
 version = "0.0.1"
 entry = "src/one.ab"
+
+# abla-ui, pinned by commit: keep exactly aligned with src/ui_source.ab.
+[dependencies]
+abla-ui = { git = "https://github.com/AndreBaltazar8/abla-ui.git", rev = "277bc04cdc6fbc3191f17d846f21475118d258c9" }
