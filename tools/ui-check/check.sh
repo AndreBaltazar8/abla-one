@@ -59,6 +59,8 @@ capture() {
 	git -C "$repo" archive "$commit" | tar -x -C "$work/abla-one"
 	ln -s "$(realpath "$mobile")" "$work/abla-mobile"
 	[ -d "$ui" ] && ln -s "$(realpath "$ui")" "$work/abla-ui"
+	# (tests/backends/desktop_frames.ab imports desktop.ab, which draws through abla-graphics.)
+	[ -d "$(dirname -- "$mobile")/abla-graphics" ] && ln -s "$(realpath "$(dirname -- "$mobile")/abla-graphics")" "$work/abla-graphics"
 	# (tests/thin_config.sh reads the compiler checkout's shell.nix beside the repository.)
 	[ -d "$(dirname -- "$mobile")/ablac" ] && ln -s "$(realpath "$(dirname -- "$mobile")/ablac")" "$work/ablac"
 	mkdir -p "$work/abla-one/tools/ui-check" "$work/abla-one/build"
@@ -77,7 +79,7 @@ capture() {
 		for t in tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab tests/remote/client.ab tests/remote/routes.ab; do
 			if compile test "$t" > "$out/test.log" 2>&1; then echo "ok   $t" >> "$out/TESTS"; else echo "FAIL $t" >> "$out/TESTS"; { echo "== $t"; tail -8 "$out/test.log"; } >> "$out/tests-failed.log"; fi
 		done
-		for script in tests/layout_size.sh tests/thin_config.sh tests/state_size.sh; do
+		for script in tests/layout_size.sh tests/thin_config.sh tests/state_size.sh tests/dsl_trees.sh; do
 			[ -f "$script" ] || continue
 			if [ -n "$nix" ]; then run=($slot $nix "ABLAC=$ablac $script"); else run=(env "ABLAC=$ablac" "$script"); fi
 			if "${run[@]}" > "$out/test.log" 2>&1; then echo "ok   $script" >> "$out/TESTS"; else echo "FAIL $script" >> "$out/TESTS"; { echo "== $script"; tail -8 "$out/test.log"; } >> "$out/tests-failed.log"; fi

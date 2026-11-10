@@ -22,5 +22,5 @@ echo "abla-ui: $(grep '^abla-ui ' toolchain/sibling-revisions || echo 'not pinne
 echo "optimized server (bytes): was $(stat -c %s "$was"), now $(stat -c %s "$now"), $(( $(stat -c %s "$now") - $(stat -c %s "$was") )) more"
 size "$was" "$now"
 echo "symbols that grew or are new, by bytes (top 25):"
-join -a 2 -e 0 -o 0,1.2,2.2 <(nm --size-sort -S "$was" | awk '{ s[$4] += strtonum("0x" $2) } END { for (n in s) print n, s[n] }' | sort) <(nm --size-sort -S "$now" | awk '{ s[$4] += strtonum("0x" $2) } END { for (n in s) print n, s[n] }' | sort) | awk '$3 > $2 { print $3 - $2, $1 }' | sort -rn | head -25
+join -a 2 -e 0 -o 0,1.2,2.2 <(nm --size-sort -S "$was" | awk '{ s[$4] += strtonum("0x" $2) } END { for (n in s) print n, s[n] }' | sort) <(nm --size-sort -S "$now" | awk '{ s[$4] += strtonum("0x" $2) } END { for (n in s) print n, s[n] }' | sort) | awk '$3 > $2 { print $3 - $2, $1 }' | sort -rn | awk "NR <= 25"
 }
