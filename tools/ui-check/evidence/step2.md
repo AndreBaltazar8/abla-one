@@ -60,7 +60,15 @@ abla-one d91c350, against the older pin c1878461: the same gates equal.
 ## Not verified
 
 - abla-one's own `check.sh check` on this commit against 70db437: run by b8, not by this file's author.
-- The phone suites: NovaKind's side (novakind-aa runs them).
+- NovaKind's full suite: a run on this pin (NovaKind main 56cae6cc plus the two pin lines, four
+  parts) passed part 1 of 4, 36 suites, and was stopped when NovaKind changed its base; the
+  run on the rebased head was stopped before its first part ended, to leave NovaKind's slots
+  to its release. So: not verified. The three live suites are in that full: not run.
+- The phone suites: NovaKind's side.
+- Against c1878461, which NovaKind went back to pinning after these runs (NovaKind main
+  6a9533e1; the rebased head is `abla-ui-step2-c187` ab4029a, code at f350b2b, the same diff
+  over c1878461): started and stopped unfinished. 70db437 is one commit on c1878461 that
+  touches the live server's keep-alive only.
 - A release APK: there is no command for one in NovaKind's tool; the debug build is what was measured.
 - The firmware image's size: it does not link at the pin (above).
 - Instruction counts: `perf` is not installed on this machine; wall times only.

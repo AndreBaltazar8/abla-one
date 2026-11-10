@@ -11,7 +11,15 @@ Environment, all optional: `ABLAC` (default `~/.local/share/abla/v0.2.48/install
 NovaKind's pinned compiler), `NIX` (default NovaKind's `toolchain/shell.nix`), `SLOT` (default
 NovaKind's `tools/compiler-slot`; `SLOT=` for none), `ABLA_UI` / `ABLA_MOBILE` (the sibling
 checkouts to link; default the ones beside abla-one: point `ABLA_UI` at a worktree holding the
-abla-ui commit the revision needs), `STORE` (default `~/.cache/abla-one-ui-check`).
+abla-ui commit the revision needs), `STORE` (default `~/.cache/abla-one-ui-check`). `NO_SUITE=1`
+captures the screens without running the suite (a capture kept that way says so in `ABOUT`;
+remove it from the store to take a full one).
+
+A revision whose tree locks packages (abla-one's main: `abla.lock`, a `.abla/packages` rule in
+the Makefile) has them prepared in the export with `ablac package vendor`, which fetches from
+the network; and where the tree takes abla-mobile as a package (`src/mobile_source.ab`), the
+capture program is made to import it the same way. `tests/state_size.sh` and
+`tests/dsl_trees.sh` run with the suite where a revision has them.
 
 ## abla-one's own output: `check.sh`
 

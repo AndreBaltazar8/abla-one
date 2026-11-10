@@ -63,7 +63,11 @@ optimized `app` +5,184 bytes.
 
 - abla-one's own `check.sh check` on this commit against 70db437: run by b8, not by this file's author.
 - NovaKind's full suite, with the three live suites (`landing-web`, `app-journey`,
-  `chat-records`), and the phone suites: run by NovaKind on the pushed tag, not here.
+  `chat-records`), and the phone suites: not run here; NovaKind's side.
+- Against c1878461, which NovaKind went back to pinning after these runs (NovaKind main
+  6a9533e1; the rebased head is `abla-ui-step1-c187` f740839, the same diff over c1878461):
+  started and stopped unfinished, to leave NovaKind's slots to its release. 70db437 is one
+  commit on c1878461 that touches the live server's keep-alive only.
 - A release APK: there is no command for one in NovaKind's tool; the debug build is what was measured.
 - The firmware image's size: it does not link at the pin (above).
 - Instruction counts: `perf` is not installed on this machine; wall times only.
