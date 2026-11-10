@@ -1,0 +1,37 @@
+import "abla/test"
+import "../../src/one.ab"
+
+// State reads as NovaKind writes them: through an immutable parameter, a field of an
+// immutable object, and several reads as one call's arguments through a val taken from a var
+// parameter (one/owner_month.ab, one/pos_state.ab). A read must not need a mutable receiver:
+// abla-one's own code never read State that way, so its suite passed while NovaKind didn't
+// compile. This file failing to build is that failure.
+
+class Shift(var actor: string by State("ana"), var session: int by State(7), var open: bool by State(false))
+
+class Area(val shift: Shift, val label: string)
+
+class Stamp(val actor: string, val session: int, val again: int)
+
+fun stampOf(shift: Shift): string = "${shift.actor}@${shift.session}"
+
+fun areaLine(area: Area): string = if (area.shift.open) "${area.label} ${area.shift.actor}" else area.label
+
+fun stampFrom(var areas: array<Area>): Stamp {
+    val s = areas[0].shift
+    Stamp(s.actor, s.session, s.session)
+}
+
+fun main: int {
+    val shift = Shift()
+    expectEqual(stampOf(shift), "ana@7", "a read through an immutable parameter")
+    val area = Area(Shift(), "till")
+    expectEqual(areaLine(area), "till", "a read through a field of an immutable object")
+    var areas = [Area(Shift(), "back")]
+    val stamp = stampFrom(areas)
+    expectEqual(stamp.session + stamp.again, 14, "several reads as one call's arguments")
+    val start = oneRevision()
+    areas[0].shift.session = 8
+    expectEqual(oneRevision(), start + 1, "a write after those reads still moves the revision")
+    0
+}
