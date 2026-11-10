@@ -37,7 +37,7 @@ fun main: int {
     for (node in [screen("Add", 1), screen("Add", 1), screen("Added", 1), screen("Add", 5), screen("Add", 1)]) {
         expectEqual(dump(onePaintFrame(oneLayoutCached(node, t, "epaper", 300, 400, scroll, cache), 300, 400)), fresh(node, t, scroll), "cached layout")
     }
-    expect(cache.boxes.size > 0, "keeps boxes")
+    expect(cache.wraps.size > 0 && cache.resolved.size > 0, "keeps wrapped text and resolved styles")
     // The same text at another width is wrapped again.
     var narrow = oneLayoutCached(screen("Add", 1), t, "epaper", 120, 400, scroll, cache)
     expectEqual(dump(onePaintFrame(narrow, 120, 400)), dump(onePaintFrame(oneLayout(screen("Add", 1), t, "epaper", 120, 400, scroll), 120, 400)), "another width")
