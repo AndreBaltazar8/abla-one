@@ -65,8 +65,17 @@ capture() {
 	[ -d "$(dirname -- "$mobile")/ablac" ] && ln -s "$(realpath "$(dirname -- "$mobile")/ablac")" "$work/ablac"
 	mkdir -p "$work/abla-one/tools/ui-check" "$work/abla-one/build"
 	cp "$here/capture.ab" "$work/abla-one/tools/ui-check/capture.ab"
+	# Where abla-one takes abla-mobile as a package (main: src/mobile_source.ab), the capture program must too, or its symbols come twice.
+	if [ -f "$work/abla-one/src/mobile_source.ab" ]; then
+		sed -i 's|^import "../../../abla-mobile/src/ui.ab"$|import "../../src/mobile_source.ab"\nimport importSubpath(oneMobileSource(), "ui")|' "$work/abla-one/tools/ui-check/capture.ab"
+	fi
 	(
 		cd "$work/abla-one" || exit 2
+		# A tree with locked packages (main: abla-mobile) needs .abla/packages, as its Makefile makes it.
+		if [ -f abla.lock ] && grep -q "^.abla/packages:" Makefile 2>/dev/null; then
+			compile package vendor --project . > "$out/packages.log" 2>&1 || { echo "the packages of $rev could not be prepared:" >&2; tail -5 "$out/packages.log" >&2; exit 2; }
+			rm -rf vendor
+		fi
 		{ "$ablac" --version; echo "abla-one $commit"; echo "abla-mobile $(git -C "$mobile" rev-parse HEAD 2>/dev/null)"; [ -d "$ui" ] && echo "abla-ui $(git -C "$ui" rev-parse HEAD 2>/dev/null)"; echo "load $(cut -d' ' -f1-3 /proc/loadavg)"; } > "$out/ABOUT"
 		compile build tools/ui-check/capture.ab -o build/ui-check-capture --fast > "$out/build.log" 2>&1 || { echo "the capture program does not build at $rev:" >&2; head -20 "$out/build.log" >&2; exit 2; }
 		./build/ui-check-capture "$out/screens" 30 > "$out/capture.log" 2>&1 || { echo "the capture program failed at $rev:" >&2; tail -5 "$out/capture.log" >&2; exit 2; }
@@ -76,6 +85,9 @@ capture() {
 		{ echo "ui-check-capture $(stat -c %s build/ui-check-capture)"; echo "gallery-web $(stat -c %s build/gallery-web 2>/dev/null || echo missing)"; } > "$out/SIZES"
 		# The suite, a test at a time so one failure names itself (the Makefile's TESTS).
 		: > "$out/TESTS"
+		# NO_SUITE=1: screens only, where the suite was run another way (a capture kept so says it in ABOUT).
+		[ "${NO_SUITE:-}" = 1 ] && echo "suite not run (NO_SUITE=1)" >> "$out/ABOUT"
+		[ "${NO_SUITE:-}" = 1 ] || {
 		for t in tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab tests/remote/client.ab tests/remote/routes.ab; do
 			if compile test "$t" > "$out/test.log" 2>&1; then echo "ok   $t" >> "$out/TESTS"; else echo "FAIL $t" >> "$out/TESTS"; { echo "== $t"; tail -8 "$out/test.log"; } >> "$out/tests-failed.log"; fi
 		done
@@ -84,6 +96,7 @@ capture() {
 			if [ -n "$nix" ]; then run=($slot $nix "ABLAC=$ablac $script"); else run=(env "ABLAC=$ablac" "$script"); fi
 			if "${run[@]}" > "$out/test.log" 2>&1; then echo "ok   $script" >> "$out/TESTS"; else echo "FAIL $script" >> "$out/TESTS"; { echo "== $script"; tail -8 "$out/test.log"; } >> "$out/tests-failed.log"; fi
 		done
+		}
 		rm -f "$out/test.log"
 	) || { rm -rf "$work"; return 2; }
 	rm -rf "$work"
