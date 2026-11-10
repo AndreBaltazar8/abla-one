@@ -1,0 +1,175 @@
+// Random trees for the layout engine, the same from a seed everywhere: rows, columns, stacks,
+// texts of varied lengths, spacers; growers, fixed, filling and hugging sizes, minima and
+// maxima, gaps and paddings in odd pixels, alignments, wrapping rows, depth up to 5. Each is
+// laid out at three widths and every node's box printed, for tools/ui-check/check.sh `gen` to
+// compare between two revisions (and to shrink a tree that differs: `drop` removes nodes).
+//   ui-check-gen <first seed> <count>          every seed's tree and boxes, to stdout
+//   ui-check-gen <seed> 1 <drop,drop,…>        that tree without the nodes numbered so
+//                                              (preorder, the root 0; a node goes with its children)
+
+import "abla/io"
+import "abla/process/arguments"
+import "../../src/one.ab"
+import "../../src/layout/layout.ab"
+
+class Rng(var state: int)
+fun Rng.next(): int {
+    this.state = (this.state * 6364136223846793005 + 1442695040888963407) & 9223372036854775807
+    (this.state >> 24) & 1073741823
+}
+fun Rng.below(n: int): int = this.next() % n
+fun Rng.chance(percent: int): bool = this.below(100) < percent
+fun Rng.pick(values: array<int>): int = values[this.below(values.size)]
+
+class Spec(val kind: string, val props: array<string>, val values: array<string>, val text: string, val children: array<Spec>, var id: int = 0, var dropped: bool = false)
+
+val WORDS = ["a", "de", "um", "casa", "ponte", "valley", "extraordinariamente", "1234,56", "€", "—", "Olá,", "mundo.", "pequeno", "grande", "W", "iii", "MMMM", "açúcar", "x"]
+
+fun words(var rng: Rng, count: int): string {
+    var out = ""
+    for (i in 0 until count) out = if (i == 0) WORDS[rng.below(WORDS.size)] else "$out ${WORDS[rng.below(WORDS.size)]}"
+    out
+}
+
+fun prop(var s: Spec, name: string, value: int): void {
+    s.props.append(name)
+    s.values.append("$value")
+    return
+}
+
+fun word(var s: Spec, name: string, value: string): void {
+    s.props.append(name)
+    s.values.append(value)
+    return
+}
+
+fun sizing(var s: Spec, var rng: Rng, inRow: bool, inColumn: bool): void {
+    val w = rng.below(10)
+    if (w == 0) prop(s, "width", rng.pick([1, 7, 23, 48, 97, 133, 201]))
+    else if (w == 1) word(s, "width", "fill")
+    val h = rng.below(12)
+    if (h == 0) prop(s, "height", rng.pick([1, 9, 17, 31, 64, 95]))
+    else if (h == 1) word(s, "height", "fill")
+    if (rng.chance(22)) prop(s, "grow", rng.pick([1, 1, 1, 2, 3]))
+    if (rng.chance(8)) prop(s, "minWidth", rng.pick([5, 33, 71, 150]))
+    if (rng.chance(8)) prop(s, "maxWidth", rng.pick([11, 45, 99, 177, 333]))
+    if (rng.chance(5)) prop(s, "minHeight", rng.pick([3, 27, 55]))
+    if (rng.chance(5)) prop(s, "maxHeight", rng.pick([13, 41, 88]))
+    if (rng.chance(10)) word(s, "alignSelf", ["start", "center", "end", "stretch"][rng.below(4)])
+    return
+}
+
+fun make(var rng: Rng, depth: int, inRow: bool, inColumn: bool): Spec {
+    val leaf = depth >= 5 || rng.chance(25 + depth * 12)
+    if (leaf) {
+        if (rng.chance(12)) {
+            val sp = Spec("spacer", [], [], "", [])
+            prop(sp, "a.size", rng.pick([0, 1, 5, 12, 33]))
+            return sp
+        }
+        val t = Spec("text", [], [], words(rng, rng.pick([0, 1, 1, 2, 3, 5, 9, 17, 30])), [])
+        if (rng.chance(30)) prop(t, "size", rng.pick([9, 11, 13, 15, 17, 22, 31]))
+        if (rng.chance(20)) word(t, "weight", ["medium", "semibold", "bold"][rng.below(3)])
+        if (rng.chance(15)) prop(t, "maxLines", rng.pick([1, 1, 2, 3]))
+        if (rng.chance(10)) prop(t, "lineHeight", rng.pick([13, 19, 27]))
+        if (rng.chance(10)) word(t, "textAlign", ["center", "end"][rng.below(2)])
+        sizing(t, rng, inRow, inColumn)
+        return t
+    }
+    val pick = rng.below(10)
+    val kind = if (pick < 4) "row" else if (pick < 8) "column" else "stack"
+    val s = Spec(kind, [], [], "", [])
+    if (rng.chance(45)) prop(s, "gap", rng.pick([1, 3, 4, 7, 8, 13]))
+    if (rng.chance(40)) prop(s, "padding", rng.pick([1, 3, 5, 8, 11]))
+    if (rng.chance(15)) prop(s, "paddingLeft", rng.pick([2, 9, 17]))
+    if (rng.chance(10)) prop(s, "paddingTop", rng.pick([1, 6]))
+    if (rng.chance(30)) word(s, "align", ["start", "center", "end", "stretch"][rng.below(4)])
+    if (rng.chance(30)) word(s, "justify", ["start", "center", "end", "between"][rng.below(4)])
+    if (kind == "row" && rng.chance(20)) word(s, "wrap", "true")
+    sizing(s, rng, inRow, inColumn)
+    val count = rng.pick([0, 1, 2, 2, 3, 3, 4, 6])
+    for (i in 0 until count) s.children.append(make(rng, depth + 1, kind == "row", kind == "column"))
+    s
+}
+
+fun number(var s: Spec, next: int): int {
+    s.id = next
+    var at = next + 1
+    for (c in s.children) at = number(c, at)
+    at
+}
+
+fun drop(var s: Spec, ids: array<int>): void {
+    for (id in ids) if (id == s.id && id != 0) s.dropped = true
+    for (c in s.children) drop(c, ids)
+    return
+}
+
+fun node(s: Spec): Node {
+    var look = style()
+    var size = 0
+    for (i in 0 until s.props.size) {
+        if (s.props[i] == "wrap") look = look.wrap()
+        else if (s.props[i] == "a.size") size = oneParseInt(s.values[i], 0)
+        else look = look.set(s.props[i], s.values[i])
+    }
+    if (s.kind == "text") return text(s.text, look)
+    if (s.kind == "spacer") return spacer(size)
+    val kids: array<Node> = []
+    for (c in s.children) if (!c.dropped) kids.append(node(c))
+    if (s.kind == "row") return row(look, kids)
+    if (s.kind == "stack") return stack(look, kids)
+    column(look, kids)
+}
+
+fun show(s: Spec, indent: string): void {
+    var line = "$indent#${s.id} ${s.kind}"
+    for (i in 0 until s.props.size) line = "$line ${s.props[i]}=${s.values[i]}"
+    if (s.kind == "text") line = "$line \"${s.text}\""
+    println(line)
+    for (c in s.children) if (!c.dropped) show(c, "$indent  ")
+    return
+}
+
+fun boxes(box: OneBox, path: string): void {
+    var line = "  $path ${box.node.kind} x=${box.x} y=${box.y} w=${box.w} h=${box.h} content=${box.contentH}"
+    if (box.lines.size > 0) {
+        line = "$line lines="
+        for (i in 0 until box.lines.size) line = "$line[${box.lines[i]}:${if (i < box.lineWidths.size) box.lineWidths[i] else -1}]"
+    }
+    println(line)
+    var i = 0
+    for (child in box.children) {
+        boxes(child, "$path/$i")
+        i += 1
+    }
+    return
+}
+
+fun main: int {
+    val first = if (processArgumentCount() > 0) oneParseInt(processArgument(0), 1) else 1
+    val count = if (processArgumentCount() > 1) oneParseInt(processArgument(1), 1) else 1
+    val drops: array<int> = []
+    if (processArgumentCount() > 2) {
+        for (part in processArgument(2).split(",")) if (oneParseInt(part, -1) > 0) drops.append(oneParseInt(part, -1))
+    }
+    val theme = theme()
+    for (seed in first until first + count) {
+        var rng = Rng(seed * 2654435761 + 97)
+        val root = Spec("column", [], [], "", [])
+        val kids = 1 + rng.below(3)
+        for (i in 0 until kids) root.children.append(make(rng, 1, false, true))
+        val unused = number(root, 0)
+        drop(root, drops)
+        println("seed $seed")
+        show(root, " ")
+        val widths = [rng.pick([97, 211, 233, 317]), rng.pick([360, 411, 479, 599]), rng.pick([777, 1023, 1280])]
+        for (width in widths) {
+            for (height in [640, 0]) {
+                println(" at $width × $height")
+                boxes(oneLayout(node(root), theme, "desktop", width, height, Map()), "r")
+            }
+        }
+    }
+    0
+}

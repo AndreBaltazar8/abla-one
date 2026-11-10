@@ -3,6 +3,9 @@
 #   tools/ui-check/check.sh capture <rev>          capture <rev> into the store (the baseline)
 #   tools/ui-check/check.sh check <rev> [<base>]   capture <rev> and compare with <base>
 #                                                  (default: NovaKind's pin, c1878461)
+#   tools/ui-check/check.sh gen <rev> [<base> [N]] lay out N random trees (gen.ab; 20000) with
+#                                                  both and compare every box; a tree that
+#                                                  differs is shrunk to a small one and shown
 # A capture exports <rev> (git archive: no checkout or worktree is touched) beside links to
 # its sibling repositories (abla-mobile; abla-ui when there is one: ABLA_MOBILE, ABLA_UI name
 # them), overlays this directory's capture.ab (so both sides run the same capture), builds with
@@ -22,6 +25,7 @@
 # ABLAC (default the 0.2.48 install NovaKind pins), NIX (default NovaKind's toolchain shell),
 # SLOT (default NovaKind's compiler-slot; SLOT= for none), STORE (default ~/.cache/abla-one-ui-check).
 set -uo pipefail
+{
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)
 ablac=${ABLAC:-$HOME/.local/share/abla/v0.2.48/installed/bin/ablac}
@@ -38,10 +42,16 @@ compile() { # in the export's root: compile <ablac arguments…>
 }
 
 capture() {
-	local rev=$1 commit out work
+	local rev=$1 commit out work final lock
 	commit=$(git -C "$repo" rev-parse --verify "$rev^{commit}") || { echo "no such revision: $rev" >&2; return 2; }
-	out=$store/$commit
-	if [ -f "$out/DONE" ] && [ "${FORCE:-}" != 1 ]; then echo "$out"; return 0; fi
+	final=$store/$commit
+	mkdir -p "$store"
+	# One capture of a commit at a time (a second waits, then finds it done), built aside and
+	# moved into place whole: a reader never sees half of one.
+	exec {lock}> "$store/$commit.lock"
+	flock "$lock"
+	if [ -f "$final/DONE" ] && [ "${FORCE:-}" != 1 ]; then echo "$final"; return 0; fi
+	out=$store/$commit.partial
 	rm -rf "$out"
 	mkdir -p "$out"
 	work=$(mktemp -d)
@@ -49,6 +59,8 @@ capture() {
 	git -C "$repo" archive "$commit" | tar -x -C "$work/abla-one"
 	ln -s "$(realpath "$mobile")" "$work/abla-mobile"
 	[ -d "$ui" ] && ln -s "$(realpath "$ui")" "$work/abla-ui"
+	# (tests/thin_config.sh reads the compiler checkout's shell.nix beside the repository.)
+	[ -d "$(dirname -- "$mobile")/ablac" ] && ln -s "$(realpath "$(dirname -- "$mobile")/ablac")" "$work/ablac"
 	mkdir -p "$work/abla-one/tools/ui-check" "$work/abla-one/build"
 	cp "$here/capture.ab" "$work/abla-one/tools/ui-check/capture.ab"
 	(
@@ -73,7 +85,9 @@ capture() {
 	) || { rm -rf "$work"; return 2; }
 	rm -rf "$work"
 	touch "$out/DONE"
-	echo "$out"
+	rm -rf "$final"
+	mv "$out" "$final"
+	echo "$final"
 }
 
 case ${1:-} in
@@ -113,5 +127,45 @@ check)
 	[ $failed = 0 ] && echo "ui-check: identical" || echo "ui-check: NOT identical"
 	exit $failed
 	;;
-*) sed -n '2,24p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;
+gen)
+	# Random trees (gen.ab), laid out by <rev> and by <base>: every node's box must agree. A
+	# seed that differs is shrunk (nodes dropped while the two still differ) and shown.
+	#   check.sh gen <rev> [<base> [<seeds, default 20000>]]
+	rev=${2:?a revision}; baseRev=${3:-$pin}; seeds=${4:-20000}
+	work=$(mktemp -d)
+	trap 'rm -rf "$work"' EXIT
+	for side in new base; do
+		commit=$(git -C "$repo" rev-parse --verify "$([ $side = new ] && echo "$rev" || echo "$baseRev")^{commit}") || exit 2
+		mkdir -p "$work/$side/abla-one"
+		git -C "$repo" archive "$commit" | tar -x -C "$work/$side/abla-one"
+		ln -s "$(realpath "$mobile")" "$work/$side/abla-mobile"
+		[ -d "$ui" ] && ln -s "$(realpath "$ui")" "$work/$side/abla-ui"
+		mkdir -p "$work/$side/abla-one/tools/ui-check" "$work/$side/abla-one/build"
+		cp "$here/gen.ab" "$work/$side/abla-one/tools/ui-check/gen.ab"
+		(cd "$work/$side/abla-one" && compile build tools/ui-check/gen.ab -o build/ui-check-gen --fast > "$work/$side.log" 2>&1) || { echo "gen.ab does not build at $side:"; head -20 "$work/$side.log"; exit 2; }
+		"$work/$side/abla-one/build/ui-check-gen" 1 "$seeds" > "$work/$side.txt" 2> "$work/$side.err" || { echo "the generator failed at $side: $(tail -2 "$work/$side.err")"; exit 2; }
+	done
+	if cmp -s "$work/base.txt" "$work/new.txt"; then echo "gen: $seeds random trees, $(grep -c ' x=' "$work/base.txt") boxes: identical"; exit 0; fi
+	# The seeds that differ: split both outputs by seed and compare.
+	bad=$(awk 'FNR==1 { side++ } /^seed / { seed=$2; next } { text[side, seed] = text[side, seed] $0 "\n"; seen[seed] = 1 } END { for (s in seen) if (text[1, s] != text[2, s]) print s }' "$work/base.txt" "$work/new.txt" | sort -n)
+	echo "gen: $(echo "$bad" | wc -l) of $seeds trees differ; the first: $(echo "$bad" | head -8 | tr '\n' ' ')"
+	seed=$(echo "$bad" | head -1)
+	one() { "$work/$1/abla-one/build/ui-check-gen" "$seed" 1 "$2" 2>&1; }
+	differs() { [ "$(one base "$1")" != "$(one new "$1")" ]; }
+	nodes=$(one base "" | grep -c '^ *#')
+	drops=""
+	n=$((nodes - 1))
+	while [ $n -ge 1 ]; do
+		try=${drops:+$drops,}$n
+		if differs "$try"; then drops=$try; fi
+		n=$((n - 1))
+	done
+	echo "seed $seed, shrunk from $nodes nodes to $(one base "$drops" | grep -c '^ *#') (ui-check-gen $seed 1 ${drops:-''}):"
+	one base "$drops" | sed -n '/^ *#/p'
+	diff <(one base "$drops") <(one new "$drops") | grep '^[<>]' | head -12 | sed 's/^</  was/; s/^>/  now/' | cut -c1-200
+	exit 1
+	;;
+*) sed -n '2,27p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;
 esac
+exit
+}
