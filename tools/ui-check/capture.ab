@@ -1,0 +1,202 @@
+// What abla-one produces for a fixed set of screens, written out file by file for
+// tools/ui-check/check.sh to compare between two revisions (the conversion onto abla-ui must
+// change none of it). Per screen: the web document, the test backend's dump per target, the
+// Android tree's JSON, and for the layout engine the boxes and the paint frame at several
+// widths. Run from the repository root: build/ui-check-capture <out dir> [timing rounds]
+
+import "abla/io"
+import "abla/fs"
+import "abla/json"
+import "abla/process/arguments"
+import "abla/process/time"
+import "../../src/one.ab"
+import "../../src/backends/test.ab"
+import "../../src/backends/web_document.ab"
+import "../../src/backends/android_tree.ab"
+import "../../src/layout/layout.ab"
+import "../../src/layout/paint.ab"
+import "../../examples/gallery/gallery.ab"
+import "../../examples/services/services.ab"
+import "../../../abla-mobile/src/ui.ab"
+
+val WIDTHS = [240, 320, 359, 360, 361, 479, 480, 481, 599, 600, 601, 759, 760, 761, 1024, 1280, 1499, 1500, 1501]
+val TARGETS = ["test", "web-document", "android", "desktop", "epaper"]
+
+fun joined(values: array<string>, sep: string): string {
+    var out = ""
+    var first = true
+    for (v in values) {
+        out = if (first) v else "$out$sep$v"
+        first = false
+    }
+    out
+}
+
+fun ints(values: array<int>): string {
+    var out = ""
+    for (v in values) out = "$out $v"
+    out
+}
+
+fun boxDump(box: OneBox, path: string, var out: array<string>): void {
+    var line = "$path ${box.node.kind} x=${box.x} y=${box.y} w=${box.w} h=${box.h} content=${box.contentH} scroll=${box.scrollY}"
+    if (box.lines.size > 0) line = "$line lines=[${joined(box.lines, "|")}] widths=[${ints(box.lineWidths)} ]"
+    out.append(line)
+    var i = 0
+    for (child in box.children) {
+        boxDump(child, "$path/$i", out)
+        i += 1
+    }
+    return
+}
+
+// Screens that press on what the gallery doesn't: wrapping at every width, ellipsis, long
+// words, growth shared out with remainders, wrapping rows, scrolling, viewport states.
+fun stress(name: string): Node {
+    val long = "Um texto comprido o bastante para quebrar em várias linhas, com palavrasextraordinariamentecompridassemespaçosnenhuns e pontuação; números 1 234 567,89 € e símbolos — “aspas” … fim."
+    if (name == "text") return column(style().padding(13).gap(7), [
+        text(long, style()),
+        text(long, style().maxLines(1)),
+        text(long, style().maxLines(2).fontSize(17).weight("bold")),
+        text(long, style().maxLines(3).fontSize(11).lineHeight(19)),
+        text("", style()),
+        text(" ", style()),
+        text("a", style().width(1)),
+        text("Supercalifragilisticexpialidocious", style().width(60)),
+        text("linha um\nlinha dois\n\nlinha quatro", style()),
+        text("日本語のテキスト と emoji 🙂 e acentos àéîõü ÇÃ", style().fontSize(15)),
+        text(long, style().textAlign("center").tracking(50)),
+        text(long, style().textAlign("end").weight("semibold").maxWidth(211)),
+        rich("normal **negrito** e mais texto que quebra em várias linhas para ver as quebras com estilos", style())
+    ])
+    if (name == "grow") return column(style().padding(5).gap(3).fill(), [
+        row(style().gap(3), [text("a", style().grow(1)), text("bb", style().grow(1)), text("ccc", style().grow(1))]),
+        row(style().gap(7), [column(style().grow(1).background("#eee"), [text("um", style())]), column(style().grow(2).background("#ddd"), [text("dois", style())]), column(style().grow(3).background("#ccc"), [text("três", style())])]),
+        row(style().justify("between"), [text("esq", style()), text("meio", style()), text("dir", style())]),
+        row(style().justify("center").align("center").height(41), [text("centro", style()), spacer(9), text("x", style().fontSize(21))]),
+        row(style().justify("end").align("end").height(37), [text("fim", style()), text("fim2", style().alignSelf("start"))]),
+        row(style(), [text("largura fixa", style().width(97)), text("resto que cresce e quebra quando não cabe na largura disponível", style().grow(1)), text("min", style().minWidth(53))]),
+        column(style().grow(1).justify("center").align("center"), [text("ao centro do que sobra", style())]),
+        column(style().maxWidth(333).alignSelf("center").border(1, "#000").padding(11), [text("caixa com largura máxima e margem igual dos dois lados", style())]),
+        row(style().gap(1), [column(style().grow(1).minWidth(101), [text("a", style())]), column(style().grow(1).maxWidth(59), [text("b", style())]), column(style().grow(1), [text("c", style())])])
+    ])
+    if (name == "wrap") {
+        val chips: array<Node> = []
+        for (i in 0 until 23) chips.append(column(style().paddingX(7 + i % 5).paddingY(3).background("#e0e0e0").radius(9), [text("etiqueta $i${if (i % 4 == 0) " comprida" else ""}", style().fontSize(12 + i % 3))]))
+        val cells: array<Node> = []
+        for (i in 0 until 9) cells.append(column(style().width(97 + i * 13).height(31), [text("$i", style())]).keyed("cell$i"))
+        return column(style().padding(9).gap(11), [
+            row(style().wrap().gap(5), chips),
+            row(style().wrap().gap(13).justify("center"), cells),
+            scrollRow(style().gap(4).height(47), chips),
+            scroll(style().height(120).gap(2), [text("um", style()), text("dois", style()), text("três", style()), text("quatro", style()), text("cinco", style()), text("seis", style()), text("sete", style()), text("oito", style())]).keyed("list")
+        ])
+    }
+    column(style().padding(24).gap(16).upTo(760, style().padding(12).gap(8)).upTo(360, style().padding(4).gap(2)).from(1500, style().padding(48)), [
+        row(style().gap(12).upTo(600, style().gap(4)), [
+            column(style().grow(1).upTo(480, style().width(0)), [text("coluna um com texto que quebra consoante a largura", style().fontSize(18).upTo(760, style().fontSize(15)).upTo(360, style().fontSize(13)))]),
+            column(style().width(300).upTo(760, style().width(200)).upTo(480, style().width(120)), [text("coluna dois", style().from(1500, style().weight("bold")))])
+        ]),
+        text("só em ecrãs largos", style().from(1500, style().color("#f00")).upTo(1024, style().opacity(50))),
+        input("valor", "marcador", 7, style().upTo(600, style().fillWidth())),
+        pressable(9, style().padding(10).background("#193c30").pressed(style().background("#000")).on("web", style().hover(style().background("#333"))).on("android", style().set("ripple", "none")), [text("Carregar", style().color("#fff"))])
+    ])
+}
+
+class Shot(val name: string, val root: Node)
+
+fun write(out: string, name: string, text: string): void {
+    Path("$out/$name").writeText(text)
+    return
+}
+
+fun capture(out: string, name: string, make: (string, int) -> Node, theme: Theme): void {
+    for (target in TARGETS) write(out, "$name.dump.$target.txt", oneTestDump(make(target, 0), theme, target))
+    write(out, "$name.web.html", oneWebDocument("Check · $name", "pt-PT", make("web-document", 0), theme, "icons", "#ffffff"))
+    write(out, "$name.webclient.html", oneWebClientDocument("Check · $name", "pt-PT", make("web-document", 0), theme, "icons", "#ffffff", "one/host.js", "app.wasm"))
+    write(out, "$name.android.json", mobileEncodeTree(1, name, false, oneAndroidNode(make("android", 0), theme, "root")))
+    for (target in ["desktop", "epaper"]) {
+        for (width in WIDTHS) {
+            val scroll: Map<string, int> = Map()
+            val box = oneLayout(make(target, width), theme, target, width, 640, scroll)
+            val lines: array<string> = []
+            boxDump(box, "r", lines)
+            write(out, "$name.layout.$target.$width.txt", "${joined(lines, "\n")}\n")
+            write(out, "$name.paint.$target.$width.json", oneFrameJson(onePaintFrame(box, width, 640)))
+        }
+    }
+    return
+}
+
+var galleryRoute = "/"
+var servicesApp = ServicesDemo(OneNoServices(), "http://localhost")
+var stressName = "text"
+
+fun ui(target: string, width: int, theme: Theme): Ui = if (width > 0) oneUiSized(target, theme, width) else oneUi(target, theme)
+
+fun makeGallery(target: string, width: int): Node {
+    var app = Gallery(OneNoServices())
+    if (galleryRoute != "/") app.receive("route", galleryRoute)
+    var u = ui(target, width, oneDefaultTheme())
+    app.render(u)
+}
+
+fun makeServices(target: string, width: int): Node {
+    var u = ui(target, width, oneDefaultTheme())
+    servicesApp.render(u)
+}
+
+fun makeStress(target: string, width: int): Node = stress(stressName)
+
+fun main: int {
+    // (The arguments after the program's name.)
+    val out = if (processArgumentCount() > 0) processArgument(0) else "build/ui-check"
+    val rounds = if (processArgumentCount() > 1) oneParseInt(processArgument(1), 0) else 0
+    Path(out).createDirectories()
+    val theme = oneDefaultTheme()
+    val names: array<string> = []
+    val makers: array<(string, int) -> Node> = []
+    for (route in ["/", "/people", "/form/1", "/form/2"]) {
+        galleryRoute = route
+        val name = "gallery${if (route == "/") "-home" else route.replace("/", "-")}"
+        capture(out, name, makeGallery, theme)
+        names.append(name)
+    }
+    capture(out, "services", makeServices, theme)
+    names.append("services")
+    for (s in ["text", "grow", "wrap", "viewport"]) {
+        stressName = s
+        capture(out, "stress-$s", makeStress, theme)
+        names.append("stress-$s")
+    }
+    println("captured ${names.size} screens × (${TARGETS.size} dumps, 2 documents, 1 android tree, ${2 * WIDTHS.size} layouts and paints) into $out")
+    // Render + layout + paint per screen, the best of `rounds` (microseconds).
+    if (rounds > 0) {
+        var report = ""
+        var index = 0
+        for (name in names) {
+            var best = 0
+            for (round in 0 until rounds) {
+                val start = monotonicNanoseconds()
+                if (index < 4) {
+                    galleryRoute = ["/", "/people", "/form/1", "/form/2"][index]
+                    val frame = onePaintFrame(oneLayout(makeGallery("desktop", 1024), theme, "desktop", 1024, 640, Map()), 1024, 640)
+                    val html = oneWebDocument("t", "pt-PT", makeGallery("web-document", 0), theme, "icons", "#ffffff")
+                } else if (index == 4) {
+                    val frame = onePaintFrame(oneLayout(makeServices("desktop", 1024), theme, "desktop", 1024, 640, Map()), 1024, 640)
+                    val html = oneWebDocument("t", "pt-PT", makeServices("web-document", 0), theme, "icons", "#ffffff")
+                } else {
+                    stressName = ["text", "grow", "wrap", "viewport"][index - 5]
+                    val frame = onePaintFrame(oneLayout(makeStress("desktop", 1024), theme, "desktop", 1024, 640, Map()), 1024, 640)
+                    val html = oneWebDocument("t", "pt-PT", makeStress("web-document", 0), theme, "icons", "#ffffff")
+                }
+                val took = (monotonicNanoseconds() - start) / 1000
+                if (best == 0 || took < best) best = took
+            }
+            report = "$report$name $best\n"
+            index += 1
+        }
+        write(out, "TIMING.txt", report)
+    }
+    0
+}
