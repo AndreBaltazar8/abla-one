@@ -1,0 +1,82 @@
+import "abla/fs"
+import "abla/io"
+import "../one/preview_data.ab"
+import "../one/screens.ab"
+import "../../abla-one/src/backends/web_document.ab"
+import "../../abla-one/src/backends/test.ab"
+import "../../abla-one/src/layout/layout.ab"
+
+// (ui-check, uncommitted: game-pandatrails-9b.) Every preview screen laid out by abla-one's layout engine, each node's box
+// a line, for comparing two abla-one revisions box for box. Never connects to a server.
+fun boxLines(box: OneBox, path: string, var out: array<string>): void {
+    var line = "$path ${box.node.kind} x=${box.x} y=${box.y} w=${box.w} h=${box.h} content=${box.contentH} scroll=${box.scrollY}"
+    if (box.lines.size > 0) {
+        line = "$line lines="
+        for (i in 0 until box.lines.size) line = "$line[${box.lines[i]}:${if (i < box.lineWidths.size) box.lineWidths[i] else -1}]"
+    }
+    out.append(line)
+    var i = 0
+    for (child in box.children) {
+        boxLines(child, "$path/$i", out)
+        i += 1
+    }
+    return
+}
+
+fun main: int {
+    val folder = Path("build/ui-check-boxes")
+    folder.createDirectories()
+    for (language in ["en", "pt-PT"]) {
+        for (width in [360, 411, 1024, 1280, 1920]) {
+            for (screen in ["home", "conversations", "thread", "team", "account", "finance", "invitation", "invoicing", "customers", "products", "documents", "plan", "payments", "subscriptions", "ledger", "organization", "usage", "settings", "access", "obligations", "payroll", "people", "leave", "calendar", "filing", "efatura", "stockcounts", "stockat", "holidays", "payrollrates"]) {
+                var app = sampleApp()
+                app.locale = language
+                app.access = "preview.eyJzaWQiOiJjbGFyby1zeW50aGV0aWMifQ.signature"
+                for (permission in ["view", "invite", "members_manage", "roles_manage", "settings_manage", "documents_view", "documents_issue", "series_manage", "saft_export", "payment_providers_manage", "audit_view", "chat", "team_view", "developers_manage", "developers_view", "expenses_submit", "expenses_approve", "finance_view", "finance_manage", "finance_review", "books_manage", "pay_view", "pay_manage", "leave_approve", "payroll_view", "working_time_view", "working_time_manage", "working_time_approve", "working_time_export", "projects_view", "projects_manage", "sales_offers_manage", "stock_read", "stock_manage", "stock_value_read", "stock_count", "assets_read", "assets_manage", "assets_value_read"]) app.organization.permissions.append(permission)
+                app.tab = if (screen == "home") 0 else if (screen == "team") 2 else if (screen == "account") 3 else 1
+                if (screen == "finance") { app.tab = novakindBillTab; app.billView = finHome }
+                if (screen == "invoicing") { app.tab = novakindBillTab; app.billView = billHome }
+                if (screen == "customers") { app.tab = novakindBillTab; app.billView = billCustomers }
+                if (screen == "products") { app.tab = novakindBillTab; app.billView = billProducts }
+                if (screen == "documents") { app.tab = novakindBillTab; app.billView = billDocuments }
+                if (screen == "plan") { app.tab = novakindBillTab; app.billView = billPlan }
+                if (screen == "payments") { app.tab = novakindBillTab; app.billView = billPayments }
+                if (screen == "subscriptions") { app.tab = novakindBillTab; app.billView = billSubscriptions }
+                if (screen == "ledger") { app.tab = novakindBillTab; app.billView = billLedger }
+                if (screen == "organization") { app.tab = novakindBillTab; app.billView = orgOverview; app.form = jsonObject(["name"], [jsonString(app.organization.name)]) }
+                if (screen == "usage") { app.tab = novakindBillTab; app.billView = billDeveloperUsage }
+                if (screen == "settings") { app.tab = novakindBillTab; app.billView = finSettings }
+                if (screen == "access") { app.tab = novakindBillTab; app.billView = billAccess }
+                if (screen == "home") sampleCashflow(app)
+                if (screen == "obligations") { app.tab = novakindBillTab; app.billView = workObligations; sampleWork(app) }
+                if (screen == "payroll") { app.tab = novakindBillTab; app.billView = workPayroll; sampleWork(app) }
+                if (screen == "people") { app.tab = novakindBillTab; app.billView = workPeople; sampleWork(app) }
+                if (screen == "leave") { app.tab = novakindBillTab; app.billView = workLeaveInbox; sampleWork(app) }
+                if (screen == "calendar") { app.tab = novakindBillTab; app.billView = workCalendar; sampleWork(app) }
+                if (screen == "filing") { app.tab = novakindBillTab; app.billView = workFiling; sampleWork(app) }
+                if (screen == "efatura") { app.tab = novakindBillTab; app.billView = fatHome; sampleWork(app) }
+                if (screen == "stockcounts") { app.tab = novakindBillTab; app.billView = stockCountsHome; sampleWork(app) }
+                if (screen == "stockat") { app.tab = novakindBillTab; app.billView = stockAtHome; sampleWork(app) }
+                if (screen == "holidays") { app.tab = novakindBillTab; app.billView = workHolidays; sampleWork(app) }
+                if (screen == "payrollrates") { app.tab = novakindBillTab; app.billView = workPayrollRates; sampleWork(app) }
+                if (screen == "invitation") app.invitation = "synthetic-invitation"
+                if (screen == "thread") {
+                    app.channelId = "c1"
+                    app.channelName = "geral"
+                    app.channelKind = "channel"
+                    app.messages = sampleMessages()
+                }
+                for (target in ["android", "desktop"]) {
+                    var ui = oneUiSized(target, novakindTheme(), width)
+                    val lines: array<string> = []
+                    boxLines(oneLayout(app.render(ui), novakindTheme(), target, width, 780, Map()), "r", lines)
+                    var text = ""
+                    for (l in lines) text = "$text$l\n"
+                    folder.child("$screen-$language-$width-$target.txt").writeText(text)
+                }
+            }
+        }
+    }
+    println("ui-check boxes: build/ui-check-boxes")
+    0
+}
