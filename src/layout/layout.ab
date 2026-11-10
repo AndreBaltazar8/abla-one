@@ -36,8 +36,15 @@ fun oneAdvances(weight: string): Map<int, int> {
 
 // Inter's widths as an abla-ui TableFont, one table a weight; abla-one's weights map to those
 // four (oneWeightNumber), so a weight the tables don't have reads the regular one, as before.
-val oneInterFont = tableFont(oneInterCodes, [400, 500, 600, 700], [oneInterWidths400, oneInterWidths500, oneInterWidths600, oneInterWidths700],
-    f64FromInt(oneInterAscent) / 1000.0, f64FromInt(oneInterDescent) / 1000.0, 560, false)
+// Made on first use, not at start-up: every program imports this file, and one that measures no
+// text then links none of the font's code.
+val oneInterFonts: array<TableFont> = []
+
+fun oneInterFontReady(): void {
+    if (oneInterFonts.size == 0) oneInterFonts.append(tableFont(oneInterCodes, [400, 500, 600, 700], [oneInterWidths400, oneInterWidths500, oneInterWidths600, oneInterWidths700],
+        f64FromInt(oneInterAscent) / 1000.0, f64FromInt(oneInterDescent) / 1000.0, 560, false))
+    return
+}
 
 // UTF-8 decoding: the code point at `i` and its byte length.
 fun oneCodeAt(text: string, i: int): int {
@@ -55,9 +62,10 @@ fun oneCodeLength(b: int): int = if (b >= 240) 4 else if (b >= 224) 3 else if (b
 // advance tables (the same arithmetic as before: each code point's advance times the size,
 // summed; code points past U+2000 that aren't listed are one em, others 560).
 fun oneTextMilli(text: string, size: int, weight: string): int {
-    val face = oneInterFont.face("Inter", f64FromInt(size), oneWeightNumber(weight))
+    oneInterFontReady()
+    val face = oneInterFonts[0].face("Inter", f64FromInt(size), oneWeightNumber(weight))
     // The font sums in 1/1000 px exactly and hands back px; this is that sum again.
-    f64ToInt(oneInterFont.width(face, text, 0, text.size) * 1000.0 + 0.5)
+    f64ToInt(oneInterFonts[0].width(face, text, 0, text.size) * 1000.0 + 0.5)
 }
 
 @noinline
