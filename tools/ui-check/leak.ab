@@ -1,0 +1,33 @@
+import "abla/fs"
+import "abla/io"
+import "abla/memory"
+import "../one/preview_data.ab"
+import "../one/screens.ab"
+import "../../abla-one/src/backends/web_document.ab"
+
+// (ui-check, uncommitted in NovaKind: game-pandatrails-9b.) A server makes an app per live session and per first paint, for
+// days: making and dropping one must retain nothing. 10,000 apps made, rendered once and dropped, in ten rounds; the
+// process's resident memory after each round (kB, /proc/self/statm) must stop growing after the first rounds.
+fun residentKb(): int {
+    val fields = Path("/proc/self/statm").readText().split(" ")
+    var pages = 0
+    for (c in fields[1]) if (c >= 48 && c <= 57) pages = pages * 10 + int(c) - 48
+    pages * 4
+}
+
+fun main: int {
+    var line = "resident kB after each 1000 apps:"
+    for (round in 0 until 10) {
+        for (i in 0 until 1000) {
+            var app = sampleApp()
+            if (i % 100 == 0) {
+                var ui = oneUiSized("web-document", novakindTheme(), 1280)
+                val html = oneWebDocument("NovaKind", "en", app.render(ui), novakindTheme(), "../one-icons", "#ffffff")
+            }
+        }
+        memoryCollect()
+        line = "$line ${residentKb()}"
+    }
+    println(line)
+    0
+}
