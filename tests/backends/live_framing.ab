@@ -1,0 +1,76 @@
+import "abla/test"
+import "abla/http"
+import "../../src/backends/web_live.ab"
+
+// The framing of a request head as the live server reads it: the body length, or -1 for a head it refuses.
+fun framing(headers: string): int {
+    val text = "POST /x HTTP/1.1\r\n$headers\r\n"
+    oneLiveFraming(httpParseRequest(text))
+}
+
+fun main: int {
+    // Accepted: no Content-Length is no body, digits give the length, surrounding spaces and tabs and the name's case do not matter.
+    expectEqual(framing(""), 0, "no headers")
+    expectEqual(framing("Host: a\r\nAccept: */*\r\n"), 0, "no Content-Length")
+    expectEqual(framing("content-length: 5\r\n"), 5, "a length")
+    expectEqual(framing("Content-Length:5\r\n"), 5, "no space after the colon")
+    expectEqual(framing("CONTENT-LENGTH:  7 \t\r\n"), 7, "spaces and tabs around the value, any case")
+    expectEqual(framing("content-length: 0\r\n"), 0, "zero")
+    expectEqual(framing("content-length: 007\r\n"), 7, "leading zeros")
+    expectEqual(framing("content-length: 999999999999999\r\n"), 999999999999999, "fifteen digits")
+    expectEqual(framing("content-length: 16777216\r\n"), 16777216, "the 16 MiB limit is the server's, not the parser's")
+    expectEqual(framing("content-length: 5\r\ncontent-length:  5 \r\nCONTENT-LENGTH: 005\r\n"), 5, "several agreeing headers")
+
+    // Refused: a sign, other characters, nothing, inner whitespace, a list, too many digits.
+    expectEqual(framing("content-length: -3\r\n"), -1, "negative")
+    expectEqual(framing("content-length: +3\r\n"), -1, "signed")
+    expectEqual(framing("content-length: 12abc\r\n"), -1, "trailing junk")
+    expectEqual(framing("content-length: abc\r\n"), -1, "not a number")
+    expectEqual(framing("content-length: 1 2\r\n"), -1, "whitespace inside")
+    expectEqual(framing("content-length: \r\n"), -1, "empty")
+    expectEqual(framing("content-length:\r\n"), -1, "nothing")
+    expectEqual(framing("content-length: 5,5\r\n"), -1, "a list")
+    expectEqual(framing("content-length: 0x10\r\n"), -1, "hexadecimal")
+    expectEqual(framing("content-length: 1e3\r\n"), -1, "an exponent")
+    expectEqual(framing("content-length: ５\r\n"), -1, "a non-ASCII digit")
+    expectEqual(framing("content-length: 1000000000000000\r\n"), -1, "sixteen digits")
+    expectEqual(framing("content-length: 99999999999999999999\r\n"), -1, "overflow")
+
+    // Refused: several Content-Length headers that differ (whichever is first, last or between).
+    expectEqual(framing("content-length: 5\r\ncontent-length: 3\r\n"), -1, "two that differ")
+    expectEqual(framing("content-length: 3\r\ncontent-length: 3\r\ncontent-length: 4\r\n"), -1, "the last differs")
+    expectEqual(framing("Content-Length: 0\r\nContent-Length: 5\r\n"), -1, "zero and a length")
+    expectEqual(framing("content-length: 5\r\ncontent-length: x\r\n"), -1, "a valid one and an invalid one")
+
+    // Refused: Transfer-Encoding, alone, with a Content-Length, in any case and with any value.
+    expectEqual(framing("transfer-encoding: chunked\r\n"), -1, "chunked")
+    expectEqual(framing("Transfer-Encoding: chunked\r\ncontent-length: 5\r\n"), -1, "chunked with a length")
+    expectEqual(framing("content-length: 5\r\nTRANSFER-ENCODING: chunked\r\n"), -1, "a length, then chunked")
+    expectEqual(framing("transfer-encoding: identity\r\n"), -1, "identity")
+    expectEqual(framing("transfer-encoding: gzip, chunked\r\n"), -1, "a coding list")
+    expectEqual(framing("transfer-encoding: x\r\n"), -1, "an unknown coding")
+    expectEqual(framing("transfer-encoding:\r\n"), -1, "an empty value")
+
+    // Refused: whitespace before the colon of a framing header, and a folded line (a name that begins with whitespace).
+    expectEqual(framing("Content-Length : 5\r\n"), -1, "space before the colon, Content-Length")
+    expectEqual(framing("Content-Length\t: 5\r\n"), -1, "tab before the colon, Content-Length")
+    expectEqual(framing("Transfer-Encoding : chunked\r\n"), -1, "space before the colon, Transfer-Encoding")
+    expectEqual(framing("X-A: 1\r\n Content-Length: 5\r\n"), -1, "a folded Content-Length")
+    expectEqual(framing("X-A: 1\r\n\tTransfer-Encoding: chunked\r\n"), -1, "a folded Transfer-Encoding")
+    expectEqual(framing("Host: a\r\n continuation: b\r\n"), -1, "any folded line")
+    expectEqual(framing("X-A : 1\r\nHost: a\r\n"), -1, "space before the colon of any header (RFC 9112 5.1)")
+    expectEqual(framing("Host: a\r\nX-B\t: 1\r\n"), -1, "tab before the colon of any header")
+
+    // Line ends: every LF has its CR before it and every CR its LF after it.
+    expect(oneLiveLineEndingsValid("GET / HTTP/1.1\r\nHost: a\r\n\r\n"), "a head of CR LF lines")
+    expect(oneLiveLineEndingsValid("GET / HTTP/1.1\r\n\r\n"), "a head without headers")
+    expect(!oneLiveLineEndingsValid("GET / HTTP/1.1\nHost: a\r\n\r\n"), "a bare LF after the request line")
+    expect(!oneLiveLineEndingsValid("GET / HTTP/1.1\r\nHost: a\nX: b\r\n\r\n"), "a bare LF inside a header")
+    expect(!oneLiveLineEndingsValid("GET / HTTP/1.1\r\nHost: a\r\n\n"), "a bare LF as the blank line")
+    expect(!oneLiveLineEndingsValid("GET / HTTP/1.1\r\nHost: a\rb\r\n\r\n"), "a bare CR inside a value")
+    expect(!oneLiveLineEndingsValid("GET / HTTP/1.1\r\nHost: a\r\n\r\r"), "a CR with nothing after it at the end")
+    expect(!oneLiveLineEndingsValid("\nGET / HTTP/1.1\r\n\r\n"), "an LF first")
+    expect(!oneLiveLineEndingsValid("GET / HTTP/1.1\r\nX: a\r\r\n\r\n"), "two CRs before an LF")
+    expect(oneLiveLineEndingsValid("GET /\x00\xff HTTP/1.1\r\nk: \x00\r\n\r\n"), "NUL and high bytes are not line ends")
+    testsPassed()
+}

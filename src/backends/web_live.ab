@@ -4,6 +4,7 @@ import "abla/net"
 import "abla/json"
 import "abla/crypto"
 import "abla/bytes"
+import "abla/text"
 import "abla/websocket"
 import "abla/process/time"
 import "abla/sys/linux/random"
@@ -388,7 +389,58 @@ fun OneLiveServer.accept(): void {
     return
 }
 
-fun oneLiveContentLength(request: HttpRequest): int = oneParseInt(request.header("content-length"), 0)
+// Whether every line of a request head, through its blank line, ends in CR LF: no LF without the CR before it and no
+// CR without the LF after it. A bare LF or CR is a line end for some readers and not for others, and a proxy and this
+// server that disagree on where a header ends read different framing headers out of the same bytes.
+fun oneLiveLineEndingsValid(head: string): bool {
+    var at = textFindByte(head, 10, 0, head.size)
+    while (at >= 0) {
+        if (at == 0 || head[at - 1] != 13) return false
+        at = textFindByte(head, 10, at + 1, head.size)
+    }
+    var carriage = textFindByte(head, 13, 0, head.size)
+    while (carriage >= 0) {
+        if (carriage + 1 >= head.size || head[carriage + 1] != 10) return false
+        carriage = textFindByte(head, 13, carriage + 1, head.size)
+    }
+    true
+}
+
+// The number of body bytes a request head frames, or -1 when its framing is malformed and the connection is to be
+// refused. Strict, because a request read with a different length than the sender (or a proxy in front) meant makes the
+// bytes after it a different request: Transfer-Encoding is not implemented here, so a request that has one is refused
+// (never read as a body of 0 bytes); Content-Length is digits only (spaces and tabs around it are allowed), no sign, at
+// most 15 digits; several Content-Length headers must agree; a header whose name begins with whitespace (a folded
+// line) or has whitespace before its colon is refused whatever it is named (RFC 9112 5.1).
+fun oneLiveFraming(head: HttpRequest): int {
+    var length = 0
+    var seen = false
+    for (header in head.headers) {
+        val name = header.name
+        if (name.size > 0 && (name[0] == 32 || name[0] == 9)) return -1
+        if (name.size > 0 && (name[name.size - 1] == 32 || name[name.size - 1] == 9)) return -1
+        val nameEnd = name.size
+        if (nameEnd == 17 && httpAsciiEqualInsensitive(name, "transfer-encoding")) return -1
+        if (nameEnd == 14 && httpAsciiEqualInsensitive(name, "content-length")) {
+            val value = header.value
+            var begin = 0
+            var end = value.size
+            while (begin < end && (value[begin] == 32 || value[begin] == 9)) begin = begin + 1
+            while (end > begin && (value[end - 1] == 32 || value[end - 1] == 9)) end = end - 1
+            if (begin == end || end - begin > 15) return -1
+            var number = 0
+            for (index in begin until end) {
+                val byte = value[index]
+                if (byte < 48 || byte > 57) return -1
+                number = number * 10 + byte - 48
+            }
+            if (seen && number != length) return -1
+            length = number
+            seen = true
+        }
+    }
+    length
+}
 
 fun OneLiveServer.read(slot: int): void {
     val connection = TcpConnection(slots[slot].descriptor)
@@ -396,7 +448,7 @@ fun OneLiveServer.read(slot: int): void {
     connection.descriptor = -1
     if (incoming.hasData()) {
         slots[slot].input = "${slots[slot].input}${incoming.bytes}"
-        if (slots[slot].upgraded) frames(slot) else http(slot)
+        if (slots[slot].upgraded) frames(slot) else if (!slots[slot].closing) http(slot)
     } else if (incoming.reachedEof() || (incoming.failed() && incoming.errorCode != 11)) closeSlot(slot)
     return
 }
@@ -434,8 +486,16 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
         if (input.size > 65536) closeSlot(slot)
         return
     }
-    val head = httpParseRequest(input.slice(0, end))
-    val length = oneLiveContentLength(head)
+    val headText = input.slice(0, end)
+    val head = httpParseRequest(headText)
+    val length = if (oneLiveLineEndingsValid(headText)) oneLiveFraming(head) else -1
+    if (length < 0) {
+        // Malformed framing: refused and closed, and nothing of this connection's buffer is read again.
+        slots[slot].input = ""
+        queue(slot, httpText("bad request", 400).render())
+        slots[slot].closing = true
+        return
+    }
     if (input.size < end + length) {
         if (length > 16777216) closeSlot(slot)
         return
