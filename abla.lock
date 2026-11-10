@@ -1,0 +1,12 @@
+version = 2
+
+[[package]]
+name = "abla-ui"
+provider = "git"
+identity = "git:https://github.com/AndreBaltazar8/abla-ui.git"
+source = "https://github.com/AndreBaltazar8/abla-ui.git"
+selector-kind = "rev"
+selector = "277bc04cdc6fbc3191f17d846f21475118d258c9"
+revision = "277bc04cdc6fbc3191f17d846f21475118d258c9"
+digest = "4c9318dbd7a61bdc86e79b8f4b47d2469467695f"
+entry = "src/ui.ab"
