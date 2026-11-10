@@ -293,7 +293,7 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
         if (kind == "link" && box.node.attr("route") != "true") oneAddHit(frame, "link", hx, hy, hw, hh, 0, 0, path, box.node.attr("href"), box.node.attr("external"), false)
     }
     val scrolls = kind == "scroll" || kind == "feed"
-    // A scrollRow's children are already placed at its offset (oneMeasureScrollRow, oneLayoutRescroll), which keeps this short.
+    // A scrollRow's children are already placed at its offset (oneFlexBox, oneLayoutRescroll), which keeps this short.
     val across = kind == "scrollRow"
     val down = if (across) 0 else box.scrollY
     var ncx = cx
