@@ -81,3 +81,59 @@ node building, but it would put hidden state shared by every session behind a pu
 the server. Trimming flex's per-node columns would mean refactoring code that has just been
 checked identical. Either is a separate step with its own identity check, if canvas sessions
 ever matter.
+
+## What abla-one shares with abla-ui, and what it doesn't
+
+abla-one's apps are written against abla-one's API. `render(var ui: Ui): Node` returns a
+`Node`. Styles are strings (`set("gap", "8")`, tokens like `"@surface"`, `.on("web", …)`,
+`upTo` / `from`). Handlers are int ids from `ui.press { }` / `ui.change { }`, delivered by
+rendering again in dispatch mode. That API stays as it is: NovaKind's screens are written
+against it.
+
+Shared, on abla-ui's code:
+
+| Part | What abla-one uses | Pin |
+|---|---|---|
+| State | abla-ui's plain `State` (src/revision.ab): a read is a load, a write moves the revision | step 1 |
+| Text measurement | abla-ui's `TableFont` over Inter's tables, built on first use | step 1 |
+| Layout | abla-ui's flex, with abla-one's rules as its defaults (this file) | step 2 |
+| Desktop frames | the layout kept between frames (`oneLayoutCached`) | desktop |
+| Tag syntax | `$one` is an element table on abla-ui's grammar (src/grammar.ab) | step 3 |
+
+Left as they are, on purpose:
+
+- **Node and Style.** These are not replaced by abla-ui's `El` and typed `Style`. That would
+  change every app's source: render's return type, every kit call's event argument, string
+  styles. The alternative is a layer that rebuilds `Node` on every render, which costs time and
+  server bytes for nothing.
+- **Test backend** (src/backends/test.ab): a dump of the tree; nothing to retain.
+- **Web document** (web_document.ab): rendered once per request; a retained tree only adds
+  work.
+- **Thin host** (thin_host.ab): one comparison of the tree's JSON already says when to send.
+- **E-paper** (epaper.ab): it already lays out through the kept cache and repaints dirty
+  rectangles.
+
+Not done (a decision for André and NovaKind), and what each would take:
+
+- **Android, incremental updates.** Today every render sends the whole tree as JSON
+  (android.ab:51), and the host parses it whole (UiTree.fromJson). With increments, abla-one
+  would keep each session's previous tree, compare the new one by key path, and send records
+  (add, remove, move, properties) against stable node ids; the host would apply them to its
+  UiNode tree. That means:
+  - a protocol change on both sides (one APK, so no old/new compatibility needed);
+  - Kotlin in abla-mobile;
+  - novakind-aa's review of the interface;
+  - the fingerprint work (abla-mobile perf/recompose-694) on its main first;
+  - todo 732's lost-change handling designed in: a record that lands nowhere is reported, and
+    the host asks for a whole tree.
+
+  Gate: the 82 phone suites, android-recompose's bound, per-update timings.
+- **Live web, patches by node.** Today the session renders the whole HTML and sends all of it
+  when the string differs (web_session.ab:766); the page morphs its DOM by `data-one` keys.
+  With patches by node, the same key-path comparison as Android's would send only the changed
+  subtrees, as a new, versioned message kind (pages that don't know it keep whole HTML). That
+  means:
+  - projects-e8 for the protocol;
+  - room in the server's size budget: step 2 already uses 76 KB of the 100 KB allowed.
+
+  Gate: a recorded session's patch bytes old/new, the keep-alive and recovery suites.
