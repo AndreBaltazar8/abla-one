@@ -198,9 +198,14 @@ cost)
 		# Optimized: this is a cost, and a device runs an optimized build.
 		(cd "$work/$side/abla-one" && compile build tools/ui-check/relayout.ab -o build/ui-check-relayout > "$work/$side.log" 2>&1) || { echo "relayout.ab does not build at $side:"; head -12 "$work/$side.log"; exit 2; }
 	done
-	for run in 1 2 3; do
+	for run in 1 2 3 4 5; do
+		# One after the other and on one core (CPU=<n>, default 2): side by side they would land on
+		# cores of different speed (performance and efficiency cores) and compete with each other.
 		echo "run $run (load $(cut -d' ' -f1 /proc/loadavg)): was | now"
-		paste -d'|' <("$work/base/abla-one/build/ui-check-relayout") <("$work/new/abla-one/build/ui-check-relayout") | sed 's/^/  /; s/|/  |  /'
+		for side in base new; do
+			if command -v taskset > /dev/null 2>&1; then taskset -c "${CPU:-2}" "$work/$side/abla-one/build/ui-check-relayout"; else "$work/$side/abla-one/build/ui-check-relayout"; fi > "$work/$side.out"
+		done
+		paste -d'|' "$work/base.out" "$work/new.out" | sed 's/^/  /; s/|/  |  /'
 	done
 	;;
 *) sed -n '2,27p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;

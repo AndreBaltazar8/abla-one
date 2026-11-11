@@ -4,7 +4,7 @@ abla-one `abla-ui-grammar` c29e33f54be8b1e71b48eebe79e0fc41913f94b1 with abla-ui
 dfb2417a2a34d273c6622b572801390def6747de, against abla-one
 70db437b7e8bd4a2938db2ecadd7bb18741199dd. Compiler ablac 0.2.48. NovaKind at main
 56cae6cc84000b49715d4419517a1e7ab678228d with no source change. Measured 2026-11-10 on a
-shared machine. NovaKind has since gone back to pinning c1878461; see "Not verified".
+shared machine. NovaKind has since gone back to pinning c1878461; the same piece on that pin is in `c187.md`.
 
 ## NovaKind's gates (`tools/ui-check/novakind.sh <worktree> c29e33f 70db437`)
 
@@ -29,7 +29,13 @@ compile time; a rerun on a quieter machine was not done.
 ## Not verified
 
 - The timing above.
-- Against c1878461 on NovaKind main 6a9533e1 (the rebased head `abla-ui-grammar-c187` 9cd7582): not run.
 - NovaKind's full suite and phone suites on this pin: not run.
 - abla-one's own `make test` with `tests/dsl_trees.sh` on this commit: run by b8.
 - Android library and firmware: not measured for this pin.
+
+## On NovaKind's current pin
+
+NovaKind went back to pinning c1878461 after these runs (main 6a9533e1; 70db437 is one commit
+on c1878461 that touches the live server's keep-alive only). The rebased head `abla-ui-grammar-c187` 9cd7582
+against c1878461 passes the same gates; NovaKind's full, run on the last piece, is there too:
+`c187.md`.

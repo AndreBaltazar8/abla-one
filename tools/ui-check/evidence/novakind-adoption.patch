@@ -1,0 +1,29 @@
+diff --git a/tests/pinned-build.ab b/tests/pinned-build.ab
+index a98fc1996..d50966ed0 100644
+--- a/tests/pinned-build.ab
++++ b/tests/pinned-build.ab
+@@ -176,7 +176,7 @@ fun main: int {
+         names.append(fields[0])
+         commits.append(fields[1])
+     }
+-    check(sameSet(names, ["abla-postgres", "abla-smtp", "abla-mjml", "abla-pdf", "abla-stripe", "abla-mobile", "abla-embedded", "abla-mvc"]) && names.size == 8, "the pinned siblings are the server's eight: ${textJoin(names, ", ")}")
++    check(sameSet(names, ["abla-postgres", "abla-smtp", "abla-mjml", "abla-pdf", "abla-stripe", "abla-mobile", "abla-embedded", "abla-mvc", "abla-ui"]) && names.size == 9, "the pinned siblings are the server's nine: ${textJoin(names, ", ")}")
+     var index = 0
+     while (index < names.size) {
+         val there = folder.child("tree/${names[index]}")
+diff --git a/toolchain/abla-one-revision b/toolchain/abla-one-revision
+index 3e270a1ff..8caadbe10 100644
+--- a/toolchain/abla-one-revision
++++ b/toolchain/abla-one-revision
+@@ -1 +1 @@
+-c1878461b385cd01bedbda5254211dba49bbb3b7
++9cd75821ac5cd2a8e56002a7206ff6d2901c0eda
+diff --git a/toolchain/sibling-revisions b/toolchain/sibling-revisions
+index 5f91e198b..7e9315ad8 100644
+--- a/toolchain/sibling-revisions
++++ b/toolchain/sibling-revisions
+@@ -6,3 +6,4 @@ abla-stripe f5d220c7838f4566d59cb49df055f7270c72a7bf
+ abla-mvc 83e068ec37d6f692adabf7000b62924fd6f6c7e2
+ abla-mobile b37c480948eaad7c4574ab1e12b5771e13e5b1a0
+ abla-embedded 7e9ce53e42ad78784b5a8a993ab9de2e607f2837
++abla-ui dfb2417a2a34d273c6622b572801390def6747de
