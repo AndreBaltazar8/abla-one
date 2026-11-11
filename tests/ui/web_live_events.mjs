@@ -189,7 +189,7 @@ try {
     await page.goto(base + '/moment', {waitUntil: 'commit'});
     await page.getByText('Emitidas: 0').waitFor({state:'attached'});
     check(await page.evaluate(() => !window.__socket && Array.isArray(window.__oneEarly)), 'before the host script, with its early intent queue installed');
-    check(await page.locator('#one-root').isHidden(), 'even a matching cookie waits for layout before interaction');
+    check(await page.locator('#one-root').isVisible() && await page.evaluate(() => !document.documentElement.hasAttribute('data-one-ready')), 'a matching cookie shows the page, not yet ready, before the host script');
     await page.evaluate(() => {
       const count = [...document.querySelectorAll('button')].find(b=>b.textContent==='Contar');
       count.click(); count.click();

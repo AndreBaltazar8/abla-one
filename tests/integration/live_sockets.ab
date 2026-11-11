@@ -77,14 +77,14 @@ fun main: int {
     expect(exchange(server, plain, "").indexOf("handler") >= 0, "other requests reach the handler")
     plain.close()
 
-    // Every scripted page waits for its actual viewport, even with a remembered cookie.
+    // A scripted page compares the width it was laid out for with the window before its first paint.
     var first = connect(port)
     first.writeResult("GET /page HTTP/1.1\r\nHost: x\r\n\r\n")
-    expect(exchange(server, first, "").indexOf("data-one-held") >= 0, "a first page is held back")
+    expect(exchange(server, first, "").indexOf("'data-one-shown':'data-one-held'") >= 0, "a first page is held back unless its guessed width is the window's")
     first.close()
     var known = connect(port)
     known.writeResult("GET /page HTTP/1.1\r\nHost: x\r\nCookie: one_width=1200\r\n\r\n")
-    expect(exchange(server, known, "").indexOf("data-one-held") >= 0, "a remembered width is still held until its layout acknowledgement")
+    expect(exchange(server, known, "").indexOf("innerWidth===1200?'data-one-shown':'data-one-held'") >= 0, "a remembered width shows the page only in a window of that width")
     known.close()
 
     // A deferred request waits, then gets its answer.

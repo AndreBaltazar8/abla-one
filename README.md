@@ -41,14 +41,18 @@ running server keeps those bytes, so a later build that replaces the source
 tree cannot swap its browser protocol. Keep the binary and host script at the
 same SDK revision before starting each node; restart to load a changed host.
 
-A `one_width` cookie improves the server-rendered layout guess; it does not make
-that guess interactive. With JavaScript, the live document waits until the host
-applies a patch acknowledging the current viewport width. Delayed handshakes,
-unrelated socket messages and replies for an earlier width keep the app held.
-Even an unchanged tree sends a viewport acknowledgement. There is no timeout
-that reveals guessed controls.
+The server lays a page out for the width in the `one_width` cookie of an earlier
+page, or for a guess. A script in the head compares that width with the window
+before the first paint. When they are equal the page shows at once, and presses
+made before the socket answers are replayed on it. When they differ the layout
+is a guess: the page stays hidden until the host applies a patch acknowledging
+the current viewport width. Delayed handshakes, unrelated socket messages and
+replies for an earlier width keep it held, and there is no timeout that reveals
+guessed controls. Even an unchanged tree sends a viewport acknowledgement, which
+sets `data-one-ready` in both cases.
 
-A connection status and a reload link stay available while waiting. Applications
+A connection status and a reload link appear only when the wait is long: after
+0.4 s over a held page, after 3 s as a small note under a shown one. Applications
 can set `OneLiveOptions.connectionText` and `reloadText` (defaults: `Connecting…`
 and `Reload`). Without JavaScript the hold attribute is never set, so the
 server-rendered content remains readable and the connection state stays hidden.

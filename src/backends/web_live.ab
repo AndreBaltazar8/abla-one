@@ -751,11 +751,12 @@ fun OneLiveServer.pageRender(request: HttpRequest, index: int): HttpResponse {
     val recoverable = oneRecoverySessions.get(sessions[index].id)
     val proof = if (recoverable != null) ",\"proof\":${oneLiveScriptString(recoverable.proof)}" else ""
     val boot = "{\"s\":\"${sessions[index].id}\",\"r\":${sessions[index].revision},\"icons\":\"${options.iconBase}\"$proof${if (settled != route) ",\"route\":${oneLiveScriptString(settled)}" else ""}}"
+    val laidOutFor = sessions[index].width
     val session = sessions[index]
     val fill = if (session.document) "min-height:100%" else "height:100%"
     val body = "<!doctype html><html lang=\"${oneHtmlEscape(if (session.lang != "") session.lang else options.lang)}\"><head><meta charset=\"utf-8\"><base href=\"${oneRouteBase(route)}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\"><title>${oneHtmlEscape(if (session.title != "") session.title else options.title)}</title>${session.meta}${options.head}" +
         "<style>html,body{margin:0;height:100%;background:${options.background}}#one-root{$fill}#one-root>.one{$fill}\n${oneWebBaseCss()}</style><style id=\"one-css\">${sessions[index].css.text()}</style>" +
-        "${if (canvas) "" else oneLiveHoldFirstPaint}${if (canvas) "" else oneWebEarlyEvents}<script>window.__one=$boot</script><script src=\"one/${if (canvas) "canvas" else "host"}.js\" defer></script></head><body>${if (canvas) "" else oneLiveConnection(options, route)}<div id=\"one-root\">$markup</div></body></html>"
+        "${if (canvas) "" else oneLiveHoldFirstPaint(laidOutFor)}${if (canvas) "" else oneWebEarlyEvents}<script>window.__one=$boot</script><script src=\"one/${if (canvas) "canvas" else "host"}.js\" defer></script></head><body>${if (canvas) "" else oneLiveConnection(options, route)}<div id=\"one-root\">$markup</div></body></html>"
     val headers = [
         HttpHeader("Content-Type", "text/html; charset=utf-8"),
         HttpHeader("Cache-Control", "no-store"),
@@ -770,10 +771,14 @@ fun OneLiveServer.pageRender(request: HttpRequest, index: int): HttpResponse {
     HttpResponse(200, headers, body)
 }
 
-// A remembered width is only an SSR hint. With JS, a page becomes interactive
-// after host.js applies the matching viewport acknowledgement. Without JS the
-// attribute is never set, so the server-rendered page remains readable.
-val oneLiveHoldFirstPaint = "<style>#one-connecting{display:none}[data-one-held] #one-root{visibility:hidden}[data-one-held] #one-connecting{display:flex;position:fixed;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:24px;background:Canvas;color:CanvasText;font:16px system-ui}#one-connecting a{color:inherit}</style><script>document.documentElement.setAttribute('data-one-held','');document.addEventListener('click',e=>{if(e.target.closest&&e.target.closest('#one-connecting a')){e.preventDefault();location.reload()}})</script>"
+// The page was laid out for `width` (the one_width cookie of an earlier page, or a guess). A script in the head compares it
+// with the window before the first paint. Equal: the layout is this browser's, so the page shows at once (data-one-shown) and
+// presses made before the socket answers are replayed on it (oneWebEarlyEvents). Different: the layout is a guess, and a press
+// on it would land on controls about to move, so the page stays hidden (data-one-held) until host.js applies the acknowledgement
+// of its own width. The connection state appears only when the wait is long: after 0.4 s over a held page, after 3 s as a small
+// note under a shown one. Without JS neither attribute is set, so the server-rendered page remains readable.
+fun oneLiveHoldFirstPaint(width: int): string =
+    "<style>#one-connecting{display:none}[data-one-held] #one-root{visibility:hidden}[data-one-held] #one-connecting,[data-one-shown]:not([data-one-ready]) #one-connecting{display:flex;position:fixed;align-items:center;justify-content:center;gap:16px;background:Canvas;color:CanvasText;font:16px system-ui;animation:one-wait 0s both}[data-one-held] #one-connecting{inset:0;flex-direction:column;padding:24px;animation-delay:.4s}[data-one-shown]:not([data-one-ready]) #one-connecting{left:50%;bottom:16px;transform:translateX(-50%);padding:10px 16px;border-radius:999px;box-shadow:0 2px 12px rgba(0,0,0,.25);z-index:2147483647;animation-delay:3s}@keyframes one-wait{from{visibility:hidden}to{visibility:visible}}#one-connecting a{color:inherit}</style><script>document.documentElement.setAttribute(innerWidth===$width?'data-one-shown':'data-one-held','');document.addEventListener('click',e=>{if(e.target.closest&&e.target.closest('#one-connecting a')){e.preventDefault();location.reload()}})</script>"
 fun oneLiveConnection(options: OneLiveOptions, route: string): string =
     "<div id=\"one-connecting\"><span role=\"status\" aria-live=\"polite\">${oneHtmlEscape(options.connectionText)}</span><a href=\"${oneHtmlEscape(route)}\">${oneHtmlEscape(options.reloadText)}</a></div>"
 
