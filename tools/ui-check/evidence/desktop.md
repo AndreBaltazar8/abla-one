@@ -4,7 +4,7 @@ abla-one `abla-ui-desktop` b40f35ab2c88cc5c2193e3659ded59b9d64e47df (tag `novaki
 with abla-ui 82fbc4b1cdbcbdc5cb96673c2920627719344109, against abla-one
 70db437b7e8bd4a2938db2ecadd7bb18741199dd. Compiler ablac 0.2.48. NovaKind at main
 56cae6cc84000b49715d4419517a1e7ab678228d with no source change. Measured 2026-11-10 on a
-shared machine. NovaKind has since gone back to pinning c1878461; see "Not verified".
+shared machine. NovaKind has since gone back to pinning c1878461; the same piece on that pin is in `c187.md`.
 
 ## NovaKind's gates (`tools/ui-check/novakind.sh <worktree> b40f35a 70db437`)
 
@@ -23,8 +23,13 @@ as the server has no desktop backend in it.
 
 ## Not verified
 
-- Against c1878461 on NovaKind main 6a9533e1 (the rebased head `abla-ui-desktop-c187` eabb66a):
-  started and stopped unfinished, to leave NovaKind's slots to its release.
 - NovaKind's full suite and phone suites on this pin: not run.
 - abla-one's own `make test` with `tests/backends/desktop_frames.ab` on this commit: run by b8.
 - Android library and firmware: not measured for this pin (the Android app has no desktop backend).
+
+## On NovaKind's current pin
+
+NovaKind went back to pinning c1878461 after these runs (main 6a9533e1; 70db437 is one commit
+on c1878461 that touches the live server's keep-alive only). The rebased head `abla-ui-desktop-c187` eabb66a
+against c1878461 passes the same gates; NovaKind's full, run on the last piece, is there too:
+`c187.md`.

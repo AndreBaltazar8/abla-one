@@ -29,20 +29,28 @@ Every node's box, 20,000 trees at three widths with and without a height: 2,222,
 | desktop keeps its layout | 2804961 → 95b9ce4 | identical |
 | `$one` on abla-ui's grammar | 95b9ce4 → c241709 | identical |
 
-## Timing: not settled
+## Timing (`tools/ui-check/check.sh cost 2804961 7c910ea`)
 
-The captures time each screen (render, layout, paint and document; best of 30). With the load
-rising from 36 to 55 through the four captures these are no result. As printed, layout's piece
-against the one before it: gallery screens +11%, +9%, −11%, +47%; services +50%; the four
-stress screens +40% to +76% (1 to 14 ms each), its capture taken at a quarter more load than
-its base's. What is known from quieter runs on the pin line (`check.sh cost`): a first layout
-through flex costs 11 to 30% more, a cached re-layout the same. This piece's timing was not
-re-measured on a quiet machine.
+The layout piece against the commit before it: the gallery on the e-paper target through
+`oneLayoutCached`, optimized builds, microseconds, best of 40, five runs, the two sides one
+after the other on one core (load 36; the last three runs, which repeat):
+
+| screen | first layout | the same tree again | after one change |
+|---|---|---|---|
+| `/` | 352 → 397 (+13%) | 171 → 169 | 188 → 184 |
+| `/people` | 213–237 → 247–266 (+11 to +22%) | 97–115 → 97–109 | 95–112 → 101–107 |
+| `/form/1` | 74–83 → 88–100 (+17 to +32%) | 45–51 → 45–53 | 44–51 → 45–52 |
+
+A first layout through flex costs 11 to 30% more (45 µs on the biggest screen); a cached
+re-layout and a re-layout after one change cost the same. The pin line gives the same
+(`c187.md`). The per-screen times the captures print were taken with the load rising from 36
+to 55 and with the two sides on cores of different speed: they are no result and are not given.
 
 ## Not verified
 
 - The suite in these captures: skipped (`NO_SUITE=1`). `make test` on c241709: 50 passed,
   0 failed, run by the lead; `make ui-web-live` on the head before the last rebase: equal to
   main before it, run by b8.
-- The timing above.
+- Instruction counts: `perf` is not installed on this machine; wall times only, on a machine
+  that was not quiet.
 - NovaKind against main: NovaKind pins abla-one by commit on the c1878461 line, not main.

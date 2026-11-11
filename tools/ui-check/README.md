@@ -48,8 +48,9 @@ capture program is made to import it the same way. `tests/state_size.sh` and
   node's box must agree between the two revisions. A tree that differs is shrunk (nodes
   dropped while the two still differ) and printed with the differing boxes. Nothing stored.
 - `cost` (`relayout.ab`): the gallery on the epaper target through `oneLayoutCached`:
-  first layout, the same tree again, and after one change, microseconds, best of 40, three
-  runs side by side, optimized builds. Timing on a shared machine: read several runs.
+  first layout, the same tree again, and after one change, microseconds, best of 40, five
+  runs, optimized builds, the two sides one after the other on one core (`CPU=<n>`, default
+  2). Timing on a shared machine: read the runs that repeat.
 
 ## NovaKind's screens: `novakind.sh`, `sizes.sh`
 
