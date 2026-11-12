@@ -311,7 +311,7 @@ fun oneEventSays(node: Node): string {
 
 fun oneCollectEvents(node: Node, place: string, var map: OneEventMap): void {
     for (item in node.attrs) {
-        if (item.name == "onPress" || item.name == "onChange" || item.name == "onSubmit" || item.name == "onVisible" || item.name == "onDismiss") {
+        if (item.name == "onPress" || item.name == "onChange" || item.name == "onHold" || item.name == "onSubmit" || item.name == "onVisible" || item.name == "onDismiss") {
             val id = oneParseInt(item.value, 0)
             if (id > 0 && node.attr("enabled") != "false") {
                 map.byId.set(id, "$place#${item.name}")
