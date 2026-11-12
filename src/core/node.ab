@@ -79,6 +79,11 @@ fun bitmap(cells: string, columns: int, label: string, look: Style): Node = oneN
 fun pressable(event: int, look: Style, children: array<Node>): Node =
     oneNode("pressable", look, oneVisible(children)).setInt("onPress", event)
 
+// A control to hold down (`Ui.hold`), as a press-to-talk button. It is drawn
+// like a pressable and takes no presses.
+fun holdable(event: int, look: Style, children: array<Node>): Node =
+    oneNode("pressable", look, oneVisible(children)).setInt("onHold", event)
+
 fun input(value: string, placeholder: string, onChange: int, look: Style): Node =
     oneNode("input", look, []).set("value", value).set("placeholder", placeholder).setInt("onChange", onChange)
 

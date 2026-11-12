@@ -19,7 +19,7 @@ class OnePaint(
 )
 
 class OneHit(
-    val kind: string,      // press, input, scroll, link (value: href)
+    val kind: string,      // press, hold, input, scroll, link (value: href)
     val x: int,
     val y: int,
     val w: int,
@@ -289,6 +289,8 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     if ((kind == "pressable" || kind == "link") && hw > 0 && hh > 0) {
         val event = oneParseInt(box.node.attr("onPress"), 0)
         if (event > 0 && box.node.attr("enabled") != "false") oneAddHit(frame, "press", hx, hy, hw, hh, event, 0, path, box.node.attr("label"), "", false)
+        val hold = oneParseInt(box.node.attr("onHold"), 0)
+        if (hold > 0 && box.node.attr("enabled") != "false") oneAddHit(frame, "hold", hx, hy, hw, hh, hold, 0, path, box.node.attr("label"), "", false)
         // A link to outside the app (`external`) says so in the hit's placeholder, for the canvas page to open it in a new tab.
         if (kind == "link" && box.node.attr("route") != "true") oneAddHit(frame, "link", hx, hy, hw, hh, 0, 0, path, box.node.attr("href"), box.node.attr("external"), false)
     }

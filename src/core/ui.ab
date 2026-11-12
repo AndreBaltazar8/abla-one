@@ -40,6 +40,19 @@ class Ui(
         }
         id
     }
+    // A press held down: `handler(true)` when it goes down on the control, and
+    // `handler(false)` when it's let go, wherever the pointer is then. Only
+    // the desktop delivers it (a target without it never calls the handler);
+    // its id is a change's, with the value "down" or "up".
+    fun hold(var handler: FnMut(bool) -> void): int {
+        changes = changes + 1
+        val id = oneChangeBase + changes
+        if (!handled && id == dispatchId) {
+            handled = true
+            handler(dispatchValue == "down")
+        }
+        id
+    }
     // Fine-grained invalidation: `build` runs only when `deps` (a summary of
     // what the subtree reads, such as "${message.id}|${message.edited}")
     // differs from the last render, or when the event being delivered

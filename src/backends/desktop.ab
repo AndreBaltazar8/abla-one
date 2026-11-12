@@ -110,7 +110,10 @@ class OneDesktopState(
     var clicks: int = 0,
     // The layout kept from frame to frame (one per width: styles resolve by the viewport).
     var layoutCache: OneLayoutCache = oneLayoutCache(),
-    var layoutWidth: int = -1
+    var layoutWidth: int = -1,
+    // The control held down (`Ui.hold`): its layout path, and its event when it went down.
+    var holdKey: string = "",
+    var holdEvent: int = 0
 )
 
 // Lays the frame's tree out through the kept cache: only what changed is laid out again.
@@ -157,6 +160,20 @@ fun oneDesktopHit(frame: OneFrame, x: int, y: int, kind: string): int {
     }
     -1
 }
+
+fun oneDesktopHitAtPath(frame: OneFrame, kind: string, key: string): int {
+    var i = frame.hits.size - 1
+    while (i >= 0) {
+        if (frame.hits[i].kind == kind && frame.hits[i].key == key) return i
+        i = i - 1
+    }
+    -1
+}
+
+// As oneDesktopDeliver, also after the route changed: a hold that went down
+// is always let go.
+fun oneDesktopDeliverAny(var app: OneApp, theme: Theme, var state: OneDesktopState, event: int, value: string): bool =
+    oneDispatch(app, "desktop", theme, event, value, state.width)
 
 fun oneDesktopHitAtKey(frame: OneFrame, key: string): int {
     var i = frame.hits.size - 1
@@ -266,7 +283,8 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
     )
     if (!window.valid()) return 1
     oneUseEditing()
-    val icons = OneIconSource({ name -> linuxReadFile("${options.iconDir}/$name.svg", 65536) })
+    // An icon's name may be the SVG itself, for an app that ships no icon directory.
+    val icons = OneIconSource({ name -> if (oneStarts(name, "<svg")) name else linuxReadFile("${options.iconDir}/$name.svg", 65536) })
     oneLiveQueueList[oneLiveQueueIndex(session)].routes.start("/")
     var state = OneDesktopState(options.width, options.height, 0, 0, 0, 0, false, "", 0, "", true, Map(), Map(), oneLiveQueueList[oneLiveQueueIndex(session)].routes)
     var pixels = pixelBuffer(state.width, state.height)
@@ -377,6 +395,23 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
                     oneEditPointer(state.pointerX, state.pointerY, state.shift, state.clicks)
                     state.selecting = true
                     state.dragKey = ""
+                    state.dirty = true
+                } else if (event.pointerButtonPressed() && oneDesktopHit(frame, state.pointerX, state.pointerY, "hold") >= 0) {
+                    val held = frame.hits[oneDesktopHit(frame, state.pointerX, state.pointerY, "hold")]
+                    oneDesktopBlur(state)
+                    state.holdKey = held.key
+                    state.holdEvent = held.event
+                    state.dragKey = ""
+                    oneDesktopDeliver(app, theme, state, held.event, "down")
+                    state.dirty = true
+                } else if (!event.pointerButtonPressed() && state.holdKey != "") {
+                    // Let go anywhere: to the same control, by its place in the tree, as the
+                    // render after going down may have numbered its event differently.
+                    val again = oneDesktopHitAtPath(frame, "hold", state.holdKey)
+                    val target = if (again >= 0) frame.hits[again].event else state.holdEvent
+                    state.holdKey = ""
+                    state.holdEvent = 0
+                    oneDesktopDeliverAny(app, theme, state, target, "up")
                     state.dirty = true
                 } else if (event.pointerButtonPressed()) {
                     state.downX = state.pointerX
