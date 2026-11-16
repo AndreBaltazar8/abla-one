@@ -47,6 +47,8 @@ class OneLiveSlot(
     var recoveryStarted: int = 0
 )
 
+class OneLiveConnectionText(val connectionText: string, val reloadText: string)
+
 class OneLiveOptions(
     val title: string,
     val lang: string,
@@ -59,7 +61,10 @@ class OneLiveOptions(
     val head: string,
     // The first-layout connection state, outside the app while it is held.
     val connectionText: string = "Connecting…",
-    val reloadText: string = "Reload"
+    val reloadText: string = "Reload",
+    // Optional page-language map. The page selects exact/base language, then
+    // English; the original texts above remain the fallback and no-map behavior.
+    val connectionTexts: Map<string, OneLiveConnectionText> = Map()
 )
 
 // Seeds a new session's secure storage from the page request, and maps stored
@@ -779,8 +784,23 @@ fun OneLiveServer.pageRender(request: HttpRequest, index: int): HttpResponse {
 // note under a shown one. Without JS neither attribute is set, so the server-rendered page remains readable.
 fun oneLiveHoldFirstPaint(width: int): string =
     "<style>#one-connecting{display:none}[data-one-held] #one-root{visibility:hidden}[data-one-held] #one-connecting,[data-one-shown]:not([data-one-ready]) #one-connecting{display:flex;position:fixed;align-items:center;justify-content:center;gap:16px;background:Canvas;color:CanvasText;font:16px system-ui;animation:one-wait 0s both}[data-one-held] #one-connecting{inset:0;flex-direction:column;padding:24px;animation-delay:.4s}[data-one-shown]:not([data-one-ready]) #one-connecting{left:50%;bottom:16px;transform:translateX(-50%);padding:10px 16px;border-radius:999px;box-shadow:0 2px 12px rgba(0,0,0,.25);z-index:2147483647;animation-delay:3s}@keyframes one-wait{from{visibility:hidden}to{visibility:visible}}#one-connecting a{color:inherit}</style><script>document.documentElement.setAttribute(innerWidth===$width?'data-one-shown':'data-one-held','');document.addEventListener('click',e=>{if(e.target.closest&&e.target.closest('#one-connecting a')){e.preventDefault();location.reload()}})</script>"
-fun oneLiveConnection(options: OneLiveOptions, route: string): string =
-    "<div id=\"one-connecting\"><span role=\"status\" aria-live=\"polite\">${oneHtmlEscape(options.connectionText)}</span><a href=\"${oneHtmlEscape(route)}\">${oneHtmlEscape(options.reloadText)}</a></div>"
+fun oneLiveConnection(options: OneLiveOptions, route: string): string {
+    val body = "<span role=\"status\" aria-live=\"polite\">${oneHtmlEscape(options.connectionText)}</span><a href=\"${oneHtmlEscape(route)}\">${oneHtmlEscape(options.reloadText)}</a></div>"
+    if (options.connectionTexts.size == 0) return "<div id=\"one-connecting\">$body"
+    val names: array<string> = []
+    val texts: array<Json> = []
+    for (name in options.connectionTexts.keys()) {
+        val text = options.connectionTexts.get(name)
+        if (text != null) {
+            names.append(name.lowercase())
+            texts.append(jsonObject(["connectionText", "reloadText"], [jsonString(text.connectionText), jsonString(text.reloadText)]))
+        }
+    }
+    val fallback = jsonObject(["connectionText", "reloadText"], [jsonString(options.connectionText), jsonString(options.reloadText)])
+    val config = jsonStringify(jsonObject(["languages", "fallback"], [jsonObject(names, texts), fallback]))
+    "<div id=\"one-connecting\" data-one-connection-texts=\"${oneHtmlEscape(config)}\">$body" +
+        "<script>(()=>{const box=document.getElementById('one-connecting'),config=JSON.parse(box.getAttribute('data-one-connection-texts'));const own=key=>Object.prototype.hasOwnProperty.call(config.languages,key);const update=()=>{const lang=(document.documentElement.lang||'').toLowerCase(),base=lang.split('-')[0],text=own(lang)?config.languages[lang]:own(base)?config.languages[base]:own('en')?config.languages.en:config.fallback;box.querySelector('[role=status]').textContent=text.connectionText;box.querySelector('a').textContent=text.reloadText};update();new MutationObserver(update).observe(document.documentElement,{attributes:true,attributeFilter:['lang']})})()</script>"
+}
 
 fun oneLiveCookie(request: HttpRequest, name: string): string {
     val header = request.header("cookie")

@@ -57,6 +57,14 @@ can set `OneLiveOptions.connectionText` and `reloadText` (defaults: `Connectingâ
 and `Reload`). Without JavaScript the hold attribute is never set, so the
 server-rendered content remains readable and the connection state stays hidden.
 
+For multilingual applications, `OneLiveOptions.connectionTexts` optionally maps
+language tags to `OneLiveConnectionText(connectionText, reloadText)`. The page
+selects the current `<html lang>` case-insensitively: exact tag, base language,
+then English. If English is absent, the original `connectionText` and `reloadText`
+are the fallback. Text follows later document-language changes, including when
+the host script cannot load. The map is escaped JSON in a data attribute and its
+values become text nodes. Omitting it preserves the existing notice markup.
+
 A full live stylesheet belongs to the current owner's atomic CSS table. Hello
 and restored-owner patches carry `cssReset: true` and the complete `css` string,
 including responsive rules. The host replaces `#one-css` before morphing the

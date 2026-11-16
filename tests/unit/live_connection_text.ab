@@ -1,0 +1,20 @@
+import "abla/test"
+import "../../src/backends/web_live.ab"
+
+fun main: int {
+    val plain = OneLiveOptions("Proof", "en", "#fff", "/icons", "unused", "")
+    expectEqual(oneLiveConnection(plain, "/proof?a=1&b=2"), "<div id=\"one-connecting\"><span role=\"status\" aria-live=\"polite\">Connecting…</span><a href=\"/proof?a=1&amp;b=2\">Reload</a></div>", "without a language map the existing markup is unchanged")
+    val texts: Map<string, OneLiveConnectionText> = Map()
+    texts.set("pt-PT", OneLiveConnectionText("A ligar…", "Recarregar"))
+    texts.set("x-proof", OneLiveConnectionText("<img src=x onerror=alert(1)>\"&</script>", "<b>Reload</b>"))
+    val options = OneLiveOptions("Proof", "en", "#fff", "/icons", "unused", "", "Custom connection", "Custom reload", texts)
+    val markup = oneLiveConnection(options, "/proof\"onclick=\"bad")
+    expect(markup.contains("data-one-connection-texts="), "the optional language map is carried with the notice")
+    expect(markup.contains("&quot;pt-pt&quot;"), "language keys are normalized for case-insensitive document lookup")
+    expect(markup.contains("&lt;img src=x onerror=alert(1)&gt;"), "notice markup is escaped inside the data attribute")
+    expect(!markup.contains("<img") && !markup.contains("<b>Reload</b>"), "configured text cannot introduce elements")
+    expect(markup.contains("href=\"/proof&quot;onclick=&quot;bad\""), "the reload route remains an escaped attribute")
+    expect(markup.contains("Custom connection</span>") && markup.contains("Custom reload</a>"), "original custom texts remain the no-script fallback")
+    expect(markup.contains(".textContent=text.connectionText") && markup.contains("attributeFilter:['lang']"), "the page uses text nodes and follows document-language changes")
+    testsPassed()
+}

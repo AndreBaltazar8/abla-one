@@ -21,3 +21,4 @@ for _ in $(seq 100); do
 done
 export ONE_TEST_BASE="http://127.0.0.1:$(cat "$portfile")"
 timeout 90 node tests/ui/web_live_viewport.mjs
+timeout 60 node tests/ui/web_live_notice_language.mjs
