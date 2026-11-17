@@ -754,7 +754,7 @@ abla-one/
   - the epaper backend for PaperMono (`epaper.ab`) and its HTTP device link
     (`epaper_host.ab`), with the gallery as the example;
   - tested by unit checks against abla-embedded's dither and plane layout,
-    and by a device simulator (`tests/ui/epaper_device.py`). The simulator
+    and by a device simulator (`tests/ui/thin_device.ab`, run by `tests/ui/thin_device.sh`). The simulator
     applies the wire updates exactly as firmware would and must match the
     host canvas byte for byte after every tap;
   - not yet: the firmware side on real hardware (no device was attached for

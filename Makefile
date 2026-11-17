@@ -116,6 +116,7 @@ gallery-live: gallery-web
 ui-web-live: gallery-live
 	$(NIX) '$(ABLAC) build tests/ui/viewport_live.ab -o build/viewport-live --fast'
 	tests/ui/viewport-live.sh
+	tests/backends/live_framing_socket.sh build/gallery-live
 	tests/ui/live.sh
 	$(NIX) '$(ABLAC) build tests/ui/readfile_live.ab -o build/readfile-live --fast'
 	tests/ui/readfile-live.sh
