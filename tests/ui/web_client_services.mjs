@@ -1,5 +1,5 @@
 // Wasm client services UI test: the services demo running in the browser,
-// against tests/ui/echo.py (which also serves the page and module). Covers
+// against tests/ui/echo.ab (which also serves the page and module). Covers
 // the same operations as the Android services test: requests with headers,
 // byte and large bodies, a picked 1.5 MB file as a body and in multipart, a
 // 3 MB response saved to a file and read back by range, typed secure storage
@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'one-port-'));
 const portfile = path.join(temp, 'port');
-const server = spawn('python3', ['tests/ui/echo.py', '0', 'build/services'], {stdio: 'ignore', env: {...process.env, ONE_TEST_PORT_FILE: portfile}});
+const server = spawn('build/echo', ['0', 'build/services'], {stdio: 'ignore', env: {...process.env, ONE_TEST_PORT_FILE: portfile}});
 for (let i = 0; i < 100 && !fs.existsSync(portfile); i++) {
   if (server.exitCode !== null) throw new Error('echo server failed to start');
   await new Promise(r => setTimeout(r, 100));

@@ -3,7 +3,7 @@ ABLAC ?= $(abspath ../ablac/build/ablac)
 NIX := nix-shell ../ablac/shell.nix --run
 TESTS := $(wildcard tests/unit/*.ab tests/backends/*.ab tests/integration/*.ab tests/remote/client.ab tests/remote/routes.ab)
 
-.PHONY: test-recovery-raw test-recovery test-remote papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-thin ui-thin ui-web-live ui-desktop ui-android ui-android-services gallery-web gallery-android gallery-live gallery-desktop
+.PHONY: test-recovery-raw test-recovery test-remote papermono-gallery flash-papermono test ui ui-web ui-web-client gallery-client services-client gallery-thin ui-thin ui-web-live ui-desktop ui-android ui-android-services echo-server gallery-web gallery-android gallery-live gallery-desktop
 
 # What abla.lock names, under .abla/, which a fresh clone hasn't got and the targets that build
 # programs of this tree read (without it: E_PACKAGE_IMPORT, `locked package abla-mobile could not
@@ -85,9 +85,14 @@ services-client: .abla/packages
 	cp examples/services/build/client/services.wasm build/services/services.wasm
 	cp src/backends/web/host.js build/services/one/host.js
 
+# The echo server of the services UI tests (tests/ui/echo.ab).
+echo-server: .abla/packages
+	mkdir -p build
+	$(NIX) '$(ABLAC) build tests/ui/echo.ab -o build/echo --fast'
+
 # Wasm client mode in the browser: the gallery (static files) and the
-# services demo (against tests/ui/echo.py).
-ui-web-client: gallery-client services-client
+# services demo (against tests/ui/echo.ab).
+ui-web-client: gallery-client services-client echo-server
 	node tests/ui/web_client_gallery.mjs
 	node tests/ui/web_client_routes.mjs
 	node tests/ui/web_client_services.mjs

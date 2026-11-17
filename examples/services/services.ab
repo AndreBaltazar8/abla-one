@@ -1,7 +1,7 @@
 import "abla/json"
 import "../../src/one_kit.ab"
 
-// Exercises every platform service against an echo server (tests/ui/echo.py).
+// Exercises every platform service against an echo server (tests/ui/echo.ab).
 // Each button runs one operation; the log shows what came back.
 
 class ServicesDemo(

@@ -1,0 +1,130 @@
+import "../port.ab"
+import "abla/bytes"
+import "abla/crypto"
+import "abla/fs"
+import "abla/http"
+import "abla/http/event"
+import "abla/json"
+import "abla/net"
+import "abla/process"
+import "abla/text"
+
+// Echo server for the services UI tests (it replaces tests/ui/echo.py).
+// POST, PUT and PATCH report what they received as JSON with sorted keys: method
+// (m), body size (len), the first ten hex digits of its SHA-256 (sha), the
+// X-Abla header (x), the content type without parameters (type) and the body
+// when it is at most 64 bytes (body), or for multipart/form-data "name:size"
+// for each part (parts). GET /big serves 3 MB of bytes i % 251 behind
+// `Authorization: Bearer one-services-fixture`. With a second argument, other
+// GET paths serve files from that directory, so the Wasm client page and the
+// echo share an origin.
+//
+// usage: echo PORT [STATIC_DIRECTORY]   (PORT 0: any free port, written to $ONE_TEST_PORT_FILE)
+
+val echoStatic: array<string> = []
+val echoBig: array<string> = []
+
+fun echoBigBody(): string {
+    if (echoBig.size == 0) {
+        var block = ""
+        var i = 0
+        while (i < 251) { block = "$block${byteEncode(i)}"; i = i + 1 }
+        val whole = 3 * 1024 * 1024
+        val repeated = block.repeat(whole / 251 + 1)
+        echoBig.append(repeated.slice(0, whole))
+    }
+    echoBig[0]
+}
+
+fun echoQuote(text: string): string = jsonEncodeString(text).text
+
+fun echoFail(status: int): HttpResponse = HttpResponse(status, [HttpHeader("Content-Type", "text/plain")], "")
+
+fun echoKind(path: string): string {
+    if (path.endsWith(".wasm")) return "application/wasm"
+    if (path.endsWith(".html")) return "text/html"
+    if (path.endsWith(".js") || path.endsWith(".mjs")) return "text/javascript"
+    if (path.endsWith(".css")) return "text/css"
+    if (path.endsWith(".json")) return "application/json"
+    if (path.endsWith(".svg")) return "image/svg+xml"
+    if (path.endsWith(".png")) return "image/png"
+    if (path.endsWith(".txt")) return "text/plain"
+    "application/octet-stream"
+}
+
+// "name:size" for each part of a multipart body.
+fun echoParts(data: string, boundary: string): string {
+    val delimiter = "--$boundary"
+    val parts: array<string> = []
+    var at = data.indexOf(delimiter)
+    while (at >= 0) {
+        val begin = at + delimiter.size
+        val next = data.indexOf(delimiter, begin)
+        if (next < 0) { at = next } else {
+            // The chunk between two delimiters: CRLF, headers, a blank line, content, CRLF.
+            var chunk = data.slice(begin, next)
+            if (chunk.startsWith("\r\n")) chunk = chunk.slice(2, chunk.size)
+            val split = chunk.indexOf("\r\n\r\n")
+            if (split >= 0) {
+                val head = chunk.slice(0, split)
+                var content = chunk.slice(split + 4, chunk.size)
+                if (content.endsWith("\r\n")) content = content.slice(0, content.size - 2)
+                val key = head.indexOf("name=\"")
+                if (key >= 0) {
+                    val from = key + 6
+                    val to = head.indexOf("\"", from)
+                    parts.append(echoQuote("${head.slice(from, to)}:${content.size}"))
+                }
+            }
+            at = next
+        }
+    }
+    "[${textJoin(parts, ", ")}]"
+}
+
+fun echoHandle(request: HttpRequest): HttpResponse {
+    if (request.method == "GET") {
+        if (request.path == "/big") {
+            if (request.header("Authorization") != "Bearer one-services-fixture") return echoFail(401)
+            return HttpResponse(200, [HttpHeader("Content-Type", "application/zip")], echoBigBody())
+        }
+        if (echoStatic.size > 0 && !request.path.startsWith("/echo")) {
+            var relative = request.path.slice(1, request.path.size)
+            if (relative.contains("..")) return echoFail(404)
+            val file = Path("${echoStatic[0]}/$relative")
+            if (relative == "" || !file.info().isFile()) return echoFail(404)
+            return HttpResponse(200, [HttpHeader("Content-Type", echoKind(relative))], file.readText())
+        }
+    } else if (request.method != "POST" && request.method != "PUT" && request.method != "PATCH") {
+        return echoFail(501)
+    }
+    val data = request.body
+    val kind = request.header("Content-Type")
+    var type = kind
+    val semicolon = kind.indexOf(";")
+    if (semicolon >= 0) type = kind.slice(0, semicolon)
+    val multipart = kind.startsWith("multipart/form-data") && kind.contains("boundary=")
+    // Keys in sorted order: body, len, m, parts, sha, type, x.
+    var fields = ""
+    if (!multipart && data.size <= 64) fields = "\"body\": ${echoQuote(data)}, "
+    fields = "$fields\"len\": ${data.size}, \"m\": ${echoQuote(request.method)}, "
+    if (multipart) fields = "$fields\"parts\": ${echoParts(data, kind.slice(kind.indexOf("boundary=") + 9, kind.size))}, "
+    fields = "$fields\"sha\": ${echoQuote(hexEncode(sha256(data)).slice(0, 10))}, \"type\": ${echoQuote(type)}, \"x\": ${echoQuote(request.header("X-Abla"))}"
+    HttpResponse(200, [HttpHeader("Content-Type", "application/json"), HttpHeader("X-Echo", "yes")], "{$fields}")
+}
+
+fun main: int {
+    var port = 0
+    if (processArgumentCount() > 0) {
+        for (c in processArgument(0)) { if (c < 48 || c > 57) return 2; port = port * 10 + c - 48 }
+    }
+    if (processArgumentCount() > 1) echoStatic.append(processArgument(1))
+    // A browser opens idle connections ahead of use, so the event server (no blocked accept) serves it;
+    // the limits leave room for the 3 MB response and the 1.5 MB uploads.
+    val options = HttpEventServerOptions(1023, 65536, 8 * 1024 * 1024, 16 * 1024 * 1024, 100, 30000, 2147483647, 5000)
+    val server = httpEventServerHandler(echoHandle, ipv4Loopback(port), options)
+    if (server.listener.descriptor < 0) return 1
+    testPublishPort(server.listener.localPort())
+    while (!server.stopped) server.step(1000)
+    0
+}
