@@ -203,7 +203,11 @@ fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string,
         index = index + 1
     }
     val common = "class=\"$classes\" data-one=\"$key\""
-    val disabled = if (node.attr("enabled") == "false") " disabled aria-disabled=\"true\"" else ""
+    // A pressable with a handler is disabled for now, not for good: the page may enable it, and a press made right after
+    // typing waits for that (host.js `held`). A natively disabled button swallows the click, so that press would be lost:
+    // such a one says it with aria-disabled alone (the host ignores its clicks), one with no handler is native too.
+    val held = node.kind == "pressable" && node.attr("onPress") != "" && node.attr("onPress") != "0"
+    val disabled = if (node.attr("enabled") != "false") "" else if (held) " aria-disabled=\"true\"" else " disabled aria-disabled=\"true\""
     val selected = (if (node.attr("selected") == "true") " aria-selected=\"true\"" else "") +
         (if (node.attr("item") != "") " data-one-item=\"${node.attr("item")}\"" else "") +
         (if (node.attr("id") != "") " id=\"${oneHtmlEscape(node.attr("id"))}\"" else "") +

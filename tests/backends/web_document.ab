@@ -52,7 +52,8 @@ fun main: int {
     expect(has(html, "aria-label=\"Abrir conversa\""), "accessible label")
     for(event in [0,7]){
         val off=oneWebRender(pressable(event,style(),[text("Unavailable",style())]).set("enabled","false"),t,"/icons").html
-        expect(has(off," disabled"),"disabled pressable $event has native HTML disabled semantics")
+        // With a handler it stays clickable for the host, which holds a press made right after typing (web_live_events).
+        expect(has(off," disabled")==(event==0),"disabled pressable $event has native HTML disabled semantics only without a handler")
         expect(has(off," aria-disabled=\"true\""),"disabled pressable $event retains its accessibility state")
         expect(has(off,"data-one-press=\"$event\""),"disabled pressable $event retains its event identity")
     }
