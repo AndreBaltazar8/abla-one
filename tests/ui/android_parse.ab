@@ -1,0 +1,15 @@
+import "android.ab"
+import "abla/io"
+
+// The UI Automator dump reading of android.ab, on a dump with the escapes uiautomator writes.
+fun main: int {
+    val xml = "<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation=\"0\"><node index=\"0\" text=\"\" resource-id=\"\" class=\"a.b\" content-desc=\"\" bounds=\"[0,0][1080,2400]\"><node index=\"0\" text=\"json: {&quot;m&quot;: &quot;PUT&quot;, \\&quot;n\\&quot;:7}&#10;second &amp; &lt;line&gt; Est&#250;dio &#x1F600;\" content-desc=\"Abrir ligação (0)\" bounds=\"[10,20][110,220]\" /></node></hierarchy>"
+    val all = parseNodes(xml)
+    check(all.size == 2, "two nodes")
+    check(all[0].right == 1080 && all[0].bottom == 2400, "bounds of the screen")
+    check(all[1].text == "json: {\"m\": \"PUT\", \\\"n\\\":7}\nsecond & <line> Estúdio \u{1F600}", "entities decoded", all[1].text)
+    check(all[1].description == "Abrir ligação (0)" && all[1].left == 10 && all[1].top == 20 && all[1].right == 110 && all[1].bottom == 220, "description and bounds")
+    val single = parseNodes("<hierarchy><node index='0' text='json: 200 {\"m\": \"PUT\", \"a\": \"x>y\"}&#10;' resource-id=\"\" content-desc=\"it&apos;s\" bounds=\"[1,2][3,4]\" /><node text=\"next\" bounds=\"[5,6][7,8]\" /></hierarchy>")
+    check(single.size == 2 && single[0].text == "json: 200 {\"m\": \"PUT\", \"a\": \"x>y\"}\n" && single[0].description == "it's" && single[1].text == "next" && single[1].right == 7, "single-quoted values, raw double quotes and > inside", single[0].text)
+    finish("tests/ui/android_parse.ab")
+}

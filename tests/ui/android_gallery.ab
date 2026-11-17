@@ -1,0 +1,269 @@
+import "android.ab"
+import "abla/io"
+import "abla/process"
+import "abla/sys/linux/process"
+import "abla/text"
+
+// Android UI test: installs the gallery APK on the running emulator, drives it through UI Automator and
+// checks what the Compose host rendered.
+// Run from the abla-one root, holding the emulator lock (make ui-android): android_gallery
+
+val apk = "examples/gallery/android/android-app/build/outputs/apk/debug/android-app-debug.apk"
+val package = "dev.abla.one.gallery"
+
+fun tap(text: string): void {
+    val n = find(text)
+    if (n != null) { tapNode(n); pause(800) } else giveUp("FAIL control not found: $text")
+}
+
+fun present(text: string, tries: int = 8): bool = find(text, tries) != null
+
+fun focused(): string = adbLine(["shell", "dumpsys", "window"], "mCurrentFocus")
+
+fun link(url: string): void {
+    adb(["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "'$url'", package])
+    return
+}
+
+fun activities(): int {
+    var count = 0
+    for (line in lines(adb(["shell", "dumpsys", "activity", "activities"]))) {
+        if (line.contains("Hist") && line.contains("$package/org.abla.mobile.host.AblaMobileActivity")) count = count + 1
+    }
+    count
+}
+
+// `adb exec-out screencap`: width, height, format and colour space as 32-bit little-endian, then RGBA rows.
+class Raw(val width: int, val data: string)
+
+fun le32(data: string, at: int): int = data[at] + data[at + 1] * 256 + data[at + 2] * 65536 + data[at + 3] * 16777216
+
+fun rawScreen(): Raw {
+    val data = adb(["exec-out", "screencap"])
+    Raw(le32(data, 0), data)
+}
+
+// 0xRRGGBB
+fun pixel(screen: Raw, x: int, y: int): int {
+    val at = 16 + (y * screen.width + x) * 4
+    screen.data[at] * 65536 + screen.data[at + 1] * 256 + screen.data[at + 2]
+}
+
+fun swipeToEnd(): void {
+    val size = nodes()[0]
+    val x = size.right / 2
+    val top = size.bottom * 3 / 4
+    val bottom = size.bottom / 4
+    var i = 0
+    while (i < 6) {
+        adb(["shell", "input", "swipe", "$x", "$top", "$x", "$bottom", "150"])
+        pause(200)
+        i = i + 1
+    }
+}
+
+fun main: int {
+    dismissSystemDialog()
+    adb(["install", "-r", apk])
+    adb(["shell", "am", "force-stop", package])
+    adb(["shell", "monkey", "-p", package, "1"])
+    check(present("Adicionar (0)"), "first render")
+    tap("Adicionar (0)")
+    tap("Adicionar (1)")
+    check(present("Adicionar (2)"), "press events update state")
+    val todas = find("Todas")
+    val screen = nodes()[0].right
+    check(todas != null && todas.right - todas.left < screen / 3, "chips hug their label")
+    // The first page, as the other targets' screenshots show it.
+    adbToFile(["exec-out", "screencap", "-p"], "build/ui/android-gallery.png")
+    tap("Pessoas")
+    check(present("Maya Townsend"), "tab switch")
+    tap("Maya Townsend")
+    tap("Componentes")
+    check(present("Última pessoa aberta: Maya Townsend"), "list row press reached the app")
+    tap("Pesquisar pessoas")
+    adb(["shell", "input", "text", "ti"])
+    pause(800)
+    keyBack()  // close the keyboard, which covers the tab bar
+    pause(500)
+    tap("Pessoas")
+    check(present("Tiago Mendes") && !present("Sofia Costa", 1), "text input filters the list")
+
+    // A long form: the same shape as the previous screen, opened by a key.
+    tap("Componentes")
+    tap("Abrir formulário")
+    check(present("Nome"), "form opens")
+
+    // Fast typing: every keystroke reaches the app, even when the field loses focus
+    // straight after and the render can't keep up. Far more than the event queue holds.
+    val typed = "abcdefghij".repeat(16)
+    tap("Nome")
+    // In parts: `input text` stops after about 10 s, silently and with status 0, so on a slow emulator a whole string loses its tail
+    // before the app sees it: the field held a clean prefix each time, in 10.2 to 11.1 s, and whole strings took at most 7.8 s.
+    var part = 0
+    while (part < typed.size) {
+        adb(["shell", "input", "text", typed.slice(part, if (part + 40 < typed.size) part + 40 else typed.size)])
+        part = part + 40
+    }
+    tap("Valor")
+    check(present("Nome: $typed", 40), "fast typing reaches the app")
+    check(present(typed, 4), "fast typing stays in the field")
+
+    // Decimal keyboard: the system gets a decimal number field, and only a number stays.
+    // The first inputType in the dump is the current field's; later ones are history.
+    val dump = adb(["shell", "dumpsys", "input_method"])
+    val typeAt = dump.indexOf("inputType=")
+    check(typeAt >= 0 && dump.slice(typeAt + 10, typeAt + 16) == "0x2002", "decimal keyboard requested")
+    adb(["shell", "input", "text", "12,5a0.3"])
+    check(present("Valor: 12,503", 20), "decimal field keeps digits and one separator")
+    keyBack()
+    pause(500)
+
+    // A link renders, delivers its event and opens the browser.
+    adb(["logcat", "-c"])
+    tap("Abrir ligação (0)")
+    pause(1500)
+    val log = adb(["logcat", "-d", "-s", "ActivityTaskManager:I"])
+    check(log.contains("android.intent.action.VIEW") && log.contains("example.com"), "link opens the browser")
+    val resolved = lines(adb(["shell", "cmd", "package", "resolve-activity", "--brief", package]).trim())
+    val activity = resolved[resolved.size - 1].split("/")
+    adb(["shell", "am", "start", "-n", "$package/${activity[activity.size - 1].trim()}"])
+    check(present("Abrir ligação (1)", 12), "link press reached the app")
+    // The same activity comes back with its field focused, and the keyboard over the form.
+    if (adb(["shell", "dumpsys", "input_method"]).contains("mInputShown=true")) {
+        keyBack()
+        pause(500)
+    }
+
+    // Scroll: updates keep the position, and the next screen opens at the top.
+    swipeToEnd()
+    check(present("Formulário seguinte"), "form scrolls to its end")
+    tap("Notas")
+    adb(["shell", "input", "text", "fim"])
+    pause(1000)
+    keyBack()
+    pause(500)
+    check(present("Notas: fim", 12) && present("Formulário seguinte", 2), "state changes keep the scroll position")
+    tap("Formulário seguinte")
+    check(present("Formulário 2"), "next form opens")
+    check(present("Nome") && !present("Formulário seguinte", 1), "next screen opens at the top")
+
+    // The system's back button walks the routes, and each screen is as it was left.
+    keyBack()
+    check(present("Formulário 1"), "back: the previous route")
+    check(present("Formulário seguinte") && !present("Nome", 1), "back: its scroll is restored")
+    keyBack()
+    // Nothing left to go back to: the app leaves, as Android apps do. Tabs were routes too.
+    var presses = 0
+    while (focused().contains(package) && presses < 16) {
+        keyBack()
+        pause(1000)
+        presses = presses + 1
+    }
+    check(!focused().contains(package) && presses > 1, "back walks to the first entry, then leaves the app ($presses presses)")
+
+    // A link with the app open reaches the same activity: back at the first screen leaves.
+    adb(["shell", "am", "force-stop", package])
+    adb(["shell", "monkey", "-p", package, "1"])
+    val home = find("Adicionar (0)")
+    check(home != null, "the app is open")
+    if (home == null) return finish("tests/ui/android_gallery.ab")
+    link("abla-one-gallery://open/form/9")
+    check(present("Formulário 9", 12), "a link with the app open opens its screen")
+    check(activities() == 1, "in the same activity (${activities()})")
+    keyBack()
+    check(present("Adicionar (0)"), "back: the screen before")
+    keyBack()
+    pause(1000)
+    check(!focused().contains(package), "back again leaves, with no second home under it")
+
+    // A link that starts the app: never a frame of the first route. The primary button, near-black
+    // there, is where the form shows white.
+    adb(["shell", "am", "force-stop", package])
+    link("abla-one-gallery://open/form/7")
+    var seen = 0
+    var dark = 0
+    while (seen < 25) {
+        val frame = rawScreen()
+        seen = seen + 1
+        if (pixel(frame, home.left + 12, (home.top + home.bottom) / 2) == 0x1f2328) dark = dark + 1
+    }
+    check(dark == 0, "a cold start by link shows only its route ($dark of $seen frames showed the first)")
+    check(present("Formulário 7", 12), "a cold start by link opens its screen")
+    keyBack()
+    check(present("Adicionar (0)"), "back from it: the first route")
+
+    // A row that wraps: its children, kept inside the screen on more than one line. And one that goes sideways: one line, the rest reached by a swipe.
+    link("abla-one-gallery://open/moment")
+    val first = find("Linha", 12)
+    val last = find("disponível", 4)
+    val width = nodes()[0].right
+    check(first != null && last != null && last.top > first.bottom && last.right <= width, "a wrapping row goes on to more lines, inside the screen")
+    val start = find("Desliza", 4)
+    check(start != null && !present("o ecrã", 1), "a scrollRow starts with its end out of sight")
+    if (start != null) {
+        val y = (start.top + start.bottom) / 2
+        // Well inside the screen: from its edge, it's the system's back gesture.
+        adb(["shell", "input", "swipe", "${width - 100}", "$y", "100", "$y", "300"])
+        adb(["shell", "input", "swipe", "${width - 100}", "$y", "100", "$y", "300"])
+        val end = find("o ecrã", 6)
+        check(end != null && end.top == start.top, "a swipe brings its end, on the same line")
+    }
+    keyBack()
+    check(present("Adicionar (0)"), "back from it: the first route")
+
+    // The dropdown on the bar: over the screen, closed by a press outside, the back button or a choice.
+    check(present("Estúdio Norte"), "the switcher is on the bar")
+    tap("Estúdio Norte")
+    check(present("Oficina Sul") && present("Atelier Centro", 1), "it opens")
+    adbToFile(["exec-out", "screencap", "-p"], "build/ui/android-popover.png")
+    keyBack()
+    check(!present("Oficina Sul", 3) && present("Adicionar (0)"), "the back button closes it, and stays")
+    tap("Estúdio Norte")
+    present("Oficina Sul")
+    // The button's left end, clear of the panel on the right.
+    tapAt(home.left + 12, (home.top + home.bottom) / 2)
+    pause(800)
+    check(!present("Oficina Sul", 3) && present("Adicionar (0)"), "a press outside closes it, and reaches nothing under it")
+    tap("Estúdio Norte")
+    tap("Oficina Sul")
+    check(present("Oficina Sul") && !present("Atelier Centro", 2), "a choice takes effect and closes it")
+
+    // A bitmap: sharp cells, nothing but black and white.
+    // All of it in view: at the end of the page, clear of the tab bar.
+    var swipes = 0
+    while (swipes < 3) {
+        adb(["shell", "input", "swipe", "300", "1400", "300", "400", "300"])
+        pause(500)
+        swipes = swipes + 1
+    }
+    val code = find("Código de exemplo")
+    check(code != null, "the bitmap is on the screen, with its label")
+    if (code != null) {
+        val frame = rawScreen()
+        // Whole pixels per cell, centered in the box.
+        val cell = (code.right - code.left) / 7
+        val left = code.left + (code.right - code.left - cell * 7) / 2
+        val top = code.top + (code.bottom - code.top - cell * 7) / 2
+        // The cells are drawn without antialiasing; the emulator's composer still shifts edge pixels a little.
+        var onlyBlackAndWhite = true
+        var x = left
+        while (x < left + cell * 7) {
+            var y = top
+            while (y < top + cell * 7) {
+                val p = pixel(frame, x, y)
+                val r = p / 65536
+                val g = (p / 256) % 256
+                val b = p % 256
+                val high = if (r > g) (if (r > b) r else b) else (if (g > b) g else b)
+                val low = if (r < g) (if (r < b) r else b) else (if (g < b) g else b)
+                if (!(high <= 16 || low >= 239)) onlyBlackAndWhite = false
+                y = y + 1
+            }
+            x = x + 1
+        }
+        check(onlyBlackAndWhite, "a bitmap is only black and white")
+        check(pixel(frame, left + cell / 2, top + cell / 2) == 0x000000 && pixel(frame, left + cell + cell / 2, top + cell + cell / 2) == 0xffffff, "its cells are where they should be")
+    }
+    finish("tests/ui/android_gallery.ab")
+}

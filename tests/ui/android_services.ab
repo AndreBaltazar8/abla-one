@@ -1,0 +1,143 @@
+import "android.ab"
+import "abla/bytes"
+import "abla/crypto"
+import "abla/io"
+import "abla/process"
+import "abla/text"
+
+// Android services test: real requests from the abla-mobile host to an echo server on loopback through a
+// private adb reverse mapping. Covers headers and methods, JSON, bytes, a 500 KB in-memory body, a picked
+// file streamed as the body and as a multipart part, a 3 MB download saved to a file and read back by range,
+// typed secure storage and timers. The UI-driving half of the test (the former Python one was one program):
+// tests/ui/android_services.sh starts the echo server (tests/ui/echo.ab), builds and installs the APK, sets
+// up the reverse mapping and the 1.5 MB file in Downloads, and runs this: android_services
+
+val package = "dev.abla.one.services"
+val destination = "/sdcard/Download/one-authenticated-export.bin"
+
+fun tap(text: string): void {
+    var attempt = 0
+    while (attempt < 4) {
+        val n = find(text, 2, false)
+        if (n != null) { tapNode(n); return }
+        adb(["shell", "input", "swipe", "540", "1700", "540", "900"])
+        attempt = attempt + 1
+    }
+    giveUp("FAIL control not found: $text")
+}
+
+fun logLine(prefix: string, timeoutSeconds: int = 40): string {
+    val end = now() + timeoutSeconds * 1000
+    while (now() < end) {
+        for (n in nodes()) {
+            for (line in lines(n.text)) if (line.startsWith("$prefix:")) return line
+        }
+        pause(1000)
+    }
+    ""
+}
+
+fun has(text: string, wanted: string): bool = text.contains(wanted)
+
+fun expectedExport(): string {
+    var block = ""
+    var i = 0
+    while (i < 251) { block = "$block${byteEncode(i)}"; i = i + 1 }
+    val whole = 3 * 1024 * 1024
+    block.repeat(whole / 251 + 1).slice(0, whole)
+}
+
+fun main: int {
+    dismissSystemDialog()
+    adb(["shell", "am", "force-stop", package])
+    adb(["shell", "monkey", "-p", package, "1"])
+    find("JSON PUT", 10)
+
+    if (processEnvironmentOr("ONE_EXPORT_ONLY", "") != "1") {
+        tap("JSON PUT")
+        var line = logLine("json")
+        check(has(line, "\"m\": \"PUT\"") && has(line, "\"x\": \"one\"") && has(line, "\"type\": \"application/json\"") && has(line, "\\\"n\\\":7"), "PUT with custom header and JSON body", line)
+        tap("Bytes POST")
+        line = logLine("bytes")
+        check(has(line, "\"len\": 5") && has(line, "\"type\": \"application/octet-stream\""), "byte body", line)
+        tap("Large body")
+        line = logLine("large")
+        check(has(line, "\"len\": 500000"), "500 KB in-memory body", line)
+        tap("Pick file")
+        var picker = find("abla-one-upload.bin", 20)
+        if (picker == null) {
+            if (find("Downloads", 4) != null) tap("Downloads")
+            picker = find("abla-one-upload.bin", 20)
+        }
+        check(picker != null, "document picker shows the file")
+        val chosen = picker
+        if (chosen != null) tapNode(chosen)
+        line = logLine("pick")
+        check(has(line, "abla-one-upload.bin 1572864"), "picked file handle with name and size", line)
+        tap("Upload file")
+        line = logLine("upload", 90)
+        check(has(line, "\"len\": 1572864"), "1.5 MB file streamed as the body", line)
+        tap("Multipart")
+        line = logLine("multipart", 90)
+        check(has(line, "\"title:6\"") && has(line, "\"document:1572864\"") && has(line, "multipart/form-data"), "multipart with a text part and a file part", line)
+    }
+    tap("Download to file")
+    var line = logLine("download", 90)
+    check(has(line, "3145728") && has(line, "application/zip"), "3 MB response saved to a file", line)
+    tap("Read saved file")
+    line = logLine("read")
+    val sample = rangeSample()
+    check(line.endsWith(base64Encode(sample)), "ranged read of the saved file", line)
+    // A URL opened in another app would lack this header: /big rejects it.
+    adb(["shell", "rm", "-f", destination])
+    tap("Save response file")
+    find("Save", 10)
+    var saveNode = find("Save", 2)
+    if (saveNode == null) saveNode = find("SAVE", 2)
+    if (saveNode == null) {
+        adbToFile(["exec-out", "screencap", "-p"], "build/ui/android-export-failure.png")
+        giveUp("FAIL system create-document save action missing")
+    }
+    val save = saveNode
+    if (save != null) tapNode(save)
+    check(logLine("export", 40).endsWith("saved"), "system document save completed")
+    val payload = adb(["exec-out", "cat", destination])
+    check(sha256(payload) == sha256(expectedExport()), "saved authenticated response is byte-identical")
+    tap("Share response file")
+    pause(1000)
+    val tree = nodes()
+    var chooser = false
+    var bearer = false
+    for (n in tree) {
+        if (has(n.text, "one-authenticated-export") || has(n.text, "Sharing") || has(n.text, "Nearby")) chooser = true
+        if (has(n.text, "Bearer")) bearer = true
+    }
+    check(chooser, "Android share chooser receives opaque-file copy")
+    check(!bearer, "share UI contains no authentication header")
+    keyBack()
+    tap("Reject forged export")
+    val end = now() + 20000
+    while (now() < end) {
+        if (logLine("export", 2).endsWith("failed")) break
+        pause(200)
+    }
+    check(logLine("export", 2).endsWith("failed"), "unregistered handle and unsafe filename fail closed")
+    adb(["shell", "rm", destination])
+    tap("Secure write")
+    check(logLine("store").endsWith("204"), "typed secure write")
+    tap("Secure read")
+    line = logLine("load")
+    check(has(line, "200 count=3"), "typed secure read", line)
+    tap("Timer")
+    check(logLine("timer").endsWith("200"), "timer")
+    adbToFile(["exec-out", "screencap", "-p"], "build/ui/android-services.png")
+    finish("tests/ui/android_services.ab")
+}
+
+// Bytes 1000000..1000015 of the download, each (offset + i) % 251.
+fun rangeSample(): string {
+    var out = ""
+    var i = 0
+    while (i < 16) { out = "$out${byteEncode((1000000 + i) % 251)}"; i = i + 1 }
+    out
+}

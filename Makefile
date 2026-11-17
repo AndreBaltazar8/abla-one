@@ -62,13 +62,17 @@ ANDROID_LOCK ?= $${ANDROID_EMULATOR_LOCK:-/tmp/android-emulator.lock}
 # Needs a running emulator or device (adb).
 ui-android: gallery-android
 	mkdir -p build/ui
-	flock $(ANDROID_LOCK) python3 tests/ui/android_gallery.py
+	$(NIX) '$(ABLAC) build tests/ui/android_parse.ab -o build/android-parse --fast'
+	./build/android-parse
+	$(NIX) '$(ABLAC) build tests/ui/android_gallery.ab -o build/android-gallery --fast'
+	flock $(ANDROID_LOCK) ./build/android-gallery
 
 # Real requests, uploads, downloads, storage and timers on the emulator,
-# against tests/ui/echo.py behind a temporary HTTPS tunnel.
-ui-android-services: .abla/packages
+# against tests/ui/echo.ab through an adb reverse mapping.
+ui-android-services: .abla/packages echo-server
 	mkdir -p build/ui
-	flock $(ANDROID_LOCK) python3 tests/ui/android_services.py
+	$(NIX) '$(ABLAC) build tests/ui/android_services.ab -o build/android-services --fast'
+	flock $(ANDROID_LOCK) tests/ui/android_services.sh
 
 # The gallery in Wasm client mode: build/gallery/client.html (server-rendered)
 # with web/host.js and the app's module beside it; any static server works.

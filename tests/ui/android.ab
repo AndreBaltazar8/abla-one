@@ -1,0 +1,213 @@
+import "abla/io"
+import "abla/process"
+import "abla/sys/linux/process"
+import "abla/text"
+
+// The pieces the Android UI tests share (android_gallery.ab, android_services.ab): adb, the screen
+// as UI Automator dumps it, taps by text and a few checks.
+// ANDROID_SERIAL picks the device (default: the emulator, whatever else is plugged in: with a phone
+// too, a bare adb stops, or drives the phone).
+
+var androidFailures = 0
+
+fun pause(milliseconds: int): void {
+    linuxSleepMillisecondsChecked(milliseconds)
+    return
+}
+
+fun now(): int = linuxMonotonicMilliseconds()
+
+fun androidCommand(arguments: array<string>): Command {
+    val c = command("adb")
+    c.environment("ANDROID_SERIAL", processEnvironmentOr("ANDROID_SERIAL", "emulator-5554"))
+    for (argument in arguments) c.argument(argument)
+    c
+}
+
+// What adb printed on its standard output (a failing adb prints nothing here: the check that needed it fails).
+fun adb(arguments: array<string>): string = androidCommand(arguments).captureText()
+
+fun adbToFile(arguments: array<string>, path: string): void {
+    val c = androidCommand(arguments)
+    c.output(path)
+    c.run()
+    return
+}
+
+// An unrecoverable failure (the Python SystemExit).
+fun giveUp(message: string): never {
+    println(message)
+    exit(1)
+}
+
+fun check(ok: bool, label: string, detail: string = ""): void {
+    if (ok) println("ok   $label") else {
+        androidFailures = androidFailures + 1
+        println("FAIL $label $detail")
+    }
+}
+
+class UiNode(
+    val text: string,
+    val description: string,
+    val left: int,
+    val top: int,
+    val right: int,
+    val bottom: int
+)
+
+// The value of attribute `name` of a tag: delimited by double quotes, or by single quotes when it holds double quotes
+// (uiautomator picks, whichever the value doesn't contain).
+fun xmlAttribute(tag: string, name: string): string {
+    val key = " $name="
+    val at = tag.indexOf(key)
+    if (at < 0 || at + key.size >= tag.size) return ""
+    val from = at + key.size + 1
+    val quote = tag.slice(at + key.size, from)
+    if (quote != "\"" && quote != "'") return ""
+    tag.slice(from, tag.indexOf(quote, from))
+}
+
+fun xmlDecode(raw: string): string {
+    if (!raw.contains("&")) return raw
+    var out = ""
+    var at = 0
+    while (at < raw.size) {
+        val amp = raw.indexOf("&", at)
+        if (amp < 0) { out = "$out${raw.slice(at, raw.size)}"; at = raw.size } else {
+            out = "$out${raw.slice(at, amp)}"
+            val semi = raw.indexOf(";", amp)
+            val name = if (semi > amp) raw.slice(amp + 1, semi) else ""
+            var piece = ""
+            if (name == "quot") piece = "\""
+            else if (name == "amp") piece = "&"
+            else if (name == "lt") piece = "<"
+            else if (name == "gt") piece = ">"
+            else if (name == "apos") piece = "'"
+            else if (name.size > 1 && name[0] == 35) {
+                val hex = name[1] == 120
+                var scalar = 0
+                var i = if (hex) 2 else 1
+                while (i < name.size) {
+                    val c = name[i]
+                    val digit = if (c >= 48 && c <= 57) c - 48 else if (c >= 97 && c <= 102) c - 87 else if (c >= 65 && c <= 70) c - 55 else 0
+                    scalar = scalar * (if (hex) 16 else 10) + digit
+                    i = i + 1
+                }
+                piece = utf8Encode(scalar)
+            }
+            if (piece == "") { out = "$out&"; at = amp + 1 } else { out = "$out$piece"; at = semi + 1 }
+        }
+    }
+    out
+}
+
+// "[l,t][r,b]" as its four numbers.
+fun boundsOf(text: string): array<int> {
+    val numbers: array<int> = []
+    var value = 0
+    var inNumber = false
+    for (c in text) {
+        if (c >= 48 && c <= 57) { value = value * 10 + c - 48; inNumber = true }
+        else if (inNumber) { numbers.append(value); value = 0; inNumber = false }
+    }
+    if (inNumber) numbers.append(value)
+    while (numbers.size < 4) numbers.append(0)
+    numbers
+}
+
+// The end of the tag that begins at `at`: its first `>` outside an attribute value.
+fun xmlTagEnd(xml: string, at: int): int {
+    var quote = 0
+    var i = at
+    while (i < xml.size) {
+        val c = xml[i]
+        if (quote == 0) {
+            if (c == 34 || c == 39) quote = c
+            else if (c == 62) return i
+        } else if (c == quote) quote = 0
+        i = i + 1
+    }
+    xml.size
+}
+
+fun parseNodes(xml: string): array<UiNode> {
+    val result: array<UiNode> = []
+    var at = xml.indexOf("<node ")
+    while (at >= 0) {
+        val end = xmlTagEnd(xml, at)
+        val tag = xml.slice(at, end)
+        val b = boundsOf(xmlAttribute(tag, "bounds"))
+        result.append(UiNode(xmlDecode(xmlAttribute(tag, "text")), xmlDecode(xmlAttribute(tag, "content-desc")), b[0], b[1], b[2], b[3]))
+        at = xml.indexOf("<node ", end)
+    }
+    result
+}
+
+// While windows change, uiautomator can say "null root node", exit 0 and write nothing: there's no screen to read yet.
+fun nodes(): array<UiNode> {
+    var attempt = 0
+    while (attempt < 10) {
+        // (sic: that is how uiautomator spells it)
+        if (adb(["shell", "uiautomator", "dump", "/sdcard/one-ui.xml"]).contains("UI hierchary dumped")) attempt = 10
+        else { pause(500); attempt = attempt + 1 }
+    }
+    parseNodes(adb(["shell", "cat", "/sdcard/one-ui.xml"]))
+}
+
+// The first node, in tree order, showing `text` or described by it (`contains`: showing it among other text).
+fun find(text: string, tries: int = 8, contains: bool = false): UiNode? {
+    var attempt = 0
+    while (attempt < tries) {
+        for (n in nodes()) {
+            if ((contains && n.text.contains(text)) || n.text == text || n.description == text) return n
+        }
+        pause(500)
+        attempt = attempt + 1
+    }
+    null
+}
+
+fun screenWidth(): int {
+    val all = nodes()
+    if (all.size > 0) all[0].right else 0
+}
+
+fun centerX(n: UiNode): int = (n.left + n.right) / 2
+fun centerY(n: UiNode): int = (n.top + n.bottom) / 2
+
+fun tapAt(x: int, y: int): void {
+    adb(["shell", "input", "tap", "$x", "$y"])
+    return
+}
+
+fun tapNode(n: UiNode): void {
+    tapAt(centerX(n), centerY(n))
+}
+
+fun keyBack(): void {
+    adb(["shell", "input", "keyevent", "4"])
+    return
+}
+
+// The system's "isn't responding" dialog, seen for System UI after a boot under load, takes every tap and key meant for the app.
+fun dismissSystemDialog(): void {
+    if (adb(["shell", "dumpsys", "window"]).contains("Application Not Responding")) {
+        println("dismissed the system's \"isn't responding\" dialog")
+        keyBack()
+        pause(1000)
+    }
+}
+
+fun lines(text: string): array<string> = text.split("\n")
+
+// The first line of the dump of `service` that contains `needle`.
+fun adbLine(arguments: array<string>, needle: string): string {
+    for (line in lines(adb(arguments))) if (line.contains(needle)) return line
+    ""
+}
+
+fun finish(name: string): int {
+    println(if (androidFailures == 0) "PASS $name" else "$androidFailures failed")
+    if (androidFailures == 0) 0 else 1
+}
