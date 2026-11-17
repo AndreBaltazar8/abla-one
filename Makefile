@@ -102,7 +102,8 @@ gallery-thin: .abla/packages
 	$(NIX) '$(ABLAC) build examples/gallery/thin.ab -o build/gallery-thin --fast'
 
 ui-thin: gallery-thin
-	python3 tests/ui/thin_device.py
+	$(NIX) '$(ABLAC) build tests/ui/thin_device.ab -o build/thin-device --fast'
+	tests/ui/thin_device.sh
 
 gallery-live: gallery-web
 	$(NIX) '$(ABLAC) build examples/gallery/live.ab -o build/gallery-live --fast'

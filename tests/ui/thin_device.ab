@@ -1,0 +1,124 @@
+import "abla/io"
+import "abla/http"
+import "abla/json"
+import "abla/process"
+import "abla/text"
+
+// Plays a thin device against the gallery's app (make gallery-thin): gets the
+// tree, presses a button by its event id, sees the new tree, and sees 204 with
+// nothing new. Replaces tests/ui/thin_device.py. tests/ui/thin_device.sh starts
+// the server and runs this with its port: thin_device PORT
+
+var failures = 0
+
+fun check(name: string, ok: bool): void {
+    println("${if (ok) "ok   " else "FAIL "}$name")
+    if (!ok) failures = failures + 1
+}
+
+class Reply(val status: int, val body: string)
+
+fun call(port: int, path: string, query: string, method: string): Reply {
+    val client = httpIpv4Client("127.0.0.1:$port", "127.0.0.1", port, 8388608, 5000)
+    val headers: array<HttpHeader> = []
+    val request = HttpRequest(method, "/one/thin$path", query, headers, "", [], [])
+    val result = client.send(request)
+    if (!result.succeeded) return Reply(0, "")
+    Reply(result.response.status, result.response.body)
+}
+
+fun parse(reply: Reply): Json = jsonParse(reply.body).value
+
+fun attr(node: Json, name: string): string {
+    val attrs = node.at(3)
+    var i = 0
+    while (i + 1 < attrs.size()) {
+        if (attrs.at(i).asString() == name) return attrs.at(i + 1).asString()
+        i = i + 2
+    }
+    ""
+}
+
+fun hasText(node: Json, wanted: string): bool {
+    if (attr(node, "text").contains(wanted)) return true
+    val children = node.at(4)
+    var i = 0
+    while (i < children.size()) {
+        if (hasText(children.at(i), wanted)) return true
+        i = i + 1
+    }
+    false
+}
+
+fun toInt(text: string): int {
+    var n = 0
+    for (c in text) { if (c < 48 || c > 57) return 0; n = n * 10 + c - 48 }
+    n
+}
+
+// The press event of the first pressable whose subtree has text containing `wanted` (0: none).
+fun find(node: Json, wanted: string): int {
+    val press = attr(node, "onPress")
+    if (press != "" && hasText(node, wanted)) return toInt(press)
+    val children = node.at(4)
+    var i = 0
+    while (i < children.size()) {
+        val found = find(children.at(i), wanted)
+        if (found != 0) return found
+        i = i + 1
+    }
+    0
+}
+
+fun event(port: int, id: int, shown: int): Reply {
+    val query = if (shown < 0) "id=$id" else "id=$id&r=$shown"
+    call(port, "/event", query, "POST")
+}
+
+fun main: int {
+    if (processArgumentCount() < 1) return 2
+    var port = 0
+    for (c in processArgument(0)) { port = port * 10 + c - 48 }
+    var first = Reply(0, "")
+    var attempts = 0
+    while (attempts < 50 && first.status == 0) {
+        first = call(port, "/tree", "have=-1", "GET")
+        if (first.status == 0) linuxSleepMillisecondsChecked(100)
+        attempts = attempts + 1
+    }
+    val tree = parse(first)
+    val root = tree.get("root")
+    check("gets the tree", first.status == 200 && root.at(0).asString() != "")
+    check("styles are shared", tree.get("styles").size() < 400)
+    val revision = tree.getInt("revision")
+    check("nothing new: 204", call(port, "/tree", "have=$revision", "GET").status == 204)
+    val button = find(root, "Adicionar (0)")
+    check("finds the button", button > 0)
+    val pressed = event(port, button, -1)
+    val after = parse(pressed)
+    check("an event answers with the new tree", pressed.status == 200 && after.getInt("revision") == revision + 1)
+    check("and the app ran", find(after.get("root"), "Adicionar (1)") > 0)
+    // A press made on a screen the app has left: the id means something else now.
+    val stale = find(after.get("root"), "Adicionar (1)")
+    val shown = after.getInt("revision")
+    val people = parse(event(port, find(after.get("root"), "Pessoas"), shown))
+    check("a move answers with the new screen", find(people.get("root"), "Maya Townsend") > 0)
+    check("the tree says its entry", attr(people.get("root"), "one.entry") != "")
+    check("a press from the previous route is dropped",
+        parse(event(port, stale, shown)).getInt("revision") == people.getInt("revision"))
+    val back = parse(event(port, find(people.get("root"), "Componentes"), people.getInt("revision")))
+    check("and did nothing on the way", find(back.get("root"), "Adicionar (1)") > 0)
+    // An event older than the tree, within a route, lands by its place and on what it said.
+    val home = parse(call(port, "/tree", "have=-1", "GET"))
+    val homeShown = home.getInt("revision")
+    val add = find(home.get("root"), "Adicionar (")
+    val minus = find(home.get("root"), "Secundário")
+    val added = parse(event(port, add, homeShown))
+    check("an event changes the view", added.getInt("revision") > homeShown)
+    check("a second press on what no longer says the same is dropped",
+        parse(event(port, add, homeShown)).getInt("revision") == added.getInt("revision"))
+    check("an older event on a control that says the same runs",
+        parse(event(port, minus, homeShown)).getInt("revision") > added.getInt("revision"))
+    println(if (failures == 0) "PASS tests/ui/thin_device.ab" else "$failures failed")
+    if (failures == 0) 0 else 1
+}
