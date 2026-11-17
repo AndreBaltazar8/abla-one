@@ -1,5 +1,10 @@
 import "../one.ab"
 import "../kit/kit.ab"
+import "../core/style.ab"
+import "../layout/layout.ab"
+import "../core/node.ab"
+import "../core/ui.ab"
+import "../core/theme.ab"
 
 // Runtime helpers the $one and $theme syntaxes compile to. They are ordinary
 // functions, so generated code reads like hand-written code.

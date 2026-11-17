@@ -1,6 +1,9 @@
 // macOS CI diagnostic for the existing native_roots self-test. It creates only
 // its own synthetic source/mirror; no application or SDK secrets are inspected.
 import "../tools/native_build_roots.ab"
+import "abla/io"
+import "abla/process"
+import "abla/fs"
 
 fun main: int {
     val root = currentDirectory()

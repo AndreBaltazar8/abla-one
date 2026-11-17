@@ -5,6 +5,10 @@ import "abla/process/exit"
 import "abla/unsafe/memory"
 import "../layout/paint.ab"
 import "inter_glyphs.ab"
+import "../core/theme.ab"
+import "abla/unsafe/memory/raw"
+import "../layout/inter_metrics.ab"
+import "../layout/layout.ab"
 
 // one-raster (SPEC §10, M3): draws a paint list into ARGB pixels, for the
 // targets without a platform renderer (desktop, epaper) and for snapshot

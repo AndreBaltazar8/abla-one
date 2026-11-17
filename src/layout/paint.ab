@@ -1,5 +1,6 @@
 import "abla/json"
 import "layout.ab"
+import "../core/theme.ab"
 
 // The paint list (SPEC §10, M3): what web-canvas, desktop and epaper draw, in
 // order, in absolute logical pixels. Hit regions route input back to events.

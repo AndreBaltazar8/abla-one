@@ -2,6 +2,9 @@ import "abla/io"
 import "abla/fs"
 import "gallery.ab"
 import "../../src/backends/web_document.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/services.ab"
+import "../../src/kit/theme.ab"
 
 // Server-side renders both gallery tabs to HTML files for review.
 fun main: int {

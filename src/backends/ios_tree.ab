@@ -1,4 +1,8 @@
+import "../mobile_source.ab"
+import importSubpath(oneMobileSource(), "ui")
 import "android_tree.ab"
+import "../core/node.ab"
+import "../core/theme.ab"
 
 // The protocol-v1 node shape is portable; iOS/mobile style scopes resolve here
 // instead of accidentally retaining Android-only styles in a SwiftUI host.

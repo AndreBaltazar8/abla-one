@@ -1,5 +1,6 @@
 import "abla/test"
 import "../../src/backends/web_session.ab"
+import "../../src/core/services.ab"
 
 var timerTime = 1000
 fun timerClock(): int = timerTime

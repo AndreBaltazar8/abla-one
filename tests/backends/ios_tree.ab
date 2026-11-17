@@ -1,6 +1,10 @@
 import "abla/test"
 import "../../src/one.ab"
 import "../../src/backends/ios_tree.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
+import "../../src/backends/android_tree.ab"
+import "../../src/core/theme.ab"
 
 fun main: int {
     var t = theme()

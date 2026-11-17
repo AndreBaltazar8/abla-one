@@ -1,5 +1,7 @@
 // A balanced string index, including the first inserted record for a prefix.
 // Keep this in Abla: the evaluator's Map currently scans its keys linearly.
+import "abla/text"
+
 class OneLockIndex(
     val keys: array<string> = [], val left: array<int> = [],
     val right: array<int> = [], val height: array<int> = [],

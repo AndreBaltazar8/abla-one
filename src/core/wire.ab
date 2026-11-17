@@ -1,5 +1,6 @@
 import "abla/json"
 import "node.ab"
+import "./style.ab"
 
 // A node tree as JSON, for a thin client (SPEC §16): a client gets the whole tree,
 // as a browser gets a page, and does layout, scrolling and drawing itself. Styles

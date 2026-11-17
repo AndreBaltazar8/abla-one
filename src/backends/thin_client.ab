@@ -1,5 +1,10 @@
 import "../one.ab"
 import "../core/wire.ab"
+import "../layout/layout.ab"
+import "../core/node.ab"
+import "../core/style.ab"
+import "../core/state.ab"
+import "../core/ui.ab"
 
 // The app on a thin device: it shows the tree the server sent (thin_host.ab). Layout,
 // scrolling and drawing happen here; a press goes back to the server, by event id.

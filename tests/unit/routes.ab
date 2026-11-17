@@ -1,5 +1,10 @@
 import "abla/test"
 import "../../src/one.ab"
+import "../../src/core/routes.ab"
+import "../../src/core/services.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
 
 class Shown(val seen: array<string>, val redirect: string, val services: OneServices) : OneApp {
     fun render(var ui: Ui): Node = none()

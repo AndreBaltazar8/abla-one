@@ -1,6 +1,9 @@
 import "abla/json"
 import "abla/text"
 import "../one.ab"
+import "../core/node.ab"
+import "../core/theme.ab"
+import "../core/routes.ab"
 
 // The `web-document` target, server-side rendering (M1). Each resolved
 // declaration becomes one atomic class (`.o12{gap:8px}`), deduplicated across

@@ -4,6 +4,11 @@ import "../../src/dsl/theme.ab"
 import "../../src/dsl/one.ab"
 import "../../src/backends/test.ab"
 import "../../src/backends/web_document.ab"
+import "../../src/core/style.ab"
+import "../../src/core/theme.ab"
+import "../../src/kit/theme.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/node.ab"
 
 // A component that ships its own defaults and a theme fragment.
 fun Callout(var ui: Ui, title: string): Node = $one

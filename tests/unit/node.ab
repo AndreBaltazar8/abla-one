@@ -1,5 +1,7 @@
 import "abla/test"
 import "../../src/one.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
 
 fun main: int {
     val label = text("Hi", style().color("#000"))

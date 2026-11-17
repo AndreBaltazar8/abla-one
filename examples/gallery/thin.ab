@@ -3,6 +3,9 @@ import "abla/http"
 import "abla/net"
 import "gallery.ab"
 import "../../src/backends/thin_host.ab"
+import "../../src/backends/web_session.ab"
+import "../../src/kit/theme.ab"
+import "abla/process"
 
 // The gallery for thin devices: this host runs the app and serves its node tree
 // (src/backends/thin_host.ab) on :8954. Set ONE_THIN_ADDRESS=0.0.0.0 to serve a real

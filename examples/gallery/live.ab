@@ -4,6 +4,10 @@ import "abla/net"
 import "abla/sys/linux"
 import "gallery.ab"
 import "../../src/backends/web_live.ab"
+import "../../src/core/ui.ab"
+import "../../src/backends/web_session.ab"
+import "abla/process"
+import "../../src/kit/theme.ab"
 
 // The gallery as a live web app: server-rendered first paint, then the page
 // talks to its session over WebSocket. Run from the abla-one root after

@@ -2,6 +2,11 @@ import "abla/http"
 import "abla/process/time"
 import "../core/wire.ab"
 import "web_live.ab"
+import "../core/state.ab"
+import "../core/ui.ab"
+import "../core/theme.ab"
+import "../core/routes.ab"
+import "./web_session.ab"
 
 // An app run on the server for thin devices (SPEC §16): the state and handlers stay
 // here, and a device gets the node tree, then does layout, scrolling and drawing

@@ -4,6 +4,11 @@ import "abla/runtime/memory"
 import "../../../abla-embedded/src/esp32/abla_host_esp_idf.ab"
 import "../../../abla-embedded/src/m5stack/papermono_board.ab"
 import "../../../abla-embedded/src/m5stack/papermono_gestures.ab"
+import "../../../abla-embedded/src/display/ssd1677_session.ab"
+import "abla/unsafe/memory/raw"
+import "../core/ui.ab"
+import "../core/theme.ab"
+import "../raster/raster.ab"
 
 // An Abla One app on an M5Stack PaperMono, entirely on the device (SPEC §10):
 // the app, its state, layout, scrolling, hit testing and drawing run on the

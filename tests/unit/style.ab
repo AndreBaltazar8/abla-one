@@ -1,5 +1,6 @@
 import "abla/test"
 import "../../src/one.ab"
+import "../../src/core/style.ab"
 
 fun main: int {
     val base = style().padding(16).gap(8)

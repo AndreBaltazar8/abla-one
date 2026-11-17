@@ -4,6 +4,9 @@ import "../one.ab"
 import "inter_metrics.ab"
 import "../../../abla-ui/src/text.ab"
 import "../../../abla-ui/src/flex.ab"
+import "../core/node.ab"
+import "../core/theme.ab"
+import "../core/style.ab"
 
 // one-layout (SPEC §7, M3): lays out a node tree in logical pixels for the
 // backends that draw themselves (web-canvas, desktop, epaper). abla-ui's flex

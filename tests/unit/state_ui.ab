@@ -1,5 +1,11 @@
 import "abla/test"
 import "../../src/one.ab"
+import "../../src/core/state.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/theme.ab"
+import "../../../abla-ui/src/revision.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
 
 class Counter(var count: int by State(0), var name: string by State("ada"), var log: string by State("")) : OneApp {
     fun render(var ui: Ui): Node = column(style().gap(8), [

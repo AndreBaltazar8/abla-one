@@ -5,6 +5,13 @@ import "../one.ab"
 import "web_document.ab"
 import "web_recovery_store.ab"
 import "../layout/paint.ab"
+import "../core/routes.ab"
+import "../core/services.ab"
+import "./web_recovery_request.ab"
+import "../core/ui.ab"
+import "../core/theme.ab"
+import "../core/node.ab"
+import "../layout/layout.ab"
 
 // A web session, wherever it runs: on the server (web_live.ab, over a
 // WebSocket) or in the browser (web_client.ab, compiled to Wasm). The page

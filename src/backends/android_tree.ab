@@ -2,6 +2,8 @@ import "abla/json"
 import "../mobile_source.ab"
 import importSubpath(oneMobileSource(), "ui")
 import "../one.ab"
+import "../core/node.ab"
+import "../core/theme.ab"
 
 // Encoding for the `android` target. Resolved trees are sent to the
 // abla-mobile host as `one.*` nodes and drawn by its generic OneRenderer

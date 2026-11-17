@@ -1,6 +1,8 @@
 import "abla/test"
 import "../../src/one.ab"
 import "../../src/layout/layout.ab"
+import "../../src/layout/inter_metrics.ab"
+import "abla/io"
 
 // Text measurement goes through abla-ui's TableFont; it must give what abla-one's own sum
 // over the Inter tables gave, byte for byte: that sum is kept here as the reference.

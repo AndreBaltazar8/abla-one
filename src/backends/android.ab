@@ -2,8 +2,15 @@ import "abla/json"
 import "../mobile_source.ab"
 import oneMobileSource()
 import importSubpath(oneMobileSource(), "platform")
+import importSubpath(oneMobileSource(), "protocol")
+import importSubpath(oneMobileSource(), "runtime")
+import importSubpath(oneMobileSource(), "ui")
 import "../one.ab"
 import "android_tree.ab"
+import "../core/services.ab"
+import "../core/ui.ab"
+import "../core/theme.ab"
+import "../core/routes.ab"
 
 // The `android` target: the run loop on top of abla-mobile. Encoding lives in
 // android_tree.ab so it can be tested off-device.

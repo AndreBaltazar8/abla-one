@@ -2,6 +2,14 @@ import "../one.ab"
 import "../layout/layout.ab"
 import "../layout/paint.ab"
 import "../raster/raster.ab"
+import "../core/routes.ab"
+import "../core/theme.ab"
+import "../core/ui.ab"
+import "../core/state.ab"
+import "../core/node.ab"
+import "../core/style.ab"
+import "abla/text"
+import "abla/unsafe/memory/raw"
 
 // The `epaper` target (SPEC §10, M4), PaperMono first. Each change is laid out,
 // painted and rasterized (one-layout, one-raster), then quantised to the panel's

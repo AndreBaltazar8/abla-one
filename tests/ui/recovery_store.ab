@@ -2,6 +2,16 @@ import "abla/fs"
 import "abla/process"
 import "abla/sys/linux"
 import "../../src/backends/web_recovery_live.ab"
+import "abla/http"
+import "../../src/backends/web_live.ab"
+import "../../src/backends/web_recovery_store.ab"
+import "../../src/core/services.ab"
+import "abla/json"
+import "abla/crypto"
+import "../../src/backends/web_checkpoint.ab"
+import "../../src/backends/web_recovery.ab"
+import "abla/text"
+import "../../src/core/theme.ab"
 
 // A deliberately local test stand-in, shared by separate fixture processes.
 // Synthetic data only. Production adapters must encrypt and use their shared

@@ -2,6 +2,9 @@ import "abla/test"
 import "abla/text"
 import "../../examples/services/services.ab"
 import "../../src/backends/test.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/services.ab"
+import "../../src/kit/theme.ab"
 
 fun main: int {
     val t = oneDefaultTheme()

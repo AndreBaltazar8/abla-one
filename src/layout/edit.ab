@@ -1,5 +1,6 @@
 import "layout.ab"
 import "paint.ab"
+import "../core/theme.ab"
 
 // Editing a field in a window: a caret anywhere in the text, a selection, and what keys and
 // the pointer do to them. Offsets are bytes on character boundaries. The text operations

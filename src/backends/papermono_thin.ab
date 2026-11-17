@@ -2,6 +2,16 @@ import "papermono.ab"
 import "thin_client.ab"
 import "abla/bytes"
 import "../../../abla-embedded/src/esp32/esp_idf_net.ab"
+import "../core/theme.ab"
+import "../raster/raster.ab"
+import "abla/runtime/memory"
+import "../../../abla-embedded/src/m5stack/papermono_board.ab"
+import "../../../abla-embedded/src/m5stack/papermono_gestures.ab"
+import "./epaper.ab"
+import "../core/state.ab"
+import "abla/unsafe/memory/raw"
+import "../../../abla-embedded/src/esp32/sdk/raw_buffer.ab"
+import "abla/io"
 
 // A PaperMono in thin mode (SPEC §16): the app's state and handlers run on a server
 // (thin_host.ab), which sends the node tree. Layout, scrolling and drawing stay here,

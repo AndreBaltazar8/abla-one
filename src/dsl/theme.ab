@@ -1,5 +1,6 @@
 import "abla/compiler/parser"
 import "runtime.ab"
+import "abla/bytes"
 
 // `$theme`: a theme as a small CSS-like block (SPEC §8.4).
 //

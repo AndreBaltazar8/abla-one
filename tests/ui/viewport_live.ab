@@ -1,6 +1,12 @@
 import "../port.ab"
 import "../../src/one_kit.ab"
 import "../../src/backends/web_live.ab"
+import "../../src/core/node.ab"
+import "abla/http"
+import "../../src/kit/theme.ab"
+import "abla/net"
+import "../../src/core/ui.ab"
+import "../../src/core/style.ab"
 
 class ViewportProof(var desktop: int = 0, var phone: int = 0) : OneApp {
     fun render(var ui: Ui): Node {

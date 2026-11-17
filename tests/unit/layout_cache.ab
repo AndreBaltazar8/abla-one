@@ -2,6 +2,9 @@ import "abla/test"
 import "../../src/one.ab"
 import "../../src/layout/layout.ab"
 import "../../src/layout/paint.ab"
+import "../../src/core/style.ab"
+import "../../src/core/node.ab"
+import "../../src/core/theme.ab"
 
 // A cached layout, and a finished layout moved by new scroll offsets, must give
 // exactly what a fresh layout gives.

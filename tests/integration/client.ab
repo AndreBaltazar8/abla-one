@@ -3,6 +3,12 @@ import "abla/json"
 import "abla/crypto"
 import "../../examples/services/services.ab"
 import "../../src/backends/web_client.ab"
+import "../../src/backends/web_session.ab"
+import "../../src/core/ui.ab"
+import "../../src/kit/theme.ab"
+import "abla/text"
+import "../../src/core/theme.ab"
+import "../../src/core/services.ab"
 
 // Wasm client mode, driven natively: the page messages a module receives and
 // the messages it answers with. Uses the services demo, so requests become

@@ -3,6 +3,9 @@ import "../../src/one.ab"
 import "../../src/one_kit.ab"
 import "../../src/dsl/one.ab"
 import "../../src/layout/layout.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
+import "../../src/kit/theme.ab"
 fun tree(): Node = $one
     <Row wrap=true width=100>
       <Column width=80 height=20 />

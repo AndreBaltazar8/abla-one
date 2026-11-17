@@ -1,6 +1,12 @@
 import "abla/test"
 import "../../examples/gallery/gallery.ab"
 import "../../src/backends/test.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/routes.ab"
+import "../../src/core/theme.ab"
+import "../../src/kit/theme.ab"
+import "../../src/core/services.ab"
+import "../../src/core/node.ab"
 
 // Drives the shared gallery app the way a backend would: render, find a control,
 // dispatch its event, render again.

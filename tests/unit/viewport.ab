@@ -2,6 +2,11 @@ import "abla/test"
 import "../../src/one.ab"
 import "../../src/backends/web_document.ab"
 import "../../src/layout/layout.ab"
+import "../../src/core/theme.ab"
+import "../../src/core/style.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/node.ab"
+import "abla/text"
 
 // Viewport conditions (`upTo`, `from`, `max760:` in `$one`): native targets
 // apply them for the render width; the web document writes media queries.

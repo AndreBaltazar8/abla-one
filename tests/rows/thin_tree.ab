@@ -4,6 +4,9 @@ import "../../src/one_kit.ab"
 import "../../src/core/wire.ab"
 import "../../src/backends/thin_client.ab"
 import "../../src/layout/layout.ab"
+import "../../src/core/node.ab"
+import "../../src/kit/theme.ab"
+import "../../src/core/style.ab"
 fun block(): Node = column(style().width(80).height(20), [])
 // The server's tree on a thin device, whose program makes no such row itself: written with oneNode, as the server's own calls to Style.wrap and scrollRow aren't here.
 fun main: int {

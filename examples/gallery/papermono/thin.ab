@@ -2,6 +2,8 @@ import "../../../src/backends/papermono_thin.ab"
 import "../../../src/kit/theme.ab"
 import "../../../build/papermono/icons.ab"
 import "../../../build/papermono/thin_config.ab"
+import "../../../src/raster/raster.ab"
+import "abla/build"
 #requiredInternalFunction("freestandingMemorySet32", "memset")
 
 // The gallery's screen on a PaperMono in thin mode: `examples/gallery/thin.ab` runs

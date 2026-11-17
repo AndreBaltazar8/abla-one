@@ -1,6 +1,7 @@
 import "abla/test"
 import "abla/json"
 import "../../src/one.ab"
+import "../../src/core/services.ab"
 
 fun main: int {
     val r = oneRequest("PUT", "https://api.example/items/1").header("Authorization", "Bearer x").header("authorization", "Bearer y").json(jsonObject(["a"], [jsonInteger(1)])).timeout(5000)

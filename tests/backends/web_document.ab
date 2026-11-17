@@ -1,6 +1,11 @@
 import "abla/test"
 import "../../src/one.ab"
 import "../../src/backends/web_document.ab"
+import "../../src/core/node.ab"
+import "abla/text"
+import "../../src/core/theme.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/style.ab"
 
 fun has(haystack: string, needle: string): bool {
     var i = 0

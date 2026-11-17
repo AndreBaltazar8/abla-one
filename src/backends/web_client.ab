@@ -3,6 +3,9 @@ import "abla/crypto"
 import "abla/process/time"
 import "abla/unsafe/memory"
 import "web_session.ab"
+import "../core/services.ab"
+import "../core/ui.ab"
+import "../core/theme.ab"
 
 // Wasm client mode (SPEC §1, M3): the app runs in the browser. The page's
 // thin host (web/host.js) talks to this module instead of a WebSocket, with

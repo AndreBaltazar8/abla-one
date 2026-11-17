@@ -4,6 +4,11 @@ import "abla/sys/linux"
 import "../../src/one_kit.ab"
 import "../../src/raster/raster.ab"
 import "../../examples/gallery/gallery.ab"
+import "../../src/kit/theme.ab"
+import "../../src/core/services.ab"
+import "../../src/core/ui.ab"
+import "../../src/layout/paint.ab"
+import "../../src/layout/layout.ab"
 
 fun pixel(s: OneSurface, x: int, y: int): int = s.pixels.word(y * s.width + x)
 fun red(c: int): int = (c / 65536) % 256

@@ -2,6 +2,16 @@ import "abla/test"
 import "../../src/one_kit.ab"
 import "../../src/backends/web_checkpoint.ab"
 import "../../src/backends/web_recovery_live.ab"
+import "abla/json"
+import "../../src/backends/web_session.ab"
+import "../../src/backends/web_recovery_store.ab"
+import "../../src/kit/theme.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
+import "../../src/kit/kit.ab"
+import "../../src/backends/web_recovery.ab"
+import "abla/http"
 
 class CheckpointApp(var label: string, var draft: string, var hits: int = 0) : OneApp {
     fun render(var ui: Ui): Node = column(style(), [

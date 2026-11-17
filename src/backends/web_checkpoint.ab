@@ -1,5 +1,9 @@
 import "web_session.ab"
 import "web_recovery.ab"
+import "./web_recovery_store.ab"
+import "abla/json"
+import "../core/ui.ab"
+import "abla/text"
 
 // Checkpoints contain data, never app instances or event closures. Factories
 // rehydrate authorization and render new handlers before old controls can replay.

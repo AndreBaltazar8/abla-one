@@ -3,6 +3,8 @@ import "theme.ab"
 import "node.ab"
 import "routes.ab"
 import "state.ab"
+import "abla/text"
+import "./style.ab"
 
 val oneChangeBase = 1000000
 

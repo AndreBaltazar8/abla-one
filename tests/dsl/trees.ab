@@ -2,6 +2,12 @@ import "abla/io"
 import "../../src/one_kit.ab"
 import "../../src/dsl/one.ab"
 import "../../src/backends/test.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
+import "../../src/dsl/runtime.ab"
+import "../../../abla-ui/src/revision.ab"
+import "../../src/kit/theme.ab"
 
 // Every $one form the tests use, and the rest of the element table: the generated trees, dumped
 // (tests/dsl_trees.sh compares them with tests/dsl/trees.txt).

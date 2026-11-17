@@ -1,6 +1,11 @@
 import "abla/test"
 import "../../src/one.ab"
 import "../../src/backends/web_document.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
+import "abla/text"
+import "../../src/core/theme.ab"
 
 // Fine-grained invalidation with `ui.memo`: unchanged subtrees aren't built
 // again (nor written again as HTML), event ids stay those of a full render,

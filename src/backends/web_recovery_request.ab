@@ -1,5 +1,10 @@
 import "web_session.ab"
 import "abla/crypto"
+import "../core/services.ab"
+import "abla/bytes"
+import "./web_recovery_store.ab"
+import "abla/text"
+import "abla/json"
 
 // Only volatile materialization state: never part of the checkpoint codec.
 val oneRecoveryRawIdBase = 4503599627370496

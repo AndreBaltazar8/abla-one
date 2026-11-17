@@ -1,6 +1,11 @@
 import "../gallery.ab"
 import "../../../src/backends/papermono.ab"
 import "../../../build/papermono/icons.ab"
+import "../../../src/core/ui.ab"
+import "../../../src/core/services.ab"
+import "../../../src/kit/theme.ab"
+import "../../../src/raster/raster.ab"
+import "abla/build"
 #requiredInternalFunction("freestandingMemorySet32", "memset")
 
 // The gallery on an M5Stack PaperMono, running on the device:

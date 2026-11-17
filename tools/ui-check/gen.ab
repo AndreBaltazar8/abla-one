@@ -11,6 +11,10 @@ import "abla/io"
 import "abla/process/arguments"
 import "../../src/one.ab"
 import "../../src/layout/layout.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
+import "../../src/core/theme.ab"
+import "abla/text"
 
 class Rng(var state: int)
 fun Rng.next(): int {

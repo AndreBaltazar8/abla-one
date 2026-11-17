@@ -2,6 +2,9 @@ import "abla/test"
 import "abla/text"
 import "../../src/one.ab"
 import "../../src/backends/test.ab"
+import "../../src/core/node.ab"
+import "../../src/core/theme.ab"
+import "../../src/core/style.ab"
 
 fun main: int {
     var t = theme()

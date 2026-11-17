@@ -1,6 +1,7 @@
 // Generated pair for tests/state_size.sh: identical but for `by State(...)` (state_fields) and
 // plain fields (plain_fields). A State read must be a bare load, so the two stay the same size.
 import "../../src/one.ab"
+import "../../../abla-ui/src/revision.ab"
 
 class A0(var f0: string by State("s0"), var f1: int by State(1), var f2: string by State("s2"), var f3: int by State(3), var f4: string by State("s4"), var f5: int by State(5), var f6: string by State("s6"), var f7: int by State(7), var f8: string by State("s8"), var f9: int by State(9))
 class A1(var f0: string by State("s0"), var f1: int by State(1), var f2: string by State("s2"), var f3: int by State(3), var f4: string by State("s4"), var f5: int by State(5), var f6: string by State("s6"), var f7: int by State(7), var f8: string by State("s8"), var f9: int by State(9))

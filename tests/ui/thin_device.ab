@@ -3,6 +3,7 @@ import "abla/http"
 import "abla/json"
 import "abla/process"
 import "abla/text"
+import "abla/sys/linux/process"
 
 // Plays a thin device against the gallery's app (make gallery-thin): gets the
 // tree, presses a button by its event id, sees the new tree, and sees 204 with

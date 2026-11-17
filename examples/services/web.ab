@@ -2,6 +2,9 @@ import "abla/io"
 import "abla/fs"
 import "services.ab"
 import "../../src/backends/web_document.ab"
+import "../../src/core/services.ab"
+import "../../src/core/ui.ab"
+import "../../src/kit/theme.ab"
 
 // Writes build/services/client.html: the demo's first paint, which the Wasm
 // module then takes over.

@@ -3,6 +3,8 @@ import "abla/compiler/parser"
 import "abla/json"
 import "../core/services.ab"
 import "lock_index.ab"
+import "abla/float"
+import "abla/text"
 
 // `@server` functions, called from any client (SPEC §16). A client imports the
 // server module with `import contract`, so only signatures and data shapes reach

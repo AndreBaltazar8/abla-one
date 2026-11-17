@@ -8,6 +8,10 @@ import "../../src/one.ab"
 import "../../src/layout/layout.ab"
 import "../../src/layout/paint.ab"
 import "../../examples/gallery/gallery.ab"
+import "../../src/core/node.ab"
+import "../../src/core/services.ab"
+import "../../src/core/ui.ab"
+import "../../src/kit/theme.ab"
 
 fun tree(route: string, count: int): Node {
     var app = Gallery(OneNoServices())

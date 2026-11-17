@@ -4,6 +4,14 @@ import "abla/net"
 import "abla/crypto"
 import "../../src/one_kit.ab"
 import "../../src/backends/web_live.ab"
+import "../../src/kit/kit.ab"
+import "../../src/core/node.ab"
+import "../../src/core/services.ab"
+import "../../src/backends/web_session.ab"
+import "../../src/kit/theme.ab"
+import "../../src/core/ui.ab"
+import "../../../abla-ui/src/revision.ab"
+import "../../src/core/style.ab"
 
 class FileApp(val services: OneServices, var pending: int by State(0), var stage: int by State(0), var message: string by State(""), var file: OneFile = OneFile("", "", 0, ""), var offset: int = 0, var data: string = "") : OneApp {
     fun render(var ui: Ui): Node = column(style(), [

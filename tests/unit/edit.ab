@@ -1,6 +1,11 @@
 import "abla/test"
 import "../../src/one_kit.ab"
 import "../../src/layout/edit.ab"
+import "../../src/layout/layout.ab"
+import "../../src/core/node.ab"
+import "../../src/layout/paint.ab"
+import "../../src/kit/theme.ab"
+import "../../src/core/style.ab"
 
 // A field 300 wide, 16 padding: its text starts at x 16 and has 268 px.
 fun editFrame(value: string, multiline: bool, secure: bool): OneFrame {

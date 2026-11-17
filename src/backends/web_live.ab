@@ -14,6 +14,14 @@ import "web_document.ab"
 import "web_session.ab"
 import "web_recovery_live.ab"
 import "../layout/paint.ab"
+import "./web_recovery_store.ab"
+import "../core/ui.ab"
+import "../core/theme.ab"
+import "./web_recovery_request.ab"
+import "abla/sys/linux"
+import "../core/routes.ab"
+import "../core/services.ab"
+import "./web_checkpoint.ab"
 
 // Live web (SPEC §10, web-document M2): apps run on the server, one session
 // per browser tab. The first request is rendered on the server (SSR) and the

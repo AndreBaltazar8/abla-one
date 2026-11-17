@@ -1,5 +1,10 @@
 import "abla/test"
 import "../../src/one_kit.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/theme.ab"
+import "../../src/kit/kit.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
 
 fun tree(var ui: Ui, rows: array<string>, extra: bool): Node {
     val items: array<Node> = []

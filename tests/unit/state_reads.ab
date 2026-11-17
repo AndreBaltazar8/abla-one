@@ -1,5 +1,7 @@
 import "abla/test"
 import "../../src/one.ab"
+import "../../../abla-ui/src/revision.ab"
+import "../../src/core/state.ab"
 
 // State reads as NovaKind writes them: through an immutable parameter, a field of an
 // immutable object, and several reads as one call's arguments through a val taken from a var

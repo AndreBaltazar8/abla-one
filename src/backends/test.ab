@@ -1,4 +1,6 @@
 import "../one.ab"
+import "../core/theme.ab"
+import "../core/node.ab"
 
 // The `test` target: a canonical, line-per-node dump of the resolved tree.
 // Properties and attributes are sorted, so output only changes when the tree

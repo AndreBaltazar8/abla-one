@@ -18,6 +18,13 @@ import "../../src/layout/paint.ab"
 import "../../examples/gallery/gallery.ab"
 import "../../examples/services/services.ab"
 import "../../../abla-mobile/src/ui.ab"
+import "../../src/core/node.ab"
+import "../../src/core/theme.ab"
+import "../../src/core/services.ab"
+import "../../src/core/ui.ab"
+import "../../src/kit/theme.ab"
+import "abla/text"
+import "../../src/core/style.ab"
 
 val WIDTHS = [240, 320, 359, 360, 361, 479, 480, 481, 599, 600, 601, 759, 760, 761, 1024, 1280, 1499, 1500, 1501]
 val TARGETS = ["test", "web-document", "android", "desktop", "epaper"]

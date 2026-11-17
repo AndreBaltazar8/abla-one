@@ -1,5 +1,7 @@
 import "abla/test"
 import "../../src/one.ab"
+import "../../src/core/style.ab"
+import "../../src/core/theme.ab"
 
 fun sample(): Theme {
     var t = theme()

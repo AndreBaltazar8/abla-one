@@ -1,4 +1,5 @@
 import "style.ab"
+import "abla/text"
 
 // A theme holds tokens and named styles. Tokens may be scoped by target or
 // family ("epaper:muted"). Named styles are kind defaults ("kind:text"), text
