@@ -9,7 +9,7 @@ import "abla/net"
 import "abla/process"
 import "abla/text"
 
-// Echo server for the services UI tests (it replaces tests/ui/echo.py).
+// Echo server for the services UI tests (it replaces the former Python echo server).
 // POST, PUT and PATCH report what they received as JSON with sorted keys: method
 // (m), body size (len), the first ten hex digits of its SHA-256 (sha), the
 // X-Abla header (x), the content type without parameters (type) and the body

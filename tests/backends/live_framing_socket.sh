@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The live server's framing over real sockets (tests/backends/live_framing.ab checks the rules, this the server).
-# Replaces live_framing_socket.py.
+# Replaces the former Python test of the same name.
 #
 # usage: live_framing_socket.sh SERVER_BINARY   (run from the abla-one root; the server is examples/gallery/live.ab built,
 #                                               make gallery-live: build/gallery-live)

@@ -6,7 +6,7 @@ import "abla/text"
 
 // Plays a thin device against the gallery's app (make gallery-thin): gets the
 // tree, presses a button by its event id, sees the new tree, and sees 204 with
-// nothing new. Replaces tests/ui/thin_device.py. tests/ui/thin_device.sh starts
+// nothing new. Replaces the former Python test of the same name. tests/ui/thin_device.sh starts
 // the server and runs this with its port: thin_device PORT
 
 var failures = 0
