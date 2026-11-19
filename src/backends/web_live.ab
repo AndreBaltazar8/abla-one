@@ -88,15 +88,17 @@ class OneLiveStorage(
 // WebSockets of the application's own, on the server's port and in its loop, such
 // as a worker that dials in. `claims` picks the upgrade requests; each connection is
 // known by its ticket, for `OneLiveServer.sendSocket` and `closeSocket`. A handler
-// runs mid-loop, so one that wants to send queues it for after `step`.
+// runs mid-loop, so one that wants to send queues it for after `step`. Binary
+// messages (audio, say) go to `binary`, and out with `sendSocketBinary`.
 class OneLiveSockets(
     val claims: (HttpRequest) -> bool,
     val opened: (int, HttpRequest) -> void,
     val message: (int, string) -> void,
-    val closed: (int) -> void
+    val closed: (int) -> void,
+    val binary: (int, string) -> void
 )
 
-fun oneLiveNoSockets(): OneLiveSockets = OneLiveSockets({ request -> false }, { ticket, request -> return }, { ticket, text -> return }, { ticket -> return })
+fun oneLiveNoSockets(): OneLiveSockets = OneLiveSockets({ request -> false }, { ticket, request -> return }, { ticket, text -> return }, { ticket -> return }, { ticket, bytes -> return })
 
 fun oneLiveNoDefers(): (HttpRequest, int) -> bool {
     val none: (HttpRequest, int) -> bool = { request, ticket -> false }
@@ -296,6 +298,13 @@ fun OneLiveServer.sendSocket(ticket: int, text: string): bool {
     val slot = ticketSlot(ticket)
     if (slot < 0 || !slots[slot].appSocket) return false
     queue(slot, webSocketEncodeFrame(text, 1))
+    slots[slot].descriptor >= 0
+}
+
+fun OneLiveServer.sendSocketBinary(ticket: int, bytes: string): bool {
+    val slot = ticketSlot(ticket)
+    if (slot < 0 || !slots[slot].appSocket) return false
+    queue(slot, webSocketEncodeFrame(bytes, 2))
     slots[slot].descriptor >= 0
 }
 
@@ -821,6 +830,9 @@ fun OneLiveServer.frames(slot: int): void {
                     val received = sockets.message
                     received(this.ticket(slot), frame.payload)
                 } else message(slot, frame.payload)
+            } else if (frame.opcode == 2 && slots[slot].appSocket) {
+                val received = sockets.binary
+                received(this.ticket(slot), frame.payload)
             }
         }
     }

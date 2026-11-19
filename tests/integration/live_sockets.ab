@@ -1,3 +1,4 @@
+import "abla/bytes"
 import "abla/text"
 import "abla/http"
 import "abla/net"
@@ -39,7 +40,8 @@ fun serve(port: int): OneLiveServer = oneLiveServer(
             tickets.append(ticket)
         },
         { ticket, message -> seen.append("message:$message") },
-        { ticket -> seen.append("closed") }
+        { ticket -> seen.append("closed") },
+        { ticket, bytes -> seen.append("binary:${bytes.size}:${bytes[0]}:${bytes[bytes.size - 1]}") }
     ),
     { request, ticket ->
         if (request.path == "/later") {
@@ -139,6 +141,24 @@ fun main: int {
     expectEqual(seen[1], "message:hi", "and its messages")
     expect(server.sendSocket(socket, "back"), "it can send")
     expect(exchange(server, worker, "back").indexOf("back") >= 0, "and it arrives")
+    // Binary, with every byte value in it: 0 to 255, twice over.
+    val raw = byteBuffer()
+    var b = 0
+    while (b < 512) {
+        raw.appendByteValue(b & 255)
+        b = b + 1
+    }
+    val bytes = raw.toText()
+    worker.writeResult(webSocketEncodeFrame(bytes, 2, true, "mask"))
+    i = 0
+    while (i < 5) {
+        server.step()
+        i = i + 1
+    }
+    expectEqual(seen[2], "binary:512:0:255", "binary messages come whole, every byte as sent")
+    expect(server.sendSocketBinary(socket, bytes), "binary can be sent")
+    val echoed = exchange(server, worker, bytes.slice(500, 512))
+    expect(echoed.size >= 516 && echoed[0] == 130 && echoed.indexOf(bytes) > 0, "and arrives as a binary frame, unchanged")
     expect(!server.sendSocket(ticket, "nobody"), "not to a closed ticket")
     worker.close()
     i = 0
