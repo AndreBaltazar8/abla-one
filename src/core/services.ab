@@ -197,7 +197,8 @@ interface OneServices {
     // with the image as base64 in `body`, or 204 if cancelled.
     fun pickImage(kind: string): int
     fun clearImageCache(): void
-    // kind: "toast", "copy", "openUrl", "haptic", and on Android "saveFile"/"shareFile".
+    // kind: "toast", "copy", "openUrl", "haptic", and on Android "saveFile"/"shareFile" and
+    // "playAudio" (a short sound from an http(s) URL, "" to stop). False where it isn't done.
     // File effects use oneFileExportPayload; listen for fileExport {status:saved|shared|cancelled|failed}.
     fun effect(kind: string, payload: string): bool
     // Soft navigation: gives the current screen a new path ("/people?q=ma") with no

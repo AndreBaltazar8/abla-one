@@ -119,6 +119,8 @@ class OneAndroidServices() : OneServices {
         else if (kind == "haptic") mobileHaptic()
         else if (kind == "saveFile") mobileSaveFile(payload)
         else if (kind == "shareFile") mobileShareFile(payload)
+        // A short sound from an http(s) URL, such as a sample to choose a voice by; "" stops it.
+        else if (kind == "playAudio") (if (payload == "") mobileStopAudio() else mobilePlayAudio(payload))
         else false
     fun navigate(path: string, replace: bool = false): void {
         oneAppRoutes.navigate(path, replace)
