@@ -2,6 +2,7 @@ import "abla/build"
 import "services.ab"
 import "echo_url.ab"
 import "../../src/backends/android.ab"
+import "../../src/kit/theme.ab"
 
 // tests/ui/android_services.py writes echo_url.ab with the echo server address.
 fun servicesApplication(): int {

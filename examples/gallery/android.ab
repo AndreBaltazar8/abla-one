@@ -1,6 +1,7 @@
 import "abla/build"
 import "gallery.ab"
 import "../../src/backends/android.ab"
+import "../../src/kit/theme.ab"
 
 // Android entry: the shared gallery on the abla-mobile Compose host.
 fun galleryApplication(): int {
