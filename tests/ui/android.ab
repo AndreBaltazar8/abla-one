@@ -168,11 +168,6 @@ fun find(text: string, tries: int = 8, contains: bool = false): UiNode? {
     null
 }
 
-fun screenWidth(): int {
-    val all = nodes()
-    if (all.size > 0) all[0].right else 0
-}
-
 fun centerX(n: UiNode): int = (n.left + n.right) / 2
 fun centerY(n: UiNode): int = (n.top + n.bottom) / 2
 
