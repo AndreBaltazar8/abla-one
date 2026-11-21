@@ -1,7 +1,4 @@
 import "android.ab"
-import "abla/io"
-import "abla/process"
-import "abla/sys/linux/process"
 import "abla/text"
 
 // Android UI test: installs the gallery APK on the running emulator, drives it through UI Automator and

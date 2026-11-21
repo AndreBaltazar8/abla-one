@@ -1,6 +1,5 @@
 // Generated pair for tests/state_size.sh: identical but for `by State(...)` (state_fields) and
 // plain fields (plain_fields). A State read must be a bare load, so the two stay the same size.
-import "../../src/one.ab"
 
 class A0(var f0: string = "s0", var f1: int = 1, var f2: string = "s2", var f3: int = 3, var f4: string = "s4", var f5: int = 5, var f6: string = "s6", var f7: int = 7, var f8: string = "s8", var f9: int = 9)
 class A1(var f0: string = "s0", var f1: int = 1, var f2: string = "s2", var f3: int = 3, var f4: string = "s4", var f5: int = 5, var f6: string = "s6", var f7: int = 7, var f8: string = "s8", var f9: int = 9)

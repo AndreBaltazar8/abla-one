@@ -1,4 +1,4 @@
-// Core plus the standard kit and its default theme.
-import "one.ab"
-import "kit/kit.ab"
-import "kit/theme.ab"
+// Core plus the standard kit and its default theme, passed on to whoever imports this.
+export import "one.ab"
+export import "kit/kit.ab"
+export import "kit/theme.ab"

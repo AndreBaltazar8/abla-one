@@ -1,5 +1,4 @@
 import "android.ab"
-import "abla/io"
 
 // The UI Automator dump reading of android.ab, on a dump with the escapes uiautomator writes.
 fun main: int {
