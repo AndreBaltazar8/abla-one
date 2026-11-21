@@ -149,7 +149,7 @@ fun oneLiveRequestSnapshot(request: OneRequest): OneRequest {
     for(header in request.headers)headers.append(OneHeader(header.name,header.value))
     val parts: array<OnePart> = []
     for(part in request.parts)parts.append(OnePart(part.name,part.value,part.base64,part.file,part.filename,part.contentType))
-    OneRequest(request.method,request.url,headers,request.body,request.bodyBase64,request.bodyFile,parts,request.timeoutMs,request.binaryResponse,request.saveResponse)
+    OneRequest(request.method,request.url,headers,request.body,request.bodyBase64,request.bodyFile,parts,request.timeoutMs,request.binaryResponse,request.saveResponse,request.bodyMime)
 }
 
 fun oneRecoveryRawDrop(var state: OneRecoveryState): void {

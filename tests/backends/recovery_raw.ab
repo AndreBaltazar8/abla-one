@@ -48,11 +48,20 @@ fun main: int {
     expect(!oneRecoveryRawAccept(raw,rawTestPayload(-100,data)) && raw.total==4,"duplicate chunk completion cannot append bytes again")
     val materialized=oneRecoveryRawRequest(raw)
     expect(materialized!=null && materialized.body==data && materialized.bodyFile=="","raw file request becomes byte-exact volatile body")
+    expectEqual(raw.item.request.bodyMime,file.mime,"pending raw materialization keeps the file MIME type")
+    expect(materialized!=null && jsonParse(materialized.envelope()).value.get("headers").getString("Content-Type")==file.mime,"materialized raw file body keeps its default Content-Type")
     expect(raw.item.id==7 && raw.item.operation=="operation" && raw.item.epoch==3,"request identity and original operation context remain unchanged")
     oneRecoveryRawRelease(raw)
     expect(oneRecoveryRequestReserved==0 && raw.bytes.keys().size==0,"release clears buffer and process reservation exactly once")
     oneRecoveryRawRelease(raw)
     expect(oneRecoveryRequestReserved==0,"double release cannot underflow process budget")
+    for(request in [oneRequest("POST","/raw").header("content-type","application/x-custom").file(file),oneRequest("POST","/raw").file(file).header("content-type","application/x-custom")]){
+        val explicit=oneRecoveryRawBegin(OneLiveRequest(7,request),0)
+        explicit.bytes.set(file.handle,data);explicit.done=true
+        val rebuilt=oneRecoveryRawRequest(explicit)
+        expect(rebuilt!=null && jsonParse(rebuilt.envelope()).value.get("headers").getString("content-type")=="application/x-custom","an explicit Content-Type before or after file() survives raw materialization")
+        oneRecoveryRawRelease(explicit)
+    }
     val empty=oneRecoveryRawBegin(item,0)
     empty.reading=-200;empty.length=262144
     expect(oneRecoveryRawAccept(empty,rawTestPayload(-200,"")) && empty.done && empty.total==0,"empty shared files terminate without a false read loop")
