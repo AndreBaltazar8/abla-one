@@ -286,7 +286,11 @@ fun oneDesktopCaret(var surface: OneSurface, frame: OneFrame, key: string): void
     val hitIndex = oneDesktopInput(frame, key)
     if (hitIndex < 0) return
     val h = frame.hits[hitIndex]
-    oneFillRect(surface, h.caretX, h.caretY - 10, oneCaretWidth, 20, 1653808, 255)
+    // Only where the field shows: its hit is what's in view of it (onePaintBox).
+    if (h.caretY < h.y || h.caretY >= h.y + h.h || h.caretX < h.x || h.caretX >= h.x + h.w) return
+    val top = if (h.caretY - 10 < h.y) h.y else h.caretY - 10
+    val bottom = if (h.caretY + 10 > h.y + h.h) h.y + h.h else h.caretY + 10
+    oneFillRect(surface, h.caretX, top, oneCaretWidth, bottom - top, 1653808, 255)
     return
 }
 

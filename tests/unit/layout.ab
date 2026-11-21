@@ -274,6 +274,28 @@ fun testScrolledUnder(): void {
     expectEqual(atTop, headerEvent, "scrolled under: a press on the header is the header's")
     expectEqual(frame.hits[firstRow].y, 50, "scrolled under: the first row's press starts at the scroll's top")
     expectEqual(frame.hits[firstRow].h, 10, "scrolled under: only its part in view")
+
+    // A field likewise: its click area is only what shows.
+    val fields: array<Node> = []
+    index = 0
+    while (index < 10) {
+        fields.append(input("f$index", "Field", ui.change { value -> }, style().height(40)))
+        index = index + 1
+    }
+    val form = column(style().fill(), [pressable(ui.press { }, style().height(50), []), scroll(style().grow(1), fields)])
+    var formPath = ""
+    for (found in onePaintFrame(oneLayout(form, theme, "desktop", 200, 300, Map()), 200, 300).hits) if (found.kind == "scroll") formPath = found.key
+    val formOffsets: Map<string, int> = Map()
+    formOffsets.set(formPath, 60)
+    val scrolled = onePaintFrame(oneLayout(form, theme, "desktop", 200, 300, formOffsets), 200, 300)
+    var under = false
+    var top = -1
+    for (h in scrolled.hits) {
+        if (h.kind == "input" && h.y < 50 && h.h > 0) under = true
+        if (h.kind == "input" && h.h > 0 && (top < 0 || h.y < top)) top = h.y
+    }
+    expect(!under, "scrolled under: no field takes clicks over the header")
+    expectEqual(top, 50, "scrolled under: the first field's clicks start at the scroll's top")
     return
 }
 

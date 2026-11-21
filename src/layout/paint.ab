@@ -287,6 +287,15 @@ fun onePaintBox(box: OneBox, ox: int, oy: int, var frame: OneFrame, path: string
     val hy = if (y > cy) y else cy
     val hw = (if (x + box.w < cx + cw) x + box.w else cx + cw) - hx
     val hh = (if (y + box.h < cy + ch) y + box.h else cy + ch) - hy
+    // A field likewise: scrolled under a header, it would take the header's clicks, and its
+    // caret (drawn over everything, inside its hit) would show through. Out of view it keeps
+    // a hit with no size, as the focused field's keys still find it.
+    if (kind == "input" && frame.hits.size > 0 && frame.hits[frame.hits.size - 1].kind == "input" &&
+        (hx != x || hy != y || hw != box.w || hh != box.h)) {
+        val field = frame.hits[frame.hits.size - 1]
+        val shown = hw > 0 && hh > 0
+        frame.hits[frame.hits.size - 1] = OneHit(field.kind, if (shown) hx else x, if (shown) hy else y, if (shown) hw else 0, if (shown) hh else 0, field.event, field.submit, field.key, field.value, field.placeholder, field.multiline, field.caretX, field.caretY)
+    }
     if ((kind == "pressable" || kind == "link") && hw > 0 && hh > 0) {
         val event = oneParseInt(box.node.attr("onPress"), 0)
         if (event > 0 && box.node.attr("enabled") != "false") oneAddHit(frame, "press", hx, hy, hw, hh, event, 0, path, box.node.attr("label"), "", false)
