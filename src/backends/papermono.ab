@@ -1,3 +1,4 @@
+import "../../../abla-embedded/src/esp32/sdk/raw_buffer.ab"
 import "epaper.ab"
 import "abla/io"
 import "abla/runtime/memory"

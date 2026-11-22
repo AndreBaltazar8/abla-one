@@ -11,6 +11,7 @@ import "./epaper.ab"
 import "../core/state.ab"
 import "abla/unsafe/memory/raw"
 import "../../../abla-embedded/src/esp32/sdk/raw_buffer.ab"
+import "../../../abla-embedded/src/hal/native_buffer.ab"
 import "abla/io"
 
 // A PaperMono in thin mode (SPEC §16): the app's state and handlers run on a server
