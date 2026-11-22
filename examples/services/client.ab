@@ -1,13 +1,16 @@
 import "services.ab"
 import "../../src/backends/web_client.ab"
+import "../../src/backends/web_session.ab"
+import "../../src/core/ui.ab"
+import "../../src/kit/theme.ab"
 
 // The services demo in Wasm client mode: requests are the page's fetches to
 // its own origin (tests/ui/echo.ab serves both), storage is localStorage.
 @export("one_alloc")
-trusted fun alloc(length: u32): u32 = oneClientAlloc(length)
+trusted fun alloc(length: u32): u32 = u32(oneClientAlloc(int(length)))
 
 @export("one_message")
 trusted fun message(pointer: u32, length: u32): int =
-    oneClientRespond(pointer, length, { session -> servicesClientApp(session) }, oneDefaultTheme(), "icons")
+    oneClientRespond(int(pointer), int(length), { session -> servicesClientApp(session) }, oneDefaultTheme(), "icons")
 
 fun servicesClientApp(session: string): OneApp = ServicesDemo(oneLiveServices(session), ".")
