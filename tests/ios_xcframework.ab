@@ -1,11 +1,22 @@
-// Real application plus staged packaging, separate from the Linux slices-only
-// fixture. Requires the compiler containing the iOS packaging API.
+// Real application plus staged packaging, separate from the slices-only
+// fixture. Build from the repository root on macOS with Xcode.
+import "abla/ios/build"
 import "../src/mobile_source.ab"
-import importSubpath(oneMobileSource(), "ios_build")
-val accepted = #mobileBuildIos(mobileIosConfiguration(
-    "one-ios-fixture", "tests/ios_backend_exports.ab", "build/ios-real-app",
-    "../abla-mobile/runtime/ios-host/AppHeaders"
-))
+import importSubpath(oneMobileSource(), "ios_slices")
+
+compile fun buildXcframeworkFixture(): bool {
+    val output = "build/ios-real-app"
+    if (!mobileBuildIosSlices("one-ios-fixture", "ios_backend_exports.ab", "../$output")) return false
+    // v0.2.66 resolves the archive build relative to this file and packaging relative to the working directory.
+    iosCreateXcframework(
+        "$output/AblaApp.xcframework",
+        ["$output/ios-arm64/libabla_app.a", "$output/ios-arm64-simulator/libabla_app.a"],
+        "../abla-mobile/runtime/ios-host/AppHeaders"
+    )
+}
+
+val accepted = #buildXcframeworkFixture()
+
 fun main: int {
     if (!accepted) return 1
     0
