@@ -981,7 +981,13 @@
       const data = encoder.encode(JSON.stringify(message));
       const pointer = instance.exports.one_alloc(data.length);
       new Uint8Array(memory.buffer, pointer, data.length).set(data);
-      const packed = instance.exports.one_message(pointer, data.length);
+      let packed;
+      try { packed = instance.exports.one_message(pointer, data.length); }
+      catch (error) {
+        // The engine stops a recursion too deep for its stack (RangeError); say it as the module says a panic.
+        if (error instanceof RangeError) console.error('panic: stack overflow');
+        throw error;
+      }
       const text = decoder.decode(new Uint8Array(memory.buffer, Number(packed >> 32n), Number(packed & 0xffffffffn)));
       for (const message of JSON.parse(text)) receive(message);
     };
