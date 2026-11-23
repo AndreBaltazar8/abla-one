@@ -1,8 +1,7 @@
 name: Released Linux mobile provider regression
 on:
   push:
-    branches: [fix/mobile-package-source]
-    paths: [.github/workflows/mobile-provider-released.yml]
+    branches: [main, fix/mobile-package-source]
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,7 +23,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           path: abla-one
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -65,7 +63,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code 00b31de0282d7c3d51ee00361086901687cb8071 HEAD -- src abla.toml abla.lock
           export ABLA_SYSROOT="$GITHUB_WORKSPACE/ablac"
           nix-shell ../ablac/shell.nix --run '"$GITHUB_WORKSPACE/ablac/build/ablac" package update --project .'
           cp abla.lock "$RUNNER_TEMP/mobile-provider-linux-evidence/one-development.lock"

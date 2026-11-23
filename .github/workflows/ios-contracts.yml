@@ -1,7 +1,7 @@
 name: iOS and mobile backend contracts
 on:
   push:
-    branches: [feat/ios-host]
+    branches: [main, feat/ios-host]
   workflow_dispatch:
     inputs:
       compiler_version:
