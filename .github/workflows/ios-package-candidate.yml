@@ -21,15 +21,15 @@ jobs:
           ref: 36634a91818ab18a1173ef3ccfd1db0feef4fff1
           path: ablac
           persist-credentials: false
-      - name: Build exact candidate with the upstream macOS toolchain
+      - name: Install the pinned patched compiler toolchain
+        run: ablac/tools/install-macos-llvm.sh
+      - name: Build exact candidate with the pinned macOS toolchain
         working-directory: ablac
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/ios-package-candidate-evidence"
           test "$(git rev-parse HEAD)" = 36634a91818ab18a1173ef3ccfd1db0feef4fff1
-          brew install --force-bottle llvm@23 lld@23 openssl@3 binaryen
-          export PATH="$(brew --prefix llvm@23)/bin:$(brew --prefix lld@23)/bin:$(brew --prefix openssl@3)/bin:$PATH"
           tools/bootstrap-compiler.sh build/ci/bootstrap-ablac
           tools/build-self-hosted-current.sh build/ci/bootstrap-ablac build/ci/ablac-stage1
           tools/build-self-hosted-current.sh build/ci/ablac-stage1 build/ci/ablac
@@ -38,7 +38,7 @@ jobs:
             build/ci/ablac --version; sw_vers; xcodebuild -version
           } | tee "$RUNNER_TEMP/ios-package-candidate-evidence/compiler.txt"
           echo "ABLA_SYSROOT=$PWD" >> "$GITHUB_ENV"
-          printf '%s\n' "$PWD/build/ci" "$(brew --prefix llvm@23)/bin" "$(brew --prefix lld@23)/bin" "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+          printf '%s\n' "$PWD/build/ci" >> "$GITHUB_PATH"
       - name: Resolve public packages before any One or Mobile checkout exists
         shell: bash
         run: |
