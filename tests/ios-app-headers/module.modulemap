@@ -1,4 +1,0 @@
-module AblaApp {
-    header "abla_ios_application.h"
-    export *
-}

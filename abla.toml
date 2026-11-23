@@ -1,6 +1,7 @@
 name = "abla-one"
 version = "0.0.1"
 entry = "src/one.ab"
+compileCapabilities = ["filesystem.read", "filesystem.write"]
 
 # Development lock seed for optional backends. Keep exactly aligned with
 # src/mobile_source.ab; package subpath consumers discover that provider there.

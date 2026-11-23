@@ -1,19 +1,34 @@
 // Real application plus staged packaging, separate from the slices-only
 // fixture. Build on macOS with Xcode. Paths are read against this file and must
-// stay inside abla-one (Abla v0.2.67, #1044), so the application headers are a
-// copy of abla-mobile's runtime/ios-host/AppHeaders at the revision pinned in
-// src/mobile_source.ab; refresh tests/ios-app-headers when that pin moves.
+// stay inside abla-one (Abla v0.2.67, #1044). The application headers are
+// abla-mobile's runtime/ios-host/AppHeaders at the revision abla.lock pins,
+// read from the locked package (compilerReadDependencyFile) and staged in the
+// build directory: no copy to keep in step with the pin.
+import "abla/compiler"
 import "abla/ios/build"
 import "../src/mobile_source.ab"
 import importSubpath(oneMobileSource(), "ios_slices")
 
+#compilerGrant("filesystem.read")
+#compilerGrant("filesystem.write")
+
+compile fun stageApplicationHeaders(): bool {
+    val source = "runtime/ios-host/AppHeaders"
+    val headers = "../build/ios-real-app/headers"
+    for (name in ["abla_ios_application.h", "module.modulemap"]) {
+        if (!compilerWriteFile("$headers/$name", compilerReadDependencyFile("abla-mobile", "$source/$name"))) return false
+    }
+    true
+}
+
 compile fun buildXcframeworkFixture(): bool {
     val output = "../build/ios-real-app"
+    if (!stageApplicationHeaders()) return false
     if (!mobileBuildIosSlices("one-ios-fixture", "ios_backend_exports.ab", output)) return false
     iosCreateXcframework(
         "$output/AblaApp.xcframework",
         ["$output/ios-arm64/libabla_app.a", "$output/ios-arm64-simulator/libabla_app.a"],
-        "ios-app-headers"
+        "$output/headers"
     )
 }
 
