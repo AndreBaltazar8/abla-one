@@ -67,9 +67,8 @@ and server at the same SDK revision as described above.
 
 ## Tests
 
-Fresh provider preparation requires ablac0.2.48 (the relative package-path cycle
-fix; exact candidate99aa427d was used before release). Prepare the locked
-development dependencies with `ablac package update --project .`
+The provider and iOS verification workflows use released ablac 0.2.67. Prepare
+the locked development dependencies with `ablac package update --project .`
 before a fresh checkout's host tests. Optional mobile backends use the immutable
 provider in `src/mobile_source.ab`; the development manifest seeds that same
 dependency without importing its runtime into the web/core entry. When changing
@@ -118,7 +117,9 @@ change does not change the return type of `$remoteDecode`.
 
 ## Android toolchain
 
-Abla One needs the current compiler (generics, the runtime written in Abla), so its Android builds use the installed `ablac` (v0.2.22) with that release's runtime sources, exported once into `build/abla-runtime-v0.2.22`. abla-mobile's native CMake detects which runtime model it is given; projects still on the older pinned toolchain keep building unchanged.
+The Android build uses the installed `ablac` for application code. The native
+CMake bridge uses a legacy v0.2.22 runtime source snapshot, exported once into
+`build/abla-runtime-v0.2.22`.
 
 ## License
 

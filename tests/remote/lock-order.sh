@@ -34,6 +34,7 @@ entry() {
   printf 'import "%s.ab"\nimport "%s.ab"\n' "$1" "$2" > "$work/app/server.ab"
   cat >> "$work/app/server.ab" <<'AB'
 import "../src/server/lock.ab"
+import "abla/compiler"
 #compilerGrant("filesystem.read")
 #compilerGrant("filesystem.write")
 compile fun record(): void { oneServerLock("server.lock"); return }

@@ -29,6 +29,7 @@ source_file() {
 @server
 fun wide(value: Wide): Wide = value
 import "../src/server/lock.ab"
+import "abla/compiler"
 #compilerGrant("filesystem.read")
 #compilerGrant("filesystem.write")
 compile fun record(): void { oneServerLock("server.lock"); return }

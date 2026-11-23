@@ -7,6 +7,8 @@ ablac=$(realpath -s "${ABLAC:-../ablac/build/ablac}")
 work=$(mktemp -d)
 pid=0; failed=0
 trap 'rm -rf "$work"; [ "$pid" != 0 ] && kill "$pid" 2>/dev/null' EXIT
+# The copied application imports the same UI sibling as the repository.
+ln -s "$(dirname "$PWD")/abla-ui" "$work/abla-ui" || exit 1
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', expected '$3'"; failed=1; fi; }
 
 copy() { rm -rf "$work/p"; mkdir -p "$work/p/tests"; cp -r src "$work/p/"; cp -r tests/remote "$work/p/tests/"; cp tests/port.ab "$work/p/tests/"; }

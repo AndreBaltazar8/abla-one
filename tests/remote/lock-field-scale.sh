@@ -26,6 +26,7 @@ export ABLA_CACHE_DIR="$work/cache"
 @server
 fun wide(a: Wide0, b: Wide1, c: Wide2, d: Wide3): Wide0 = a
 import "../src/server/lock.ab"
+import "abla/compiler"
 #compilerGrant("filesystem.read")
 #compilerGrant("filesystem.write")
 compile fun canonical(): void { oneServerLock("canonical.lock"); return }

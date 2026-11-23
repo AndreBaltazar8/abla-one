@@ -1,4 +1,5 @@
 import "abla/compiler"
+import "abla/text"
 import "../../../src/server/remote.ab"
 compile fun largeProbe(): void {
     var source = OneRemoteSource("", [], [], oneRemotePrefixes(), [], [], [], indexed = true)

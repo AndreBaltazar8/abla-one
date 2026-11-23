@@ -14,6 +14,8 @@ mkdir "$work/app"
 cp "$repo/tests/remote/app/abla.toml" "$work/app/abla.toml"
 cat > "$work/app/server.ab" <<'AB'
 import "../src/server/lock.ab"
+import "../src/server/lock_index.ab"
+import "abla/compiler"
 #compilerGrant("filesystem.read")
 #compilerGrant("filesystem.write")
 compile fun byteLessOracle(left: string, right: string): bool {

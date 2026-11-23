@@ -20,6 +20,7 @@ export ABLA_CACHE_DIR="$work/cache"
     done
     cat <<'AB'
 import "../src/server/lock.ab"
+import "abla/compiler"
 #compilerGrant("filesystem.read")
 #compilerGrant("filesystem.write")
 compile fun canonical(): void { oneServerLock("canonical.lock"); return }

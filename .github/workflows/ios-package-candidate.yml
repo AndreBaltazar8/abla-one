@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: AndreBaltazar8/ablac
-          ref: 99aa427d0269605ecdfc620218355e41cff06a2e
+          ref: 36634a91818ab18a1173ef3ccfd1db0feef4fff1
           path: ablac
           persist-credentials: false
       - name: Build exact candidate with the upstream macOS toolchain
@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/ios-package-candidate-evidence"
-          test "$(git rev-parse HEAD)" = 99aa427d0269605ecdfc620218355e41cff06a2e
+          test "$(git rev-parse HEAD)" = 36634a91818ab18a1173ef3ccfd1db0feef4fff1
           brew install --force-bottle llvm@23 lld@23 openssl@3 binaryen
           export PATH="$(brew --prefix llvm@23)/bin:$(brew --prefix lld@23)/bin:$(brew --prefix openssl@3)/bin:$PATH"
           tools/bootstrap-compiler.sh build/ci/bootstrap-ablac
@@ -66,7 +66,8 @@ jobs:
           fun main: int = mobileIosApplicationProtocolVersion() - 1
           EOF
           ablac package update --project . 2>&1 | tee "$RUNNER_TEMP/ios-package-candidate-evidence/package-resolution.log"
-          ablac build main.ab --emit object -o consumer.o --fast --no-cache \
+          # These fixed public package revisions predate strict imports.
+          ablac build main.ab --emit object -o consumer.o --fast --no-cache --flat-imports \
             2>&1 | tee "$RUNNER_TEMP/ios-package-candidate-evidence/package-build.log"
           nm -gU consumer.o > "$RUNNER_TEMP/ios-package-candidate-evidence/consumer-symbols.txt"
           test "$(grep -c ' _abla_mobile_application_protocol_version$' "$RUNNER_TEMP/ios-package-candidate-evidence/consumer-symbols.txt")" = 1
@@ -75,6 +76,18 @@ jobs:
         with:
           path: abla-one
           fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: AndreBaltazar8/abla-ui
+          ref: 467e1ee22de8b159250d62d961e5c0a3ea89c58c
+          path: abla-ui
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: AndreBaltazar8/abla-graphics
+          ref: 0b37b34f557274c4c9a85698b60d96e3dfd06254
+          path: abla-graphics
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -87,7 +100,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code 0ab017ff459d71c603c0b649cdd5739b3bae8ef6 HEAD -- src tests abla.toml abla.lock
+          git diff --exit-code 00b31de0282d7c3d51ee00361086901687cb8071 HEAD -- src abla.toml abla.lock
           ablac package update --project .
           cp abla.lock "$RUNNER_TEMP/ios-package-candidate-evidence/one-development.lock"
           if git ls-files --error-unmatch abla.lock >/dev/null 2>&1; then

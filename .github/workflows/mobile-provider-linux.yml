@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: AndreBaltazar8/ablac
-          ref: 99aa427d0269605ecdfc620218355e41cff06a2e
+          ref: 36634a91818ab18a1173ef3ccfd1db0feef4fff1
           path: ablac
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -26,10 +26,22 @@ jobs:
           path: abla-one
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: AndreBaltazar8/abla-ui
+          ref: 467e1ee22de8b159250d62d961e5c0a3ea89c58c
+          path: abla-ui
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: AndreBaltazar8/abla-graphics
+          ref: 0b37b34f557274c4c9a85698b60d96e3dfd06254
+          path: abla-graphics
+          persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: AndreBaltazar8/abla-mobile
-          ref: 6d9cfaf574031729d2426565c47bad9c20712a47
+          ref: 66cf8491101fa50e51075dbc9ae5b550ee251dac
           path: abla-mobile
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
@@ -41,7 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/mobile-provider-linux-evidence"
-          test "$(git rev-parse HEAD)" = 99aa427d0269605ecdfc620218355e41cff06a2e
+          test "$(git rev-parse HEAD)" = 36634a91818ab18a1173ef3ccfd1db0feef4fff1
           nix-shell shell.nix --run 'make ablac' 2>&1 | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/compiler-build.log"
           { git rev-parse HEAD; sha256sum build/ablac; build/ablac --version; } \
             | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/compiler.txt"
@@ -50,7 +62,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code 0ab017ff459d71c603c0b649cdd5739b3bae8ef6 HEAD -- src tests abla.toml abla.lock
+          git diff --exit-code 00b31de0282d7c3d51ee00361086901687cb8071 HEAD -- src abla.toml abla.lock
           export ABLA_SYSROOT="$GITHUB_WORKSPACE/ablac"
           nix-shell ../ablac/shell.nix --run '"$GITHUB_WORKSPACE/ablac/build/ablac" package update --project .'
           cp abla.lock "$RUNNER_TEMP/mobile-provider-linux-evidence/one-development.lock"
@@ -63,7 +75,7 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/one-default.log"
           make test-remote ABLAC="$GITHUB_WORKSPACE/ablac/build/ablac" \
             2>&1 | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/one-remote.log"
-      - name: Exercise unchanged Mobile core and native queues
+      - name: Exercise Mobile core and native queues
         working-directory: abla-mobile
         shell: bash
         run: |

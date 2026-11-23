@@ -22,6 +22,7 @@ for ((i=80;i<84;i++)); do
 done >> "$work/app/server.ab"
 cat >> "$work/app/server.ab" <<'AB'
 import "../src/server/remote.ab"
+import "abla/compiler"
 #compilerGrant("filesystem.write")
 compile fun equalCacheStrings(left: array<string>, right: array<string>): bool {
     if (left.size != right.size) return false
