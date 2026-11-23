@@ -1,17 +1,19 @@
 // Real application plus staged packaging, separate from the slices-only
-// fixture. Build from the repository root on macOS with Xcode.
+// fixture. Build on macOS with Xcode. Paths are read against this file and must
+// stay inside abla-one (Abla v0.2.67, #1044), so the application headers are a
+// copy of abla-mobile's runtime/ios-host/AppHeaders at the revision pinned in
+// src/mobile_source.ab; refresh tests/ios-app-headers when that pin moves.
 import "abla/ios/build"
 import "../src/mobile_source.ab"
 import importSubpath(oneMobileSource(), "ios_slices")
 
 compile fun buildXcframeworkFixture(): bool {
-    val output = "build/ios-real-app"
-    if (!mobileBuildIosSlices("one-ios-fixture", "ios_backend_exports.ab", "../$output")) return false
-    // v0.2.66 resolves the archive build relative to this file and packaging relative to the working directory.
+    val output = "../build/ios-real-app"
+    if (!mobileBuildIosSlices("one-ios-fixture", "ios_backend_exports.ab", output)) return false
     iosCreateXcframework(
         "$output/AblaApp.xcframework",
         ["$output/ios-arm64/libabla_app.a", "$output/ios-arm64-simulator/libabla_app.a"],
-        "../abla-mobile/runtime/ios-host/AppHeaders"
+        "ios-app-headers"
     )
 }
 
