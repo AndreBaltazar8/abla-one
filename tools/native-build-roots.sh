@@ -11,6 +11,10 @@ one_native_tree=${ABLA_NATIVE_TREE:-$one_project_root/build/native-tree}
 mkdir -p "$one_project_root/build"
 "$ABLAC" build "$one_project_root/tools/check-native-build-roots.ab" -o "$one_project_root/build/check-native-build-roots" --fast
 "$one_project_root/build/check-native-build-roots" "$one_project_root" --self-test
+if [[ ${1:-} == android ]]; then
+    ABLA_MOBILE_ROOT=$(cd "$ABLA_MOBILE_ROOT" && pwd -P)
+    return
+fi
 "$one_project_root/build/check-native-build-roots" mirror "$one_project_root" "$one_native_tree/abla-one"
 for one_sdk in MOBILE GRAPHICS XML; do
     one_root_var="ABLA_${one_sdk}_ROOT"

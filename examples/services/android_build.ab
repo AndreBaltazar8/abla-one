@@ -1,5 +1,6 @@
-import "../../../abla-mobile/src/android_build.ab"
-// Built from this directory by tools/build-android.sh. This test-only app permits
+import "build/mobile-sdk/src/android_build.ab"
+
+// Built under the repository manifest by tools/build-android.sh. This test-only app permits
 // loopback HTTP through adb reverse; real applications keep cleartext disabled.
 val galleryAndroid = #mobileBuildAndroid(MobileAndroidConfiguration(
     "abla-one-services", "android.ab", "android/android-app", "debug",

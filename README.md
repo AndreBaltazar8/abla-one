@@ -117,9 +117,11 @@ change does not change the return type of `$remoteDecode`.
 
 ## Android toolchain
 
-The Android build uses the installed `ablac` for application code. The native
-CMake bridge uses a legacy v0.2.22 runtime source snapshot, exported once into
-`build/abla-runtime-v0.2.22`.
+Build the gallery APK with `make gallery-android ABLAC="$(command -v ablac)"`.
+The gallery and services examples use the repository manifest and lock, which
+grant `trusted.native` to the pinned Abla Mobile backend. Their generated
+Android files stay under their own `android/android-app/build` directories.
+Abla 0.2.70 builds the application objects with the runtime included.
 
 ## License
 
@@ -130,12 +132,12 @@ Mozilla Public License 2.0. See [LICENSE](LICENSE).
 Native build entry points select dependency roots once and pass them to source
 imports, host Gradle and CMake. Set `ABLA_COMPILER_SOURCE_ROOT` for the compiler
 checkout/shell and `ABLA_COMPILER_ROOT` for a selected runtime archive; `ABLAC`
-selects the compiler executable; `ABLA_ANDROID_SHELL` can select a matching Android Nix shell. Mobile example scripts use the SDK containing
-the script itself. One's examples additionally accept `ABLA_MOBILE_ROOT`,
-`ABLA_GRAPHICS_ROOT` and `ABLA_XML_ROOT`, including prepared pinned snapshots.
-One stages source imports through `build/native-tree` so they agree with these
-selected roots. Direct Gradle calls must provide the selected roots too; no
-Gradle/CMake fallback searches neighboring checkouts.
+selects the compiler executable. The Android examples use `shell-android.nix`
+and take their build tooling and native host from `ABLA_MOBILE_ROOT`, including
+prepared SDK snapshots. Choose a Mobile SDK revision that matches `abla.lock`.
+Desktop stages imports through `build/native-tree` and also accepts
+`ABLA_GRAPHICS_ROOT` and `ABLA_XML_ROOT`. Direct Gradle calls must provide the
+selected SDK roots.
 
 `build/check-native-build-roots "$PWD" --self-test` rejects unselected sibling
 paths in active native build files. With CMake installed, `--configure-test`
