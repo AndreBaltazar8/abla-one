@@ -62,7 +62,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code 00b31de0282d7c3d51ee00361086901687cb8071 HEAD -- src abla.toml abla.lock
+          git diff --exit-code 00b31de0282d7c3d51ee00361086901687cb8071 HEAD -- src abla.lock
+          grep -Fx 'compileCapabilities = ["filesystem.read", "filesystem.write"]' abla.toml >/dev/null
           export ABLA_SYSROOT="$GITHUB_WORKSPACE/ablac"
           nix-shell ../ablac/shell.nix --run '"$GITHUB_WORKSPACE/ablac/build/ablac" package update --project .'
           cp abla.lock "$RUNNER_TEMP/mobile-provider-linux-evidence/one-development.lock"

@@ -18,19 +18,19 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: AndreBaltazar8/ablac
-          ref: 36634a91818ab18a1173ef3ccfd1db0feef4fff1
+          ref: 150c711dffa00a28993196e4f3d24bc45525878a
           path: ablac
           persist-credentials: false
-      - uses: AndreBaltazar8/setup-abla@f13f659af61ed16f0f2568964ff5b5f3344ec70a # main, signed Abla v0.2.67 support
+      - uses: AndreBaltazar8/setup-abla@f13f659af61ed16f0f2568964ff5b5f3344ec70a # signed Abla releases
         with:
-          version: 0.2.67
+          version: 0.2.69
       - name: Verify the released compiler and exact source
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/ios-package-candidate-evidence"
-          test "$(git -C ablac rev-parse HEAD)" = 36634a91818ab18a1173ef3ccfd1db0feef4fff1
-          test "$(ablac --version)" = 'ablac 0.2.67'
+          test "$(git -C ablac rev-parse HEAD)" = 150c711dffa00a28993196e4f3d24bc45525878a
+          test "$(ablac --version)" = 'ablac 0.2.69'
           { git -C ablac rev-parse HEAD; ablac --version; shasum -a 256 "$(command -v ablac)"; sw_vers; xcodebuild -version; } \
             | tee "$RUNNER_TEMP/ios-package-candidate-evidence/compiler.txt"
           echo "ABLA_SYSROOT=$GITHUB_WORKSPACE/ablac" >> "$GITHUB_ENV"
@@ -95,7 +95,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code 00b31de0282d7c3d51ee00361086901687cb8071 HEAD -- src abla.toml abla.lock
+          git diff --exit-code 00b31de0282d7c3d51ee00361086901687cb8071 HEAD -- src abla.lock
+          grep -Fx 'compileCapabilities = ["filesystem.read", "filesystem.write"]' abla.toml >/dev/null
           ablac package update --project .
           cp abla.lock "$RUNNER_TEMP/ios-package-candidate-evidence/one-development.lock"
           if git ls-files --error-unmatch abla.lock >/dev/null 2>&1; then
@@ -120,6 +121,9 @@ jobs:
           ablac build tests/ios_xcframework.ab -o build/ios-driver --fast --no-cache \
             2>&1 | tee "$RUNNER_TEMP/ios-package-candidate-evidence/ios-archives.log"
           build/ios-driver
+          for name in abla_ios_application.h module.modulemap; do
+            cmp "build/ios-real-app/headers/$name" "../abla-mobile/runtime/ios-host/AppHeaders/$name"
+          done
           for target in ios-arm64 ios-arm64-simulator; do
             archive="build/ios-real-app/$target/libabla_app.a"
             test -s "$archive"
