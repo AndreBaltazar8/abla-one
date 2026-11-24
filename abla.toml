@@ -7,3 +7,7 @@ compileCapabilities = ["filesystem.read", "filesystem.write"]
 # src/mobile_source.ab; package subpath consumers discover that provider there.
 [dependencies]
 abla-mobile = { git = "https://github.com/AndreBaltazar8/abla-mobile.git", rev = "6d9cfaf574031729d2426565c47bad9c20712a47" }
+
+# abla-mobile declares externs and trusted code (src/protocol.ab, src/platform.ab): a dependency may only with this line (decision #122 A, E_PACKAGE_TRUSTED_DENIED).
+[dependencyCompileCapabilities]
+abla-mobile = ["trusted.native"]
