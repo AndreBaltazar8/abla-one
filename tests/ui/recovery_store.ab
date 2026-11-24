@@ -35,7 +35,7 @@ fun proofWrite(id: string, row: Json): bool {
     val temporary = proofDirectory().child("$id.${linuxProcessId()}.next")
     temporary.writeText(jsonStringify(row)) && temporary.setPermissions(384) && temporary.moveTo(proofRow(id))
 }
-fun proofRelease(lock: FileLock): void { lock.release(); linuxSyscall1(3, lock.descriptor); return }
+trusted fun proofRelease(lock: FileLock): void { lock.release(); linuxSyscall1(3, lock.descriptor); return }
 // Explicit bound for trusted synthetic rows containing up to64 base64 chunks.
 val proofJsonLimits = JsonLimits(33554432,64,100000,25165824,10000,true)
 fun proofLoad(id: string): Json = jsonParse(proofRow(id).readText(),proofJsonLimits).value
