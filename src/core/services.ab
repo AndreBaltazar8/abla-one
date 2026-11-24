@@ -1,4 +1,5 @@
 import "abla/json"
+import "abla/array"
 import "routes.ab"
 
 // Platform effects (SPEC §9). Calls that produce a result return a request
@@ -152,11 +153,7 @@ class OneResponse(
 ) {
     fun hasFile(): bool = file.handle != ""
     // Files from a pickFiles completion.
-    fun files(): array<OneFile> {
-        val out: array<OneFile> = []
-        for (item in json().values) out.append(oneFileFrom(item))
-        out
-    }
+    fun files(): array<OneFile> = json().values.mapped { item -> oneFileFrom(item) }
     fun ok(): bool = valid && error == "" && status >= 200 && status < 300
     fun header(name: string): string = headers.getString(oneLowerAscii(name))
     fun json(): Json {

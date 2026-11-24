@@ -2,6 +2,7 @@ import "web_session.ab"
 import "web_recovery.ab"
 import "./web_recovery_store.ab"
 import "abla/json"
+import "abla/array"
 import "../core/ui.ab"
 import "abla/text"
 
@@ -75,8 +76,7 @@ fun oneCheckpointStringMap(map: Map<string, string>): Json {
 }
 
 fun oneCheckpoint(session: OneLiveSession, draft: Json): string {
-    val maps: array<Json> = []
-    for (map in session.maps) maps.append(oneCheckpointMap(map))
+    val maps = session.maps.mapped { map -> oneCheckpointMap(map) }
     jsonStringify(jsonObject(
         ["v", "app", "route", "entry", "epoch", "revision", "nextId", "storage", "maps", "fenceFrom", "frontier", "typed", "asked", "operations", "pickers", "shown", "width", "height", "canvas", "files", "effects"],
         [jsonInteger(1), draft, jsonString(session.queue.routes.current()), jsonInteger(session.queue.routes.entry()), jsonInteger(session.queue.routes.epoch), jsonInteger(session.revision), jsonInteger(session.queue.nextId), oneCheckpointStringMap(session.queue.storage), jsonArray(maps), jsonInteger(session.fence.from), jsonInteger(session.eventFrontier), jsonInteger(session.changeFrontier), jsonInteger(session.routeFrontier), oneLiveOperationCheckpoint(session.queue), oneCheckpointPickers(session), jsonInteger(session.shown), jsonInteger(session.width), jsonInteger(session.height), jsonBoolean(session.canvas), oneCheckpointFiles(session), oneCheckpointEffects(session)]))
