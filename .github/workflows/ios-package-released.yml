@@ -34,6 +34,21 @@ jobs:
           { git -C ablac rev-parse HEAD; ablac --version; shasum -a 256 "$(command -v ablac)"; sw_vers; xcodebuild -version; } \
             | tee "$RUNNER_TEMP/ios-package-candidate-evidence/compiler.txt"
           echo "ABLA_SYSROOT=$GITHUB_WORKSPACE/ablac" >> "$GITHUB_ENV"
+      - name: Adapt package-cache chmod for Abla v0.2.69 on macOS
+        shell: bash
+        run: |
+          # v0.2.69 puts the option separator after the mode. BSD chmod
+          # treats it as a filename. Keep the recursive permission check.
+          mkdir -p "$RUNNER_TEMP/abla-package-tools"
+          cat > "$RUNNER_TEMP/abla-package-tools/chmod" <<'EOF'
+          #!/bin/sh
+          if [ "$#" -eq 4 ] && [ "$1" = -R ] && [ "$2" = go-w ] && [ "$3" = -- ]; then
+            exec /bin/chmod -R -- go-w "$4"
+          fi
+          exec /bin/chmod "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/abla-package-tools/chmod"
+          echo "$RUNNER_TEMP/abla-package-tools" >> "$GITHUB_PATH"
       - name: Resolve public packages before any One or Mobile checkout exists
         shell: bash
         run: |
