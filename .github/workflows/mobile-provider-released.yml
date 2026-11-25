@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: AndreBaltazar8/ablac
-          ref: 36634a91818ab18a1173ef3ccfd1db0feef4fff1
+          ref: 0d3c4b0903cf7f21966c23d5ba60fc0c622a013d
           path: ablac
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: AndreBaltazar8/abla-ui
-          ref: 467e1ee22de8b159250d62d961e5c0a3ea89c58c
+          ref: 685114ce1d1d2aadf48235bfa42c1b68b86cd20e
           path: abla-ui
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -45,16 +45,16 @@ jobs:
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
         with:
           nix_path: nixpkgs=https://github.com/NixOS/nixpkgs/archive/6510408d147d8c5e6d76043e899e9251756f6a75.tar.gz
-      - uses: AndreBaltazar8/setup-abla@f13f659af61ed16f0f2568964ff5b5f3344ec70a # main, signed Abla v0.2.67 support
+      - uses: AndreBaltazar8/setup-abla@f13f659af61ed16f0f2568964ff5b5f3344ec70a # signed Abla releases
         with:
-          version: 0.2.67
+          version: 0.2.72
       - name: Verify the released compiler and exact source
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/mobile-provider-linux-evidence" ablac/build
-          test "$(git -C ablac rev-parse HEAD)" = 36634a91818ab18a1173ef3ccfd1db0feef4fff1
-          test "$(ablac --version)" = 'ablac 0.2.67'
+          test "$(git -C ablac rev-parse HEAD)" = 0d3c4b0903cf7f21966c23d5ba60fc0c622a013d
+          test "$(ablac --version)" = 'ablac 0.2.72'
           ln -s "$(command -v ablac)" ablac/build/ablac
           { git -C ablac rev-parse HEAD; ablac --version; sha256sum "$(command -v ablac)"; } \
             | tee "$RUNNER_TEMP/mobile-provider-linux-evidence/compiler.txt"

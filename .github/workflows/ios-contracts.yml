@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       compiler_version:
-        description: Released compiler containing the package-path cycle fix
+        description: Released compiler with generated copy methods and mapped arrays
         required: true
-        default: 0.2.67
+        default: 0.2.72
         type: string
 permissions:
   contents: read
@@ -19,7 +19,7 @@ jobs:
     steps:
       # Intentionally no repository checkout: relative workspace siblings must
       # not accidentally satisfy a broken public-package import.
-      - uses: AndreBaltazar8/setup-abla@f13f659af61ed16f0f2568964ff5b5f3344ec70a # main, signed Abla v0.2.67 support
+      - uses: AndreBaltazar8/setup-abla@f13f659af61ed16f0f2568964ff5b5f3344ec70a # signed Abla releases
         with:
           version: ${{ inputs.compiler_version || '0.2.67' }}
       - name: Lock and compile exact public package modules
@@ -69,7 +69,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: AndreBaltazar8/abla-ui
-          ref: 467e1ee22de8b159250d62d961e5c0a3ea89c58c
+          ref: 685114ce1d1d2aadf48235bfa42c1b68b86cd20e
           path: abla-ui
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -84,9 +84,9 @@ jobs:
           ref: 6d9cfaf574031729d2426565c47bad9c20712a47
           path: abla-mobile
           persist-credentials: false
-      - uses: AndreBaltazar8/setup-abla@f13f659af61ed16f0f2568964ff5b5f3344ec70a # main, signed Abla v0.2.67 support
+      - uses: AndreBaltazar8/setup-abla@f13f659af61ed16f0f2568964ff5b5f3344ec70a # signed Abla releases
         with:
-          version: ${{ inputs.compiler_version || '0.2.67' }}
+          version: ${{ inputs.compiler_version || '0.2.72' }}
       - name: Test existing contracts and the iOS encoder
         working-directory: abla-one
         shell: bash
