@@ -67,7 +67,7 @@ and server at the same SDK revision as described above.
 
 ## Tests
 
-The provider and iOS checks of the current source use released ablac 0.2.72. Prepare
+The provider and iOS checks of the current source use released ablac 0.2.73. Prepare
 the locked development dependencies with `ablac package update --project .`
 before a fresh checkout's host tests. Optional mobile backends use the immutable
 provider in `src/mobile_source.ab`; the development manifest seeds that same

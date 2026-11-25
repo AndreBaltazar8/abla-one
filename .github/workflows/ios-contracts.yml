@@ -7,7 +7,7 @@ on:
       compiler_version:
         description: Released compiler with generated copy methods and mapped arrays
         required: true
-        default: 0.2.72
+        default: 0.2.73
         type: string
 permissions:
   contents: read
@@ -75,7 +75,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: AndreBaltazar8/abla-graphics
-          ref: 0b37b34f557274c4c9a85698b60d96e3dfd06254
+          ref: f50d4c5123417dc3bf2538de52aecc4e7c86a863
           path: abla-graphics
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -86,7 +86,7 @@ jobs:
           persist-credentials: false
       - uses: AndreBaltazar8/setup-abla@f13f659af61ed16f0f2568964ff5b5f3344ec70a # signed Abla releases
         with:
-          version: ${{ inputs.compiler_version || '0.2.72' }}
+          version: ${{ inputs.compiler_version || '0.2.73' }}
       - name: Test existing contracts and the iOS encoder
         working-directory: abla-one
         shell: bash
