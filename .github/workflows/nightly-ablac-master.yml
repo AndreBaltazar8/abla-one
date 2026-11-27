@@ -59,7 +59,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: AndreBaltazar8/abla-graphics
-          ref: 2dff1620678cd1968e8c0d34017b038c8bf3d45d
+          ref: f60bc6aecefd870bcce5adf1359b393bee72e32d
           path: abla-graphics
           persist-credentials: false
       - name: Install Nix
