@@ -1000,8 +1000,62 @@ fun oneAtan2(y: f64, x: f64): f64 {
 
 // --- frames ----------------------------------------------------------------------------
 
+// A picture made to the size it's drawn at: width × height pixels, 0xRRGGBB words
+// four bytes each, little end first. Empty when there's none to draw.
+class OnePicture(val width: int, val height: int, val pixels: string)
+
+// Pictures (PNG, JPEG) by path, at the size of their box, cropped or fitted (`fit`)
+// already: a backend that can decode them sets one (desktop_pictures.ab).
+class OnePictureSource(val find: (string, int, int, string) -> OnePicture)
+
+val onePictureSources: array<OnePictureSource> = []
+
+fun onePictureFor(source: string, width: int, height: int, fit: string): OnePicture {
+    if (onePictureSources.size == 0) return OnePicture(0, 0, "")
+    val find = onePictureSources[0].find
+    find(source, width, height, fit)
+}
+
 // Icons by name: returns the SVG text (desktop reads files, tests embed them).
 class OneIconSource(val load: (string) -> string)
+
+// A picture in its box, its corners rounded to `radius`.
+fun oneDrawPicture(var surface: OneSurface, picture: OnePicture, x: int, y: int, radius: int): void {
+    if (picture.width <= 0 || picture.height <= 0 || picture.pixels.size < picture.width * picture.height * 4) return
+    val x0 = if (x > surface.clipLeft) x else surface.clipLeft
+    val y0 = if (y > surface.clipTop) y else surface.clipTop
+    val x1 = if (x + picture.width < surface.clipRight) x + picture.width else surface.clipRight
+    val y1 = if (y + picture.height < surface.clipBottom) y + picture.height else surface.clipBottom
+    val r = if (radius * 2 > picture.width) picture.width / 2 else if (radius * 2 > picture.height) picture.height / 2 else radius
+    var row = y0
+    while (row < y1) {
+        var column = x0
+        while (column < x1) {
+            val px = column - x
+            val py = row - y
+            var alpha = 255
+            if (r > 0) {
+                // In a corner: how much of the pixel is inside its arc.
+                val cx = if (px < r) r else if (px >= picture.width - r) picture.width - r - 1 else -1
+                val cy = if (py < r) r else if (py >= picture.height - r) picture.height - r - 1 else -1
+                if (cx >= 0 && cy >= 0) {
+                    val dx = f64FromInt(px - cx)
+                    val dy = f64FromInt(py - cy)
+                    val inside = f64FromInt(r) + 0.5 - oneSqrt(dx * dx + dy * dy)
+                    alpha = if (inside <= 0.0) 0 else if (inside >= 1.0) 255 else f64ToInt(inside * 255.0)
+                }
+            }
+            if (alpha > 0) {
+                val at = (py * picture.width + px) * 4
+                val color = picture.pixels[at] | (picture.pixels[at + 1] << 8) | (picture.pixels[at + 2] << 16)
+                surface.blend(column, row, color, alpha)
+            }
+            column = column + 1
+        }
+        row = row + 1
+    }
+    return
+}
 
 fun oneRasterFrame(frame: OneFrame, background: string, icons: OneIconSource): OneSurface {
     var surface = oneSurface(frame.width, frame.height, oneColorValue(background))
@@ -1080,6 +1134,9 @@ fun oneRasterInto(var surface: OneSurface, frame: OneFrame, icons: OneIconSource
         } else if (p.op == "image") {
             val svg = if (p.text.size > 0 && p.text[0] != 47 && p.text[0] != 46 && !oneStarts(p.text, "http")) icons.load(p.text) else ""
             if (svg != "") oneDrawSvgColors(surface, svg, p.x, p.y, p.w, p.h)
+            else if (p.text.size > 0 && p.text[0] == 47) {
+                oneDrawPicture(surface, onePictureFor(p.text, p.w, p.h, p.weight), p.x, p.y, p.radius)
+            }
         } else if (p.op == "clip") surface.pushClip(p.x, p.y, p.w, p.h)
         else if (p.op == "unclip") surface.popClip()
     }

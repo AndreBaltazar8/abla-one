@@ -3,6 +3,7 @@ import "abla/http/tls"
 import "abla/json"
 import "../layout/edit.ab"
 import "../raster/raster.ab"
+import "desktop_pictures.ab"
 import "web_live.ab"
 import "../layout/layout.ab"
 import "../core/node.ab"
@@ -303,6 +304,7 @@ trusted fun oneDesktopRun(var app: OneApp, theme: Theme, session: string, option
     oneUseEditing()
     // An icon's name may be the SVG itself, for an app that ships no icon directory.
     val icons = OneIconSource({ name -> if (oneStarts(name, "<svg")) name else linuxReadFile("${options.iconDir}/$name.svg", 65536) })
+    if (onePictureSources.size == 0) onePictureSources.append(OnePictureSource({ file, width, height, fit -> oneDesktopPicture(file, width, height, fit) }))
     oneLiveQueueList[oneLiveQueueIndex(session)].routes.start("/")
     var state = OneDesktopState(options.width, options.height, 0, 0, 0, 0, false, "", 0, "", true, Map(), Map(), oneLiveQueueList[oneLiveQueueIndex(session)].routes)
     var pixels = pixelBuffer(state.width, state.height)

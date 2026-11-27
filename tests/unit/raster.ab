@@ -1,3 +1,4 @@
+import "abla/bytes"
 import "abla/test"
 import "abla/fs"
 import "abla/sys/linux"
@@ -44,6 +45,31 @@ fun main: int {
     expectEqual(memory.byte(2), 3, "keeps every byte")
     expect(!memory.isClear(0, 8), "bytes that are set are not clear")
     expect(memory.isClear(8, 8), "the rest is")
+
+    // A picture, drawn as made, inside the clip, its corners rounded.
+    val bytes = byteBuffer()
+    var cell = 0
+    while (cell < 100) {
+        bytes.appendByteValue(0)
+        bytes.appendByteValue(0)
+        bytes.appendByteValue(255)
+        bytes.appendByteValue(0)
+        cell = cell + 1
+    }
+    val cells = bytes.toText()
+    var shown = oneSurface(20, 20, 16777215)
+    oneDrawPicture(shown, OnePicture(10, 10, cells), 5, 5, 0)
+    expectEqual(pixel(shown, 5, 5), 16711680, "a picture's pixels land where it's drawn")
+    expectEqual(pixel(shown, 4, 5), 16777215, "and not outside it")
+    var rounded = oneSurface(20, 20, 16777215)
+    oneDrawPicture(rounded, OnePicture(10, 10, cells), 5, 5, 5)
+    expectEqual(pixel(rounded, 5, 5), 16777215, "a rounded corner stays empty")
+    expectEqual(pixel(rounded, 10, 10), 16711680, "its middle is drawn")
+    var clipped = oneSurface(20, 20, 16777215)
+    clipped.pushClip(0, 0, 8, 20)
+    oneDrawPicture(clipped, OnePicture(10, 10, cells), 5, 5, 0)
+    expectEqual(pixel(clipped, 9, 9), 16777215, "a picture keeps to the clip")
+    oneDrawPicture(clipped, OnePicture(10, 10, "short"), 5, 5, 0)
 
     var s = oneSurface(40, 40, 16777215)
     var square = onePath()

@@ -1,0 +1,155 @@
+// Pictures on the desktop: PNG and JPEG files by path, decoded once with abla-graphics
+// and made to each size they're drawn at (raster.ab's OnePicture), averaging the pixels
+// each one covers so a large photo shrinks smoothly.
+
+import "abla/bytes"
+import "abla/sys/linux"
+import "../raster/raster.ab"
+import "../../../abla-graphics/src/gltf_image.ab"
+import "../../../abla-graphics/src/gltf_png.ab"
+import "../../../abla-graphics/src/gltf_jpeg.ab"
+
+// Larger files aren't read: a picture to look at, not a poster.
+val oneDesktopPictureBytes = 16777216
+// Decoded pictures and the sizes made of them, kept while the app runs.
+val oneDesktopPictureMost = 24
+
+class OneDesktopDecoded(val width: int, val height: int, val pixels: string)
+
+val oneDesktopDecodedKeys: array<string> = []
+val oneDesktopDecodedValues: array<OneDesktopDecoded> = []
+val oneDesktopSizedKeys: array<string> = []
+val oneDesktopSizedValues: array<OnePicture> = []
+
+// RGBA bytes, as raster.ab's 0xRRGGBB words; transparent pixels over white.
+trusted fun oneDesktopDecode(file: string): OneDesktopDecoded {
+    val bytes = linuxReadFile(file, oneDesktopPictureBytes)
+    if (bytes.size < 8) return OneDesktopDecoded(0, 0, "")
+    val png = bytes[0] == 137 && bytes[1] == 80 && bytes[2] == 78 && bytes[3] == 71
+    val jpeg = bytes[0] == 255 && bytes[1] == 216
+    if (!png && !jpeg) return OneDesktopDecoded(0, 0, "")
+    val payload = GltfImagePayload(bytes, if (png) "image/png" else "image/jpeg", true, "")
+    val decoded = if (png) gltfDecodePng(payload) else gltfDecodeJpeg(payload)
+    if (!decoded.valid()) return OneDesktopDecoded(0, 0, "")
+    val width = decoded.pixels.width
+    val height = decoded.pixels.height
+    val out = byteBuffer()
+    var index = 0
+    val count = width * height
+    while (index < count) {
+        val offset = index * 4
+        val alpha = decoded.pixels.storage.load(offset + 3)
+        val red = decoded.pixels.storage.load(offset)
+        val green = decoded.pixels.storage.load(offset + 1)
+        val blue = decoded.pixels.storage.load(offset + 2)
+        // Stored as blue, green, red: the word's low byte first.
+        out.appendByteValue((blue * alpha + 255 * (255 - alpha)) / 255)
+        out.appendByteValue((green * alpha + 255 * (255 - alpha)) / 255)
+        out.appendByteValue((red * alpha + 255 * (255 - alpha)) / 255)
+        out.appendByteValue(0)
+        index = index + 1
+    }
+    OneDesktopDecoded(width, height, out.toText())
+}
+
+fun oneDesktopDecoded(file: string): OneDesktopDecoded {
+    var index = 0
+    while (index < oneDesktopDecodedKeys.size) {
+        if (oneDesktopDecodedKeys[index] == file) return oneDesktopDecodedValues[index]
+        index = index + 1
+    }
+    if (oneDesktopDecodedKeys.size >= oneDesktopPictureMost) {
+        oneDesktopDecodedKeys.clear()
+        oneDesktopDecodedValues.clear()
+    }
+    val made = oneDesktopDecode(file)
+    oneDesktopDecodedKeys.append(file)
+    oneDesktopDecodedValues.append(made)
+    made
+}
+
+// The picture at width × height: covering the box, cropped at its middle, or (`fit`) all
+// of it inside, the rest white.
+fun oneDesktopSize(source: OneDesktopDecoded, width: int, height: int, fit: string): OnePicture {
+    if (source.width <= 0 || width <= 0 || height <= 0 || width * height > 16777216) return OnePicture(0, 0, "")
+    val contain = fit == "fit" || fit == "contain"
+    // The part of the picture shown, in its own pixels, and where it lands in the box.
+    var shownW = source.width
+    var shownH = source.height
+    var boxX = 0
+    var boxY = 0
+    var boxW = width
+    var boxH = height
+    if (contain) {
+        if (source.width * height > source.height * width) boxH = source.height * width / source.width
+        else boxW = source.width * height / source.height
+        boxX = (width - boxW) / 2
+        boxY = (height - boxH) / 2
+    } else if (source.width * height > source.height * width) shownW = source.height * width / height
+    else shownH = source.width * height / width
+    val left = (source.width - shownW) / 2
+    val top = (source.height - shownH) / 2
+    val out = byteBuffer()
+    var y = 0
+    while (y < height) {
+        var x = 0
+        while (x < width) {
+            if (x < boxX || y < boxY || x >= boxX + boxW || y >= boxY + boxH || boxW <= 0 || boxH <= 0) {
+                out.appendByteValue(255)
+                out.appendByteValue(255)
+                out.appendByteValue(255)
+                out.appendByteValue(0)
+            } else {
+                // The source pixels under this one, averaged.
+                val sx0 = left + (x - boxX) * shownW / boxW
+                val sy0 = top + (y - boxY) * shownH / boxH
+                var sx1 = left + (x - boxX + 1) * shownW / boxW
+                var sy1 = top + (y - boxY + 1) * shownH / boxH
+                if (sx1 <= sx0) sx1 = sx0 + 1
+                if (sy1 <= sy0) sy1 = sy0 + 1
+                var blue = 0
+                var green = 0
+                var red = 0
+                var count = 0
+                var sy = sy0
+                while (sy < sy1 && sy < source.height) {
+                    var sx = sx0
+                    while (sx < sx1 && sx < source.width) {
+                        val at = (sy * source.width + sx) * 4
+                        blue = blue + source.pixels[at]
+                        green = green + source.pixels[at + 1]
+                        red = red + source.pixels[at + 2]
+                        count = count + 1
+                        sx = sx + 1
+                    }
+                    sy = sy + 1
+                }
+                if (count == 0) count = 1
+                out.appendByteValue(blue / count)
+                out.appendByteValue(green / count)
+                out.appendByteValue(red / count)
+                out.appendByteValue(0)
+            }
+            x = x + 1
+        }
+        y = y + 1
+    }
+    OnePicture(width, height, out.toText())
+}
+
+fun oneDesktopPicture(file: string, width: int, height: int, fit: string): OnePicture {
+    val key = "$file|$width|$height|$fit"
+    var index = 0
+    while (index < oneDesktopSizedKeys.size) {
+        if (oneDesktopSizedKeys[index] == key) return oneDesktopSizedValues[index]
+        index = index + 1
+    }
+    if (oneDesktopSizedKeys.size >= oneDesktopPictureMost) {
+        oneDesktopSizedKeys.clear()
+        oneDesktopSizedValues.clear()
+    }
+    val made = oneDesktopSize(oneDesktopDecoded(file), width, height, fit)
+    oneDesktopSizedKeys.append(key)
+    oneDesktopSizedValues.append(made)
+    made
+}
