@@ -628,16 +628,30 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
 // "profile"/"emoji" carry the normalized image as base64 text, "files" one
 // raw file per request (X-One-Name, Content-Type; X-One-Last on the final
 // one), "cancel" an empty body.
+// An upload answers only a picker the session opened (queue.pickers) and has not been answered, of the kind it was opened as: any other id
+// could be one of the session's own requests (a fetch, a timer), which the client must not complete. A normalized image is at most
+// oneLivePickedImageLimit bytes, and a session holds at most oneLiveFileBytesLimit bytes of uploaded files.
+val oneLivePickedImageLimit = 65536
+val oneLiveFileBytesLimit = 67108864
+
 fun OneLiveServer.upload(request: HttpRequest): HttpResponse {
     val index = findSession(request.queryParameter("s"))
     if (index < 0) return httpText("unknown session", 404)
     val id = oneParseInt(request.queryParameter("id"), 0)
     val kind = request.queryParameter("kind")
+    val picker = sessions[index].queue.pickerKind(id)
+    if (picker == "" || (kind != "cancel" && kind != picker)) {
+        return httpText("no such file picker", 409)
+    }
     if (kind == "cancel") {
+        sessions[index].queue.closePicker(id)
         sessions[index].queue.complete(oneResponsePayload(id, 204, if (request.queryParameter("files") == "1") "[]" else "", ""))
     } else if (kind == "profile" || kind == "emoji") {
+        if (request.body.size > oneLivePickedImageLimit) return httpText("image too large", 413)
+        sessions[index].queue.closePicker(id)
         sessions[index].queue.complete(oneResponsePayload(id, 200, request.body, ""))
     } else {
+        if (sessions[index].queue.heldFileBytes() + request.body.size > oneLiveFileBytesLimit) return httpText("uploaded files too large", 413)
         val handle = "file-${oneLiveSessionId()}"
         val info = jsonObject(["handle", "name", "size", "mime"], [jsonString(handle), jsonString(oneUrlDecode(request.header("x-one-name"))), jsonInteger(request.body.size), jsonString(if (request.header("content-type") != "") request.header("content-type") else "application/octet-stream")])
         sessions[index].queue.addFile(handle, request.body, jsonStringify(info))
@@ -655,6 +669,7 @@ fun OneLiveServer.upload(request: HttpRequest): HttpResponse {
                 }
                 i = i + 1
             }
+            sessions[index].queue.closePicker(id)
             sessions[index].queue.complete(oneResponsePayload(id, 200, jsonStringify(jsonArray(files)), ""))
         }
         return HttpResponse(200, [HttpHeader("Content-Type", "text/plain"), HttpHeader("Cache-Control", "no-store")], handle)

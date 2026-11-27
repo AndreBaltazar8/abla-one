@@ -1,0 +1,63 @@
+import "abla/http"
+import "abla/net"
+import "abla/test"
+import "abla/text"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+import "../../src/backends/web_session.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
+import "../../src/kit/theme.ab"
+
+// /one/upload answers only a file picker the session opened and has not been answered, of the kind it was opened as: an upload for any
+// other request id (one of the session's own requests) is refused and completes nothing. A normalized image is bounded.
+class UploadProbe : OneApp {
+    fun render(var ui: Ui): Node = text("uploads",style())
+    fun receive(kind: string,payload: string): void { return }
+}
+fun uploadFactory(request: HttpRequest,id: string): OneApp = UploadProbe()
+fun uploadHandler(request: HttpRequest): HttpResponse = httpText("handler")
+fun uploadPage(request: HttpRequest): bool = request.path=="/"
+
+fun post(session: string,query: string,body: string,last: bool = false): HttpRequest =
+    httpParseRequest("POST /one/upload?s=$session&$query HTTP/1.1\r\nHost: local\r\nContent-Length: ${body.size}\r\n${if (last) "X-One-Last: 1\r\nX-One-Name: a.txt\r\n" else ""}\r\n$body")
+
+fun completions(session: string): int = oneLiveQueueList[oneLiveQueueIndex(session)].completions.size
+
+fun main: int {
+    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),uploadHandler,uploadPage,uploadFactory,oneDefaultTheme(),OneLiveOptions("Uploads","en","#fff","/i","src/backends/web/host.js",""))
+    server.page(httpGet("/"))
+    expect(server.sessions.size==1,"a page opened a session")
+    val id=server.sessions[0].id
+    val services=oneLiveServices(id)
+    // No picker open: a forged upload for some request id is refused and answers nothing.
+    for(query in ["id=7&kind=profile","id=7&kind=files","id=7&kind=cancel","id=0&kind=emoji"]){
+        val forged=server.upload(post(id,query,"forged"))
+        expectEqual(forged.status,409,"no picker: $query refused")
+    }
+    expectEqual(completions(id),0,"a forged upload completes nothing")
+    // An open profile picker is answered once, by its own kind only.
+    val profile=services.pickImage("profile")
+    expectEqual(server.upload(post(id,"id=$profile&kind=files","x",true)).status,409,"a files upload cannot answer a profile picker")
+    expectEqual(server.upload(post(id,"id=$profile&kind=profile","x".repeat(70000))).status,413,"an image past the bound is refused")
+    expectEqual(server.upload(post(id,"id=$profile&kind=profile","jpeg")).status,204,"the profile picker is answered")
+    expectEqual(completions(id),1,"one completion")
+    expectEqual(server.upload(post(id,"id=$profile&kind=profile","again")).status,409,"an answered picker takes nothing more")
+    // A files picker: its files, then the last one answers it.
+    val files=services.pickFiles(["text/plain"],true)
+    expectEqual(server.upload(post(id,"id=$files&kind=files","one",true)).status,200,"the files picker takes its file")
+    expectEqual(server.upload(post(id,"id=$files&kind=files","two",true)).status,409,"and nothing after its last")
+    // Cancel closes a picker.
+    val cancelled=services.pickImage("emoji")
+    expectEqual(server.upload(post(id,"id=$cancelled&kind=cancel","")).status,204,"a cancel answers the picker")
+    expectEqual(server.upload(post(id,"id=$cancelled&kind=emoji","late")).status,409,"a cancelled picker takes nothing")
+    // At most four open pickers: the fifth is answered 429 at once and no upload can answer it.
+    val before=completions(id)
+    val open=[services.pickFiles([],false),services.pickFiles([],false),services.pickFiles([],false),services.pickFiles([],false)]
+    val fifth=services.pickFiles([],false)
+    expectEqual(completions(id),before+1,"the fifth picker is refused at once")
+    expectEqual(server.upload(post(id,"id=$fifth&kind=files","x",true)).status,409,"the refused picker takes no upload")
+    expect(open.size==4,"four open")
+    testsPassed()
+}

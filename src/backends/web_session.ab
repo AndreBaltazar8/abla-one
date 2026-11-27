@@ -4,6 +4,7 @@ import "abla/process/time"
 import "../one.ab"
 import "web_document.ab"
 import "web_recovery_store.ab"
+import "./web_recovery.ab"
 import "../layout/paint.ab"
 import "../core/routes.ab"
 import "../core/services.ab"
@@ -65,7 +66,10 @@ class OneLiveQueue(
     var eventOrdinal: int = 0,
     val requestContexts: Map<int, string> = Map(),
     // Text to copy, for a window with no page to do it (the desktop).
-    val copies: array<string> = []
+    val copies: array<string> = [],
+    // The file pickers this session opened and has not been answered (request id to kind: "files", "profile", "emoji"). /one/upload
+    // answers only these, so a client cannot complete another of the session's requests (a fetch, a timer) with bytes of its choosing.
+    val pickers: Map<int, string> = Map()
 ) {
     fun takeCopies(): array<string> {
         val out: array<string> = []
@@ -126,6 +130,25 @@ class OneLiveQueue(
         for (item in outbox) out.append(item)
         outbox.clear()
         out
+    }
+    // Records an open file picker; false past oneRecoveryPickerLimit open ones (the recovery store's bound, here for live sessions too).
+    fun openPicker(id: int, kind: string): bool {
+        if (pickers.has(id)) return pickers.get(id) == kind
+        if (pickers.keys().size >= oneRecoveryPickerLimit) return false
+        pickers.set(id, kind)
+        true
+    }
+    // The kind of the open picker `id`, or "" when the session has none by that id.
+    fun pickerKind(id: int): string = pickers.get(id) ?? ""
+    fun closePicker(id: int): void {
+        pickers.remove(id)
+        return
+    }
+    // The uploaded bytes the session holds (bounded by oneLiveFileBytesLimit).
+    fun heldFileBytes(): int {
+        var total = 0
+        for (handle in fileBytes.keys()) total = total + (fileBytes.get(handle) ?? "").size
+        total
     }
     fun addFile(handle: string, bytes: string, info: string): void {
         fileBytes.set(handle, bytes)
@@ -323,6 +346,7 @@ class OneLiveServices(val session: string) : OneServices {
     fun pickFiles(mime: array<string>, multiple: bool): int {
         val id = nextId()
         if (!oneRecoveryPickerBegin(session, id, "files")) return complete(id, 429, "", "Too many pending file pickers")
+        if (!oneRecoverySessions.has(session) && !oneLiveQueueList[oneLiveQueueIndex(session)].openPicker(id, "files")) return complete(id, 429, "", "Too many pending file pickers")
         val types: array<Json> = []
         for (item in mime) types.append(jsonString(item))
         oneLiveQueueList[oneLiveQueueIndex(session)].toPage(jsonStringify(jsonObject(["t", "id", "kind", "accept", "multiple"], [jsonString("pick"), jsonInteger(id), jsonString("files"), jsonArray(types), jsonBoolean(multiple)])))
@@ -359,6 +383,7 @@ class OneLiveServices(val session: string) : OneServices {
     fun pickImage(kind: string): int {
         val id = nextId()
         if (!oneRecoveryPickerBegin(session, id, if (kind == "emoji") "emoji" else "profile")) return complete(id, 429, "", "Too many pending file pickers")
+        if (!oneRecoverySessions.has(session) && !oneLiveQueueList[oneLiveQueueIndex(session)].openPicker(id, if (kind == "emoji") "emoji" else "profile")) return complete(id, 429, "", "Too many pending file pickers")
         oneLiveQueueList[oneLiveQueueIndex(session)].toPage(jsonStringify(jsonObject(["t", "id", "kind", "accept", "multiple"], [jsonString("pick"), jsonInteger(id), jsonString(if (kind == "emoji") "emoji" else "profile"), jsonArray([jsonString("image/*")]), jsonBoolean(false)])))
         id
     }
