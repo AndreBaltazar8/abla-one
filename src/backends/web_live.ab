@@ -65,7 +65,11 @@ class OneLiveOptions(
     val head: string,
     // The first-layout connection state, outside the app while it is held.
     val connectionText: string = "Connecting…",
-    val reloadText: string = "Reload"
+    val reloadText: string = "Reload",
+    // The sessions the server keeps at most (0: no bound). Past it, a new page ends the session that has gone longest without a socket
+    // (its tab closed or never connected), so idle sessions cannot pile up from a flood of page loads; a session with a socket is never ended
+    // for room, and a new page is never refused for it.
+    val maximumSessions: int = oneLiveDefaultMaximumSessions
 )
 
 // Seeds a new session's secure storage from the page request, and maps stored
@@ -713,6 +717,26 @@ fun oneLiveFontName(name: string): bool = name == "Inter-400.ttf" || name == "In
 // current state, at the route the request names: a new session starts there, and
 // one resumed at another route (a URL typed in the same tab) moves there. Resuming
 // asks `storage.resumes` first. A resumed session's app hears `receive("pageLoad", "")`, before the page renders.
+// OneLiveOptions.maximumSessions' default: room for many open tabs on one server, far below what a flood of page loads would leave.
+val oneLiveDefaultMaximumSessions = 4096
+
+// Before a new session: while the server holds maximumSessions or more, the session that has gone longest without a socket ends (endSession).
+// Sessions with a socket are not ended for room (they are bounded by the connections); if every session has one, nothing ends.
+fun OneLiveServer.makeRoomForSession(): void {
+    val limit = options.maximumSessions
+    while (limit > 0 && sessions.size >= limit) {
+        var oldest = -1
+        var i = 0
+        while (i < sessions.size) {
+            if (sessions[i].slot < 0 && (oldest < 0 || sessions[i].lastSeen < sessions[oldest].lastSeen)) oldest = i
+            i = i + 1
+        }
+        if (oldest < 0) return
+        endSession(oldest)
+    }
+    return
+}
+
 fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     val route = oneLiveRoute(request)
     var index = if (recovery.enabled) -1 else resumable(request, oneLiveCookie(request, "one_resume"))
@@ -720,6 +744,7 @@ fun OneLiveServer.page(request: HttpRequest): HttpResponse {
     // SSR stays readable and starts fresh; a reloaded tab presents its opaque
     // claim over the authenticated WebSocket before any controls are accepted.
     if (index < 0) {
+        makeRoomForSession()
         val id = oneLiveSessionId()
         val queueIndex = oneLiveQueueIndex(id)
         val seeded = storage.seed(request)

@@ -57,6 +57,12 @@ can set `OneLiveOptions.connectionText` and `reloadText` (defaults: `Connectingâ
 and `Reload`). Without JavaScript the hold attribute is never set, so the
 server-rendered content remains readable and the connection state stays hidden.
 
+Each page load without a resumable session starts one. `OneLiveOptions.maximumSessions`
+(default 4096, 0 for no bound) caps how many the server keeps: past it, a new page
+ends the session that has gone longest without a socket. A session with an open
+socket is never ended for room, and a new page is always served. A session with
+no page for 30 minutes ends as before.
+
 A full live stylesheet belongs to the current owner's atomic CSS table. Hello
 and restored-owner patches carry `cssReset: true` and the complete `css` string,
 including responsive rules. The host replaces `#one-css` before morphing the

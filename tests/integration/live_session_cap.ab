@@ -1,0 +1,61 @@
+import "abla/http"
+import "abla/net"
+import "abla/test"
+import "abla/text"
+import "abla/process/time"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
+import "../../src/kit/theme.ab"
+
+// OneLiveOptions.maximumSessions: a flood of page loads cannot grow the sessions past it (the session longest without a socket ends to
+// make room), a session with a socket is never ended for room, every page is still answered, and 0 means no bound.
+class CapProbe : OneApp {
+    fun render(var ui: Ui): Node = text("cap",style())
+    fun receive(kind: string,payload: string): void { return }
+}
+fun capFactory(request: HttpRequest,id: string): OneApp = CapProbe()
+fun capHandler(request: HttpRequest): HttpResponse = httpText("handler")
+fun capPage(request: HttpRequest): bool = request.path=="/"
+
+fun options(limit: int): OneLiveOptions = OneLiveOptions("Cap","en","#fff","/i","src/backends/web/host.js","",maximumSessions=limit)
+
+fun has(server: OneLiveServer,id: string): bool {
+    for(session in server.sessions) if(session.id==id) return true
+    false
+}
+
+fun main: int {
+    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),capHandler,capPage,capFactory,oneDefaultTheme(),options(5))
+    expect(server.listening(),"owned listener")
+    server.page(httpGet("/"))
+    val live=server.sessions[0].id
+    // The first session gets a socket, as its page's host would open it.
+    var socket=tcpConnectIpv4("127.0.0.1",server.listener.localPort(),1000)
+    socket.writeResult("GET /one/live?s=$live HTTP/1.1\r\nHost: local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+    socket.setNonblocking()
+    var reply=""
+    val deadline=monotonicMilliseconds()+2000
+    while(monotonicMilliseconds()<deadline && !reply.contains("101 Switching")){
+        server.step()
+        val chunk=socket.readResult(65536)
+        if(chunk.hasData())reply=reply+chunk.bytes
+    }
+    expect(reply.contains("101 Switching"),"the first session's socket is open")
+    // A flood of page loads: every one is answered, the sessions stay at the bound, the socketed one stays.
+    for(round in 0 until 40){
+        val response=server.page(httpGet("/"))
+        expectEqual(response.status,200,"page $round answered")
+        expect(server.sessions.size<=5,"page $round: ${server.sessions.size} sessions, bound 5")
+        expect(has(server,live),"page $round: the session with a socket is kept")
+    }
+    expectEqual(server.sessions.size,5,"the bound is reached, not passed")
+    socket.close()
+    // 0: no bound.
+    var unbounded=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),capHandler,capPage,capFactory,oneDefaultTheme(),options(0))
+    for(round in 0 until 12) unbounded.page(httpGet("/"))
+    expectEqual(unbounded.sessions.size,12,"maximumSessions 0 keeps every session")
+    testsPassed()
+}
