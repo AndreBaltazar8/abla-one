@@ -842,9 +842,11 @@ fun OneLiveServer.message(slot: int, payload: string): void {
     if (slots[slot].awaitingRecovery) { recoveryHello(slot, payload); return }
     val index = findSession(slots[slot].session)
     if (index < 0) return
-    val parsed = jsonParse(payload)
-    if (!parsed.succeeded) return
-    val m = parsed.value
+    val parsed = jsonDecode(payload)
+    val m = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return
+    }
     val persisted = oneRecoverySessions.get(sessions[index].id)
     val before = sessions[index].eventFrontier
     if (persisted != null) {

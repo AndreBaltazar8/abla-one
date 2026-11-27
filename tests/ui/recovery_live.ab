@@ -120,8 +120,7 @@ fun proofHandler(request: HttpRequest): HttpResponse {
     val lock = proofDirectory().child("business.lock").fileLock()
     if (!lock.tryHold()) { proofRelease(lock); return httpText("unavailable", 503) }
     val path = proofDirectory().child("business.json")
-    val parsed = jsonParse(path.readText())
-    val old = if (parsed.succeeded) parsed.value else jsonObject(["count", "seen"], [jsonInteger(0), jsonObject([], [])])
+    val old = (jsonDecode(path.readText()) as? JsonParsed)?.value ?? jsonObject(["count", "seen"], [jsonInteger(0), jsonObject([], [])])
     val seen = old.get("seen")
     val repeated = seen.has(operation)
     val count = if (repeated) old.getInt("count") else old.getInt("count") + 1
@@ -175,8 +174,7 @@ fun proofRawHandler(request: HttpRequest): HttpResponse {
     val row=proofLoad(session)
     if(!proofOwned(row,row.getString("owner"),oneParseInt(request.header("x-one-live-epoch"),0))){proofRelease(lock);return httpText("fenced",409)}
     val path=proofDirectory().child("raw-business.json")
-    val parsed=jsonParse(path.readText(),proofJsonLimits)
-    val old=if(parsed.succeeded)parsed.value else jsonObject(["count","seen"],[jsonInteger(0),jsonObject([],[])])
+    val old=(jsonDecode(path.readText(),proofJsonLimits) as? JsonParsed)?.value ?? jsonObject(["count","seen"],[jsonInteger(0),jsonObject([],[])])
     val repeated=old.get("seen").has(operation)
     val count=old.getInt("count")+(if(repeated)0 else 1)
     val next=jsonObject(["count","seen","bodyBase64","contentType","session","operation","handle"],[jsonInteger(count),proofWith(old.get("seen"),operation,jsonBoolean(true)),jsonString(base64Encode(request.body)),jsonString(request.header("content-type")),jsonString(session),jsonString(operation),jsonString(request.header("x-proof-handle"))])

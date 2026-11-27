@@ -45,13 +45,16 @@ class OneRemoteReply(val status: int, val kind: string, val message: string, val
 @noinline
 fun oneRemoteReply(response: OneResponse): OneRemoteReply {
     if (response.status == 410) {
-        val reason = jsonParse(response.body)
-        return OneRemoteReply(410, "retired", if (reason.succeeded) reason.value.asString() else response.body, jsonNull())
+        val reason = (jsonDecode(response.body) as? JsonParsed)?.value
+        return OneRemoteReply(410, "retired", reason?.asString() ?? response.body, jsonNull())
     }
     if (!response.ok()) return OneRemoteReply(response.status, "failed", if (response.error != "") response.error else response.body, jsonNull())
-    val parsed = jsonParse(response.body)
-    if (!parsed.succeeded) return OneRemoteReply(response.status, "failed", "not JSON", jsonNull())
-    OneRemoteReply(response.status, "ok", "", parsed.value)
+    val parsed = jsonDecode(response.body)
+    val value = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return OneRemoteReply(response.status, "failed", "not JSON", jsonNull())
+    }
+    OneRemoteReply(response.status, "ok", "", value)
 }
 
 // Validate before constructing any typed value. A malformed success never turns

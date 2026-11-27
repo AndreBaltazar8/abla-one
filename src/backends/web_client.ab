@@ -51,9 +51,12 @@ trusted fun oneClientRespond(pointer: int, length: int, create: (string) -> OneA
 fun oneClientMessage(input: string, create: (string) -> OneApp, theme: Theme, iconBase: string): string {
     // The page is the module's only peer; files and saved responses arrive
     // as large base64 strings, so the limits are JSON.parse's.
-    val parsed = jsonParse(input, jsonPermissiveLimits)
-    if (!parsed.succeeded || !parsed.value.isObject()) return "[]"
-    val m = parsed.value
+    val parsed = jsonDecode(input, jsonPermissiveLimits)
+    val m = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return "[]"
+    }
+    if (!m.isObject()) return "[]"
     val kind = m.getString("t")
     if (oneClientSessions.size == 0) {
         if (kind != "hello") return "[]"
@@ -149,9 +152,11 @@ fun oneClientRequestJson(r: OneRequest): Json {
 // A response saved to a file: the module keeps the bytes under a handle and
 // the app gets the file, as on the other targets.
 fun oneClientSaved(payload: string): string {
-    val parsed = jsonParse(payload, jsonPermissiveLimits)
-    if (!parsed.succeeded) return payload
-    val v = parsed.value
+    val parsed = jsonDecode(payload, jsonPermissiveLimits)
+    val v = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return payload
+    }
     val index = oneLiveQueueIndex("client")
     val bytes = base64Decode(v.getString("bodyBase64"))
     val handle = "file-${oneLiveQueueList[index].allocate()}"

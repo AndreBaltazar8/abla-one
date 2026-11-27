@@ -119,19 +119,23 @@ fun OneLiveServer.recoveryRefuse(slot: int, status: int): void {
 
 fun OneLiveServer.recoveryHello(slot: int, text: string): void {
     if (text.size > 16384) { recoveryRefuse(slot, 403); return }
-    val parsed = jsonParse(text)
+    val parsed = jsonDecode(text)
+    val message = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> { recoveryRefuse(slot, 403); return }
+    }
     val request = slots[slot].recoveryRequest
-    if (slots[slot].recoveryMessage != "" && parsed.succeeded && parsed.value.getString("t") == "viewport") {
-        val width = parsed.value.get("w")
+    if (slots[slot].recoveryMessage != "" && message.getString("t") == "viewport") {
+        val width = message.get("w")
         if (oneCheckpointCounter(width) && width.asInt() > 0 && width.asInt() <= 65536) {
-            val waiting = jsonParse(slots[slot].recoveryMessage)
-            if (waiting.succeeded) slots[slot].recoveryMessage = jsonStringify(oneRecoveryWith(waiting.value, "w", width))
+            val waiting = jsonDecode(slots[slot].recoveryMessage) as? JsonParsed
+            if (waiting != null) slots[slot].recoveryMessage = jsonStringify(oneRecoveryWith(waiting.value, "w", width))
         }
         return
     }
-    if (!parsed.succeeded || request == null || parsed.value.getString("t") != "hello" || !parsed.value.get("proof").isString()) { recoveryRefuse(slot, 403); return }
+    if (request == null || message.getString("t") != "hello" || !message.get("proof").isString()) { recoveryRefuse(slot, 403); return }
     val id = slots[slot].session
-    val proof = parsed.value.get("proof").asString()
+    val proof = message.get("proof").asString()
     if (!oneRecoveryIdentifier(proof)) { recoveryRefuse(slot, 403); return }
     val opened = recoveryOpen(request, id, proof, slot)
     if (opened.status == 202 || opened.status == 409) { slots[slot].recoveryMessage = text; return }
@@ -145,7 +149,7 @@ fun OneLiveServer.recoveryHello(slot: int, text: string): void {
     slots[slot].awaitingRecovery = false
     slots[slot].recoveryRequest = null
     slots[slot].recoveryMessage = ""
-    oneSessionMessage(sessions[index], theme, parsed.value)
+    oneSessionMessage(sessions[index], theme, message)
     state.batch.changed(true)
     return
 }

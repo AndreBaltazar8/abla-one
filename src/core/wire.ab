@@ -45,10 +45,14 @@ fun oneNodeJson(node: Node, var styles: array<Style>, var encoded: array<Json>, 
 class OneTree(val revision: int, val root: Node, val valid: bool)
 
 fun oneTreeParse(text: string): OneTree {
-    val parsed = jsonParse(text)
-    if (!parsed.succeeded || !parsed.value.isObject()) return OneTree(0, none(), false)
+    val parsed = jsonDecode(text)
+    val tree = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return OneTree(0, none(), false)
+    }
+    if (!tree.isObject()) return OneTree(0, none(), false)
     val styles: array<Style> = []
-    for (value in parsed.value.get("styles").values) {
+    for (value in tree.get("styles").values) {
         val entries: array<StyleEntry> = []
         var i = 0
         while (i + 3 < value.values.size) {
@@ -57,7 +61,7 @@ fun oneTreeParse(text: string): OneTree {
         }
         styles.append(Style(entries))
     }
-    OneTree(parsed.value.get("revision").asInt(), oneNodeParse(parsed.value.get("root"), styles), true)
+    OneTree(tree.get("revision").asInt(), oneNodeParse(tree.get("root"), styles), true)
 }
 
 fun oneNodeParse(value: Json, styles: array<Style>): Node {

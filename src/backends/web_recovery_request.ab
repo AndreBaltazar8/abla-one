@@ -90,9 +90,12 @@ fun oneRecoveryRawExpired(var raw: OneRecoveryRawRequest, now: int): bool {
     false
 }
 fun oneRecoveryRawAccept(var raw: OneRecoveryRawRequest, payload: string): bool {
-    val parsed=jsonParse(payload)
-    val value=parsed.value
-    if(!parsed.succeeded || !value.isObject() || !value.get("requestId").isNumber() || !value.get("requestId").asNumber().integer || !value.get("requestId").intAvailable() || value.getInt("requestId")!=raw.reading)return false
+    val parsed=jsonDecode(payload)
+    val value=when(parsed){
+        is JsonParsed->parsed.value
+        is JsonMalformed,is JsonLimitExceeded->return false
+    }
+    if(!value.isObject() || !value.get("requestId").isNumber() || !value.get("requestId").asNumber().integer || !value.get("requestId").intAvailable() || value.getInt("requestId")!=raw.reading)return false
     raw.completed.set(raw.reading,hexEncode(sha256(payload)))
     if(!value.get("status").isNumber() || !value.get("status").asNumber().integer || !value.get("status").intAvailable()){raw.done=true;raw.status=502;return true}
     if(value.getInt("status")!=200){raw.done=true;raw.status=if(value.getInt("status")>=400 && value.getInt("status")<=599)value.getInt("status")else 502;return true}

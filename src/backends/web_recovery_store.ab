@@ -102,9 +102,13 @@ val oneRecoverySessions: Map<string, OneRecoveryState> = Map()
 fun oneRecoveryCapture(id: string, text: string): bool {
     val state = oneRecoverySessions.get(id)
     if (state == null || text.size > oneRecoveryCheckpointLimit) return false
-    val parsed = jsonParse(text)
-    if (!parsed.succeeded || !parsed.value.isObject()) return false
-    state.draft = parsed.value
+    val parsed = jsonDecode(text)
+    val draft = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return false
+    }
+    if (!draft.isObject()) return false
+    state.draft = draft
     state.captured = true
     true
 }
@@ -165,8 +169,8 @@ fun oneRecoveryPickerBegin(id: string, request: int, kind: string): bool {
 fun oneRecoveryPickerEnd(var state: OneRecoveryState, request: int): void {
     state.pickers.remove(request)
     for (id in state.effects.keys()) {
-        val effect = jsonParse(state.effects.get(id) ?? "")
-        if (effect.succeeded && effect.value.getString("t") == "pick" && effect.value.getInt("id") == request) oneRecoveryEffectForget(state,id)
+        val effect = jsonDecode(state.effects.get(id) ?? "") as? JsonParsed
+        if (effect != null && effect.value.getString("t") == "pick" && effect.value.getInt("id") == request) oneRecoveryEffectForget(state,id)
     }
     return
 }

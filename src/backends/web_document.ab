@@ -316,17 +316,20 @@ fun oneWebNative(node: Node, theme: Theme, var css: OneCss, iconBase: string, pa
     val target = node.attr("target")
     val fallback = node.children[node.children.size - 1]
     if (target == "web" || target == "web-document") {
-        val props = jsonParse(node.attr("props"))
-        if (props.succeeded) return props.value.getString("html")
+        val props = jsonDecode(node.attr("props")) as? JsonParsed
+        if (props != null) return props.value.getString("html")
     }
     oneWebNode(fallback, theme, css, iconBase, path, parentKind)
 }
 
 fun oneWebRuns(runs: string): string {
-    val parsed = jsonParse(runs)
-    if (!parsed.succeeded) return ""
+    val parsed = jsonDecode(runs)
+    val value = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return ""
+    }
     var out = ""
-    for (run in parsed.value.values) {
+    for (run in value.values) {
         val kind = run.getString("kind")
         val value = oneHtmlEscape(run.getString("text"))
         out = if (kind == "mention") "$out<strong class=\"one-mention\">$value</strong>"

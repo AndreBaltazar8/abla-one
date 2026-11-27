@@ -157,15 +157,20 @@ class OneResponse(
     fun ok(): bool = valid && error == "" && status >= 200 && status < 300
     fun header(name: string): string = headers.getString(oneLowerAscii(name))
     fun json(): Json {
-        val parsed = jsonParse(body)
-        if (parsed.succeeded) parsed.value else jsonNull()
+        (jsonDecode(body) as? JsonParsed)?.value ?? jsonNull()
     }
 }
 
+private fun oneInvalidCompletion(): OneResponse =
+    OneResponse(0, 0, jsonObject([], []), "", "", OneFile("", "", -1, ""), "invalid completion", false)
+
 fun oneResponse(payload: string): OneResponse {
-    val parsed = jsonParse(payload)
-    if (!parsed.succeeded || !parsed.value.isObject()) return OneResponse(0, 0, jsonObject([], []), "", "", OneFile("", "", -1, ""), "invalid completion", false)
-    val v = parsed.value
+    val parsed = jsonDecode(payload)
+    val v = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return oneInvalidCompletion()
+    }
+    if (!v.isObject()) return oneInvalidCompletion()
     val valid = v.get("requestId").intAvailable() && v.get("status").intAvailable()
     val headers = if (v.get("headers").isObject()) v.get("headers") else jsonObject([], [])
     val file = if (v.get("file").isObject()) oneFileFrom(v.get("file")) else OneFile("", "", -1, "")
@@ -214,8 +219,7 @@ interface OneServices {
 // were plain strings, so a body that isn't JSON reads back as that string.
 fun oneStored(response: OneResponse): Json {
     if (response.status != 200) return jsonNull()
-    val parsed = jsonParse(response.body)
-    if (parsed.succeeded) parsed.value else jsonString(response.body)
+    (jsonDecode(response.body) as? JsonParsed)?.value ?? jsonString(response.body)
 }
 
 // Services that do nothing, for previews: every request gets id 0. Moves between

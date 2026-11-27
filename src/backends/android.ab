@@ -19,10 +19,14 @@ import "../core/routes.ab"
 // `requestId` and are delivered as kind "result"; other notifications carry
 // their own `kind` ("visibility", "openUrl", ...).
 fun oneAndroidPlatformKind(value: string): string {
-    val parsed = jsonParse(value)
-    if (!parsed.succeeded || !parsed.value.isObject()) return "unknown"
-    if (parsed.value.get("requestId").intAvailable()) return "result"
-    val kind = parsed.value.getString("kind")
+    val parsed = jsonDecode(value)
+    val json = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return "unknown"
+    }
+    if (!json.isObject()) return "unknown"
+    if (json.get("requestId").intAvailable()) return "result"
+    val kind = json.getString("kind")
     if (kind != "") kind else "unknown"
 }
 

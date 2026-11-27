@@ -51,9 +51,12 @@ fun oneCheckpointEffects(session: OneLiveSession): Json {
 
 fun oneCheckpointEffect(message: string): bool {
     if (message.size > 16384) return false
-    val parsed = jsonParse(message)
-    if (!parsed.succeeded || !parsed.value.isObject()) return false
-    val value = parsed.value
+    val parsed = jsonDecode(message)
+    val value = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return false
+    }
+    if (!value.isObject()) return false
     val kind = value.getString("t")
     if (kind == "forward") return value.keys.size == 1
     if (kind == "copy") return value.keys.size == 2 && value.get("text").isString()
@@ -155,9 +158,13 @@ fun oneCheckpointValid(value: Json): bool {
 
 fun oneCheckpointRead(text: string): Json? {
     if (text.size > oneRecoveryCheckpointLimit) return null
-    val parsed = jsonParse(text)
-    if (!parsed.succeeded || !oneCheckpointValid(parsed.value)) return null
-    parsed.value
+    val parsed = jsonDecode(text)
+    val value = when (parsed) {
+        is JsonParsed -> parsed.value
+        is JsonMalformed, is JsonLimitExceeded -> return null
+    }
+    if (!oneCheckpointValid(value)) return null
+    value
 }
 
 // Before the new factory runs, secureRead sees the durable server-only values;
