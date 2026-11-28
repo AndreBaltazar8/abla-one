@@ -97,7 +97,7 @@ fun oneRemoteBodyValue(var body: OneRemoteBody, key: string, value: Json): void 
 @noinline
 fun oneRemoteBodySend(body: OneRemoteBody, services: OneServices, base: string, route: string): int {
     val slash = if (base.size > 0 && base[base.size - 1] == 47) "" else "/"
-    services.send(oneRequest("POST", "$base${slash}one/$route").json(jsonObject(body.keys, body.values)))
+    services.send(oneRequest("POST", "$base${slash}one/$route").json(jsonObject(body.keys, body.values)).header("X-One-Call", "1"))
 }
 
 @noinline
@@ -114,9 +114,52 @@ fun oneRemoteAt(json: Json, index: int): Json = json.values[index]
 // What a route answers, on the server.
 class OneServerReply(val status: int, val body: string)
 
+// Who calls an `@server` route (decision #186). The generated route gets it from the HTTP request (src/server/caller.ab
+// builds it), never from the JSON arguments, so a client cannot claim an identity by argument. A route that is not
+// `@public` runs only when the server's authenticator returned a principal; an unknown caller is answered 401 before the
+// function runs, so a route that forgets to check fails closed. A function sees its caller by taking `caller: OneCaller`
+// as its first parameter, which the client contract leaves out. Plain strings here, so a client build that imports this
+// module carries no HTTP code.
+
+/// The identity an authenticator gives a request: `id` is the application's own name for the user, service or device.
+class OnePrincipal(val id: string)
+
+/// The caller of a route: the request's headers (names in lower case) and socket peer ("" in process), and the principal
+/// the authenticator found (null for an unknown caller, which only an `@public` route sees).
+class OneCaller(val principal: OnePrincipal?, val headerNames: array<string> = [], val headerValues: array<string> = [], val peer: string = "") {
+    /// A request header by name, in any case ("" when absent).
+    fun header(name: string): string {
+        val key = name.lowercase()
+        var index = 0
+        while (index < headerNames.size) {
+            if (headerNames[index] == key) return headerValues[index]
+            index = index + 1
+        }
+        ""
+    }
+    /// A cookie of the request ("" when absent).
+    fun cookie(name: string): string = oneCookieIn(header("cookie"), name)
+    /// Whether the authenticator recognised the caller.
+    fun known(): bool = principal != null
+}
+
+/// The value of cookie `name` in a Cookie header ("" when absent).
+fun oneCookieIn(header: string, name: string): string {
+    var start = 0
+    while (start < header.size) {
+        var end = start
+        while (end < header.size && header[end] != 59) end = end + 1
+        var part = header.slice(start, end)
+        while (part.size > 0 && part[0] == 32) part = part.slice(1, part.size)
+        if (part.size > name.size && part.slice(0, name.size + 1) == "$name=") return part.slice(name.size + 1, part.size)
+        start = end + 1
+    }
+    ""
+}
+
 fun <T> oneRemoteSend(services: OneServices, base: string, route: string, body: Json, decode: (Json) -> T, validate: (Json) -> bool): OneRemote<T> {
     val slash = if (base.size > 0 && base[base.size - 1] == 47) "" else "/"
-    OneRemote<T>(services.send(oneRequest("POST", "$base${slash}one/$route").json(body)), decode, validate)
+    OneRemote<T>(services.send(oneRequest("POST", "$base${slash}one/$route").json(body).header("X-One-Call", "1")), decode, validate)
 }
 
 // --- values to and from JSON (what the generated code calls) --------------------
@@ -552,6 +595,24 @@ compile fun oneRemoteLegacyJson(function: int): bool {
     false
 }
 
+// `caller: OneCaller` as the first parameter (src/server/caller.ab): the route fills it from the request, and the client
+// contract leaves it out.
+compile fun oneRemoteTakesCaller(function: int): bool =
+    compiler.parameterCount(function) > 0 && oneRemoteNormal(compiler.parameterType(function, 0)).endsWith("OneCaller")
+
+// The parameters that cross the network: all but the caller.
+compile fun oneRemoteFirstArgument(function: int): int = if (oneRemoteTakesCaller(function)) 1 else 0
+
+// `@public`: the route runs for an unknown caller too. Every other route needs a principal from the server's authenticator.
+compile fun oneRemoteIsPublic(function: int): bool {
+    var index = 0
+    while (index < compiler.annotationCount(function)) {
+        if (compiler.annotation(function, index) == "public") return true
+        index = index + 1
+    }
+    false
+}
+
 compile fun oneRemoteIsRetired(function: int): bool {
     var index = 0
     while (index < compiler.annotationCount(function)) {
@@ -601,7 +662,7 @@ compile fun oneRemoteWriteClients(var source: OneRemoteSource): void {
         var keys = ""
         var values = ""
         var fill = ""
-        var index = 0
+        var index = oneRemoteFirstArgument(function)
         while (index < compiler.parameterCount(function)) {
             val name = compiler.parameterName(function, index)
             val type = oneRemoteNormal(compiler.parameterType(function, index))
@@ -632,7 +693,7 @@ compile fun oneRemoteWriteRoutes(var source: OneRemoteSource): void {
     var part = 0
     for (function in functions) {
         if (cases.size > 65536) {
-            oneRemoteAppend(source, "fun ${oneRemoteDispatchName(part)}(route: string, body: Json): OneServerReply {\n    if (!body.isObject()) return OneServerReply(400, jsonStringify(jsonString(\"invalid arguments\")))\n$cases    ${oneRemoteDispatchName(part + 1)}(route, body)\n}\n")
+            oneRemoteAppend(source, "fun ${oneRemoteDispatchName(part)}(route: string, body: Json, caller: OneCaller): OneServerReply {\n    if (!body.isObject()) return OneServerReply(400, jsonStringify(jsonString(\"invalid arguments\")))\n$cases    ${oneRemoteDispatchName(part + 1)}(route, body, caller)\n}\n")
             part = part + 1
             cases = ""
         }
@@ -641,9 +702,10 @@ compile fun oneRemoteWriteRoutes(var source: OneRemoteSource): void {
         val retired = oneRemoteRetiredReason(function)
         if (oneRemoteIsRetired(function)) cases = "$cases    if (route == \"$route\") return OneServerReply(410, jsonStringify(jsonString(\"$retired\")))\n"
         else {
-            var arguments = ""
-            var checks = ""
-            var index = 0
+            var arguments = if (oneRemoteTakesCaller(function)) "caller" else ""
+            // Not @public: an unknown caller is answered before the function runs, so a route that forgets to check fails closed.
+            var checks = if (oneRemoteIsPublic(function)) "" else "        if (caller.principal == null) return OneServerReply(401, jsonStringify(jsonString(\"sign-in required\")))\n"
+            var index = oneRemoteFirstArgument(function)
             while (index < compiler.parameterCount(function)) {
                 val name = compiler.parameterName(function, index)
                 val type = oneRemoteNormal(compiler.parameterType(function, index))
@@ -660,7 +722,7 @@ compile fun oneRemoteWriteRoutes(var source: OneRemoteSource): void {
             cases = "$cases    if (route == \"$route\") {\n${checks}        return OneServerReply(200, jsonStringify($encode($full($arguments))))\n    }\n"
         }
     }
-    oneRemoteAppend(source, "fun ${oneRemoteDispatchName(part)}(route: string, body: Json): OneServerReply {\n    if (!body.isObject()) return OneServerReply(400, jsonStringify(jsonString(\"invalid arguments\")))\n$cases    OneServerReply(404, jsonStringify(jsonString(\"no such route\")))\n}\n")
+    oneRemoteAppend(source, "fun ${oneRemoteDispatchName(part)}(route: string, body: Json, caller: OneCaller): OneServerReply {\n    if (!body.isObject()) return OneServerReply(400, jsonStringify(jsonString(\"invalid arguments\")))\n$cases    OneServerReply(404, jsonStringify(jsonString(\"no such route\")))\n}\n")
     if (compilerFindFunction("oneServerAnswer") >= 0) oneRemoteAppend(source, "fun oneServerHandler(request: HttpRequest): HttpResponse = oneServerAnswer(request, oneServerDispatch)\n")
     return
 }

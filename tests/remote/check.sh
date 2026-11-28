@@ -31,7 +31,11 @@ check "lock holds no checkout paths" "$(grep -c __abla_module "$lock")" 0
 ONE_TEST_PORT_FILE="$work/port" "$work/server" & pid=$!
 for _ in $(seq 100); do [ -s "$work/port" ] && break; kill -0 "$pid" 2>/dev/null || exit 1; sleep 0.1; done
 port=$(cat "$work/port")
-post() { curl -s -m 5 -o "$work/out" -w '%{http_code}' -X POST -d "$2" "http://127.0.0.1:$port/one/$1"; }
+# The test server knows one caller: this bearer token (tests/remote/app/server.ab). anonymous() sends none.
+post() { curl -s -m 5 -o "$work/out" -w '%{http_code}' -H "Content-Type: application/json" -H "Authorization: Bearer test-token" -X POST -d "$2" "http://127.0.0.1:$port/one/$1"; }
+anonymous() { curl -s -m 5 -o "$work/out" -w '%{http_code}' -H "Content-Type: application/json" "${@:3}" -X POST -d "$2" "http://127.0.0.1:$port/one/$1"; }
+# A browser's call with the session cookie and no JSON content type: what another site's page can send without a preflight.
+browser() { curl -s -m 5 -o "$work/out" -w '%{http_code}' -H "Content-Type: text/plain" -H "Cookie: sid=test-session" "${@:3}" -X POST -d "$2" "http://127.0.0.1:$port/one/$1"; }
 check "route answers" "$(post orders '{"status":"open","limit":3}')" 200
 check "nested result" "$(grep -c '"sku":"a"' "$work/out")" 1
 check "fractional integer rejected" "$(post orders '{"status":"open","limit":23.5}')" 400
@@ -78,6 +82,20 @@ check "invalid input never executes application code" "$(cat "$work/out")" 0
 check "retired route" "$(post oldOrders '{}')" 410
 check "retired says why" "$(cat "$work/out")" '"use orders"'
 check "unknown route" "$(post nope '{}')" 404
+check "an unknown caller is refused" "$(anonymous orders '{"status":"open","limit":3}')" 401
+check "a forgotten check fails closed" "$(anonymous forgotten '{}')" 401
+check "and the route never ran" "$(grep -c PRIVATE_DATA "$work/out")" 0
+check "a wrong token is unknown" "$(anonymous whoAmI '{}' -H "Authorization: Bearer guess")" 401
+check "the caller comes from the request" "$(post whoAmI '{"caller":{"principal":{"id":"admin"}}}')" 200
+check "not from the arguments" "$(cat "$work/out")" '"tester"'
+check "an @public route runs for anyone" "$(anonymous greet '{"name":"ana"}')" 200
+check "it sees no principal then" "$(cat "$work/out")" '"hello ana"'
+check "a cross-site text/plain call with the cookie is refused" "$(browser whoAmI '{}' -H "Origin: https://evil.test" -H "Sec-Fetch-Site: cross-site")" 403
+check "also by its Origin alone" "$(browser whoAmI '{}' -H "Origin: https://evil.test")" 403
+check "and by Sec-Fetch-Site alone, even as JSON" "$(anonymous greet '{"name":"ana"}' -H "Sec-Fetch-Site: cross-site")" 403
+check "a text/plain call without X-One-Call is refused" "$(browser whoAmI '{}')" 403
+check "the same call from this origin with X-One-Call runs" "$(browser whoAmI '{}' -H "Origin: http://127.0.0.1:$port" -H "Sec-Fetch-Site: same-origin" -H "X-One-Call: 1")" 200
+check "as the cookie's caller" "$(cat "$work/out")" '"tester"'
 # Each request has curl's five-second deadline; a broken exponent parser cannot
 # hang this regression indefinitely, and this private server is stopped next.
 check "huge positive exponent refused promptly" "$(post decimalValue '{"value":1e1000000000}')" 400

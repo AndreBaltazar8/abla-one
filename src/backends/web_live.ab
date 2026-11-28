@@ -115,6 +115,18 @@ fun oneLiveNoStorage(): OneLiveStorage = OneLiveStorage({ request -> Map<string,
 class OneLiveBrowserContext(val cookie: string, val peerAddress: SocketPeerAddress? = null)
 class OneLiveCallContext(val requestId: int, val operation: string, val session: string, val epoch: int, val browser: OneLiveBrowserContext? = null)
 class OneLivePrivateRequests(val handle: (HttpRequest, OneLiveCallContext) -> HttpResponse)
+
+// An in-process call with the browser's own credentials: its cookie (replacing any the app's request set) and peer, so an
+// @server route sees the same caller as over HTTP (src/server/caller.ab). For OneLivePrivateRequests:
+//   OneLivePrivateRequests { request, context -> router.dispatch(oneLiveBrowserRequest(request, context)) }
+fun oneLiveBrowserRequest(request: HttpRequest, context: OneLiveCallContext): HttpRequest {
+    val browser = context.browser
+    if (browser == null) return request
+    val headers: array<HttpHeader> = []
+    for (h in request.headers) if (oneLowerAscii(h.name) != "cookie") headers.append(h)
+    if (browser.cookie != "") headers.append(HttpHeader("cookie", browser.cookie))
+    HttpRequest(request.method, request.path, request.query, headers, request.body, request.parameterNames, request.parameterValues, browser.peerAddress)
+}
 // Admission of actual browser HTTP only, before any page/asset/upload/defer or
 // WebSocket branch. Null admits; a response refuses and closes the connection.
 // Internal renderer RPC is governed by the application's private callback.

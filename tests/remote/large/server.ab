@@ -6,6 +6,7 @@ import "large_probe.ab"
 import "large_client.ab" as client
 fun main: int {
     val body = jsonObject(["first"],[jsonString("x")])
-    println("${oneServerDispatch("large1",body).status} ${oneServerDispatch("large200",body).status} ${oneServerDispatch("large400",body).status} ${oneServerDispatch("missing",body).status} ${oneServerDispatch("countValues",jsonParse("{\"values\":{\"a\":2.5}}").value).status}")
+    val caller = OneCaller(OnePrincipal("tester"))
+    println("${oneServerDispatch("large1",body,caller).status} ${oneServerDispatch("large200",body,caller).status} ${oneServerDispatch("large400",body,caller).status} ${oneServerDispatch("missing",body,caller).status} ${oneServerDispatch("countValues",jsonParse("{\"values\":{\"a\":2.5}}").value,caller).status}")
     0
 }

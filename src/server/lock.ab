@@ -35,7 +35,8 @@ compile fun oneLockPortable(line: string): string {
 
 compile fun oneLockRouteLine(function: int): string {
     var parameters = ""
-    var index = 0
+    // The caller is not on the wire (src/server/caller.ab): the lock records what a client sends.
+    var index = oneRemoteFirstArgument(function)
     while (index < compiler.parameterCount(function)) {
         val entry = "${compiler.parameterName(function, index)}: ${oneRemoteNormal(compiler.parameterType(function, index))}"
         parameters = if (parameters == "") entry else "$parameters, $entry"
@@ -174,7 +175,7 @@ compile fun oneServerLock(path: string): void {
         val route = oneRemoteRoute(compiler.functionName(function))
         if (oneRemoteIsRetired(function)) oneLockRemember(retired, route)
         current.append(oneLockRouteLine(function))
-        var index = 0
+        var index = oneRemoteFirstArgument(function)
         while (index < compiler.parameterCount(function)) {
             oneLockClassesIndexed(oneRemoteNormal(compiler.parameterType(function, index)), seen, current)
             index = index + 1

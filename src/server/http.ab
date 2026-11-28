@@ -1,15 +1,50 @@
 import "abla/http"
 import "abla/json"
 import "remote.ab"
+import "caller.ab"
+import "abla/text"
 
 // Serves the `@server` routes: `router.post("/one/:route", oneServerHandler)`, with
 // oneServerHandler generated for a program that imports its server modules normally.
-fun oneServerAnswer(request: HttpRequest, dispatch: (string, Json) -> OneServerReply): HttpResponse {
+// The caller comes from the request (src/server/caller.ab): a route that is not @public
+// runs only for a principal the installed authenticator returned.
+fun oneServerAnswer(request: HttpRequest, dispatch: (string, Json, OneCaller) -> OneServerReply): HttpResponse {
+    val refusal = oneServerCrossSite(request)
+    if (refusal != "") return httpJson(jsonStringify(jsonString(refusal)), 403)
     val parsed = jsonDecode(if (request.body == "") "{}" else request.body)
     val arguments = when (parsed) {
         is JsonParsed -> parsed.value
         is JsonMalformed, is JsonLimitExceeded -> return httpJson(jsonStringify(jsonString("not JSON")), 400)
     }
-    val reply = dispatch(request.routeParameter("route"), arguments)
+    val reply = dispatch(request.routeParameter("route"), arguments, oneServerCaller(request))
     httpJson(reply.body, reply.status)
+}
+
+// Why a call must not run, or "": the caller's cookie rides along on a request another site's page makes, so a route would run as
+// the victim. A page elsewhere can POST text/plain or a form without asking first; Content-Type application/json and X-One-Call
+// both need a CORS preflight, which the server never grants, so one of them is required (the client transport sends both). A
+// browser's Sec-Fetch-Site of cross-site, or an Origin that is not this host, is refused outright.
+fun oneServerCrossSite(request: HttpRequest): string {
+    if (request.header("sec-fetch-site").lowercase() == "cross-site") return "cross-site call refused"
+    val origin = request.header("origin")
+    if (origin != "" && oneServerOriginHost(origin) != request.header("host").lowercase()) return "cross-site call refused"
+    var media = request.header("content-type").lowercase()
+    var end = 0
+    while (end < media.size && media[end] != 59) end = end + 1
+    media = media.slice(0, end).trim()
+    if (media != "application/json" && request.header("x-one-call") != "1")
+        return "a call needs Content-Type: application/json or X-One-Call: 1"
+    ""
+}
+
+// The host (and port) of an Origin header, in lower case: "" for "null" or anything without a scheme.
+fun oneServerOriginHost(origin: string): string {
+    val lower = origin.lowercase()
+    var at = 0
+    while (at + 2 < lower.size && !(lower[at] == 58 && lower[at + 1] == 47 && lower[at + 2] == 47)) at = at + 1
+    if (at + 2 >= lower.size) return ""
+    var host = lower.slice(at + 3, lower.size)
+    var slash = 0
+    while (slash < host.size && host[slash] != 47) slash = slash + 1
+    host.slice(0, slash)
 }

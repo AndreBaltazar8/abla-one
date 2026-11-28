@@ -1,0 +1,41 @@
+import "abla/http"
+import "abla/text"
+import "remote.ab"
+
+// The server side of OneCaller (src/server/remote.ab, decision #186): the authenticator a server installs, and the caller a
+// generated route builds from the request.
+//
+//   oneServerAuthenticate { request -> if (validSession(oneCallerCookie(request, "sid"))) OnePrincipal(userOf(...)) else null }
+//
+// Set such a session cookie HttpOnly, Secure and SameSite=Lax (or Strict): oneServerAnswer refuses a cross-site call it can tell
+// (Sec-Fetch-Site, Origin, a body that is not JSON without X-One-Call), and SameSite keeps the browser from sending the cookie on
+// the rest.
+//
+//   @server
+//   fun orders(caller: OneCaller, status: string): array<Order> = ordersOf(caller.principal?.id ?? "", status)
+//
+//   @server
+//   @public
+//   fun signIn(name: string, password: string): bool = ...
+
+/// A cookie of `request` by name ("" when absent): for an authenticator, which reads the request's credentials.
+fun oneCallerCookie(request: HttpRequest, name: string): string = oneCookieIn(request.header("cookie"), name)
+
+private var oneServerAuthenticator: (HttpRequest) -> OnePrincipal? = { request -> null }
+
+/// Installs the server's authenticator: it reads a request's credentials (a session cookie, an Authorization header, the
+/// peer) and returns the principal, or null for a caller it does not know. Until one is installed every caller is unknown,
+/// so only `@public` routes run.
+fun oneServerAuthenticate(authenticate: (HttpRequest) -> OnePrincipal?): void {
+    oneServerAuthenticator = authenticate
+    return
+}
+
+/// The caller of `request`, as the generated routes see it.
+fun oneServerCaller(request: HttpRequest): OneCaller {
+    val names: array<string> = []
+    val values: array<string> = []
+    for (h in request.headers) { names.append(h.name.lowercase()); values.append(h.value) }
+    val peer = request.peerAddress
+    OneCaller(oneServerAuthenticator(request), names, values, if (peer == null) "" else peer.address)
+}

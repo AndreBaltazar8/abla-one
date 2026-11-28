@@ -110,6 +110,23 @@ more than 48 parts produces a named compile error even when no call is reachable
 no partial set of routes is accepted. The part cap leaves compiler module slots
 for other transforms. Split the contract or data shape if that bound is reached.
 
+## Who calls a route
+
+An `@server` route runs only for a caller the server's authenticator knows, unless
+it is marked `@public`; an unknown caller is answered 401 before the function runs.
+Install the authenticator once (`oneServerAuthenticate { request -> ... }` returns a
+`OnePrincipal` or null), and take `caller: OneCaller` as a route's first parameter
+to see the request and the principal. The client contract leaves that parameter
+out: the identity comes from the request's cookie or Authorization header, never
+from the arguments (src/server/caller.ab, SPEC §16). On the live server, use
+`oneLiveBrowserRequest` in `OneLivePrivateRequests` so an in-process call carries
+the browser's cookie. A call from another site is refused (403) before any route runs:
+`Sec-Fetch-Site: cross-site`, a foreign `Origin`, or a body that is neither
+`application/json` nor sent with `X-One-Call: 1`. Set a session cookie HttpOnly,
+Secure and SameSite=Lax or Strict. Behind a reverse proxy, keep the public `Host`
+(nginx: `proxy_set_header Host $host;`): the `Origin` check compares against it, so
+a proxy that rewrites `Host` to its upstream turns same-origin calls into 403s.
+
 ## Request decoding
 
 Generated server dispatch validates every supplied argument before calling the

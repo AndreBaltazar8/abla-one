@@ -1,4 +1,5 @@
 // A server module: the client test imports it as a contract only.
+import "../../../src/server/remote.ab"
 class Line(val sku: string, val count: int)
 class Page<T>(val items: array<T>, val next: string?)
 class Order(val id: int, val paid: bool, val lines: array<Line>, val note: string?, val tags: Map<string, string>)
@@ -58,3 +59,15 @@ fun recordedOrderCount(): int = recordedOrders
 
 @server
 fun optionalReply(enabled: bool): string? = if (enabled) "yes" else null
+
+// Who calls (decision #186): the caller comes from the request, never from the arguments.
+@server
+fun whoAmI(caller: OneCaller): string = caller.principal?.id ?? "nobody"
+
+@server
+@public
+fun greet(caller: OneCaller, name: string): string = if (caller.known()) "hello $name, ${caller.principal?.id ?? ""}" else "hello $name"
+
+// Neither @public nor a caller check: an unknown caller is still answered 401.
+@server
+fun forgotten(): string = "PRIVATE_DATA"

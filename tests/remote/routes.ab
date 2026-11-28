@@ -1,29 +1,51 @@
 import "abla/test"
 import "abla/json"
+import "abla/text"
 import "server/shop.ab" as shop
 import "../../src/server/remote.ab"
+
+// The generated routes see a caller the authenticator recognised, unless the test says otherwise.
+val tester = OneCaller(OnePrincipal("tester"))
+val anonymous = OneCaller(null)
+fun dispatch(route: string, body: Json): OneServerReply = oneServerDispatch(route, body, tester)
 
 // The generated routes, called directly (tests/remote/check.sh goes over HTTP).
 fun main: int {
     val body = jsonParse("{\"status\":\"open\",\"limit\":3}").value
-    val reply = oneServerDispatch("orders", body)
+    val reply = dispatch("orders", body)
     expectEqual(reply.status, 200, "orders")
     expectEqual(jsonParse(reply.body).value.get("next").asString(), "more", "nullable result")
     expectEqual(jsonParse(reply.body).value.get("items").at(0).get("lines").at(0).get("sku").asString(), "a", "nested result")
     expectEqual(jsonParse(reply.body).value.get("items").at(0).get("tags").get("status").asString(), "open", "map")
     expect(jsonParse(reply.body).value.get("items").at(0).get("note").isNull(), "null")
-    expectEqual(oneServerDispatch("ping", jsonObject([], [])).body, "\"pong\"", "no arguments")
-    val grown = jsonParse(oneServerDispatch("tree", jsonParse("{\"depth\":1}").value).body).value
+    expectEqual(dispatch("ping", jsonObject([], [])).body, "\"pong\"", "no arguments")
+    val grown = jsonParse(dispatch("tree", jsonParse("{\"depth\":1}").value).body).value
     expectEqual(grown.get("children").at(0).get("label").asString(), "leaf", "recursive shape")
-    expectEqual(oneServerDispatch("nope", jsonObject([], [])).status, 404, "unknown route")
+    expectEqual(dispatch("nope", jsonObject([], [])).status, 404, "unknown route")
     for (bad in ["{\"status\":false}", "{\"status\":null}", "{\"limit\":\"3\"}", "{\"limit\":null}", "[]"]) {
-        expectEqual(oneServerDispatch("orders", jsonParse(bad).value).status, 400, "bad primitive/root shape")
+        expectEqual(dispatch("orders", jsonParse(bad).value).status, 400, "bad primitive/root shape")
     }
     for (bad in ["{\"order\":[]}", "{\"order\":{\"paid\":1}}", "{\"order\":{\"lines\":{}}}", "{\"order\":{\"lines\":[null]}}", "{\"order\":{\"tags\":{\"a\":false}}}"]) {
-        expectEqual(oneServerDispatch("acceptOrder", jsonParse(bad).value).status, 400, "bad nested shape")
+        expectEqual(dispatch("acceptOrder", jsonParse(bad).value).status, 400, "bad nested shape")
     }
-    expectEqual(oneServerDispatch("orders", jsonObject([], [])).status, 200, "missing fields retain defaults")
-    expectEqual(oneServerDispatch("legacyJson", jsonParse("{\"payload\":false,\"limit\":\"7\"}").value).body, "\"0:\"", "explicit legacy adapter keeps old field coercion")
+    expectEqual(dispatch("orders", jsonObject([], [])).status, 200, "missing fields retain defaults")
+    expectEqual(dispatch("legacyJson", jsonParse("{\"payload\":false,\"limit\":\"7\"}").value).body, "\"0:\"", "explicit legacy adapter keeps old field coercion")
+
+    // The caller (decision #186): from the request, never the arguments; a route that is not @public refuses an unknown one.
+    expectEqual(dispatch("whoAmI", jsonObject([], [])).body, "\"tester\"", "a route sees its caller's principal")
+    expectEqual(dispatch("whoAmI", jsonParse("{\"caller\":{\"principal\":{\"id\":\"admin\"}}}").value).body, "\"tester\"", "an argument named caller is not the caller")
+    expectEqual(oneServerDispatch("whoAmI", jsonObject([], []), anonymous).status, 401, "an unknown caller is refused")
+    val forgotten = oneServerDispatch("forgotten", jsonObject([], []), anonymous)
+    expectEqual(forgotten.status, 401, "a route without a caller check still fails closed")
+    expect(!forgotten.body.contains("PRIVATE_DATA"), "and its function does not run")
+    expectEqual(oneServerDispatch("orders", jsonObject([], []), anonymous).status, 401, "existing routes are protected by default")
+    expectEqual(oneServerDispatch("greet", jsonParse("{\"name\":\"ana\"}").value, anonymous).body, "\"hello ana\"", "an @public route runs for anyone")
+    expectEqual(dispatch("greet", jsonParse("{\"name\":\"ana\"}").value).body, "\"hello ana, tester\"", "and sees a known caller")
+    expectEqual(oneServerDispatch("oldOrders", jsonObject([], []), anonymous).status, 410, "a retired route still says so")
+    val browser = OneCaller(null, ["cookie", "authorization"], ["theme=dark; sid=s1", "Bearer t"], "127.0.0.1")
+    expectEqual(browser.cookie("sid"), "s1", "a caller's cookie")
+    expectEqual(browser.cookie("si"), "", "a cookie name is matched whole")
+    expectEqual(browser.header("Authorization"), "Bearer t", "a header by name in any case")
 
     testsPassed()
 }

@@ -783,17 +783,18 @@ and anything else. A function clients may call is marked:
 
     // server/orders.ab
     import "abla/postgres"
+    import "abla-one/src/server/caller.ab"
 
     class Order(val id: int, val total: Money, val lines: array<Line>, val note: string?)
 
-    @server fun orders(session: Session, status: string): array<Order> { ... }
+    @server fun orders(caller: OneCaller, status: string): array<Order> { ... }
 
 A client imports the same file as a contract, and calls through `$remote`:
 
     // app/orders_screen.ab
     import contract "../server/orders.ab" as orders
 
-    pending = $remote(services, base, orders.orders(session, "open"))
+    pending = $remote(services, base, orders.orders("open"))
 
     // in `receive`, as with any service completion (§9):
     val response = oneResponse(payload)
@@ -822,8 +823,27 @@ A client imports the same file as a contract, and calls through `$remote`:
   Closures, resources and native handles can't cross a network, and are a compile
   error naming the field that holds one. Recursive shapes work too. Large bodies and files go through the
   services layer's existing file support.
-- **Authentication:** every route authenticates the session itself. Being marked
-  `@server` hides nothing: a client can call any route with any arguments.
+- **Who calls (decision #186):** the caller comes from the request, not from the
+  arguments. The server installs an authenticator,
+  `oneServerAuthenticate { request -> ... }`, that reads a request's credentials (a
+  session cookie, an Authorization header, the peer) and returns a `OnePrincipal`, or
+  null for a caller it does not know. A function that takes `caller: OneCaller` first
+  gets the request and that principal; the client contract leaves the parameter out,
+  and the client transport sends the credentials. **Deny by default:** a route not
+  marked `@public` is answered 401 for an unknown caller before its function runs, so a
+  route that forgets a check fails closed; with no authenticator installed only
+  `@public` routes run. An `@public` route may take `caller` too, to see a known caller.
+  What a principal may do (its orders, not someone else's) is still the function's
+  check. On the live server, an in-process call carries the browser's cookie and peer
+  through `OneLivePrivateRequests` and `oneLiveBrowserRequest`, so the route sees the
+  same caller as over HTTP. **Cross-site calls:** before any route runs, a call is
+  refused (403) when the browser says it is cross-site (`Sec-Fetch-Site`), when an `Origin`
+  is not the request's own host, or when its body is not `application/json` and it has no
+  `X-One-Call: 1` (another site's page could send that without a preflight, with the
+  victim's cookie); the client transport sends both. A session cookie should be HttpOnly,
+  Secure and SameSite=Lax or Strict. A reverse proxy must pass the public `Host` on
+  (`proxy_set_header Host $host`), or same-origin calls fail the `Origin` check. Being marked `@server` hides nothing else: a client can
+  call any route with any arguments.
 
 Both `pending.result(response)` and `$remoteDecode(reply, contract.route())`
 return `OneRemoteResult<T>`. `reply` can be an `OneRemoteReply` from

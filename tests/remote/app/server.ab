@@ -5,6 +5,7 @@ import "abla/compiler"
 import "../server/shop.ab" as shop
 import "../../../src/server/remote.ab"
 import "../../../src/server/http.ab"
+import "../../../src/server/caller.ab"
 import "../../../src/server/lock.ab"
 
 #compilerGrant("filesystem.read")
@@ -18,6 +19,9 @@ compile fun lock(): void {
 #compiler.transform(lock)
 
 fun main: int {
+    // The test's own credentials: an Authorization header with this bearer token, or the session cookie sid=test-session, is the
+    // principal "tester".
+    oneServerAuthenticate { request -> if (request.header("authorization") == "Bearer test-token" || oneCallerCookie(request, "sid") == "test-session") OnePrincipal("tester") else null }
     val router = httpRouter()
     router.post("/one/:route", oneServerHandler)
     var listener = tcpListen(testPort())
