@@ -4,7 +4,7 @@ import "abla/bytes"
 import "../../../abla-embedded/src/esp32/esp_idf_net.ab"
 import "../core/theme.ab"
 import "../raster/raster.ab"
-import "abla/runtime/memory"
+import "abla/memory"
 import "../../../abla-embedded/src/m5stack/papermono_board.ab"
 import "../../../abla-embedded/src/m5stack/papermono_gestures.ab"
 import "./epaper.ab"
@@ -148,8 +148,8 @@ trusted fun oneThinConnect(config: OneThinConfig): void {
 // Runs until the device powers off.
 trusted fun onePaperMonoRunThin(theme: Theme, icons: OneIconSource, config: OneThinConfig): void {
     // A safety net: memory is cleaned up while idle (see onePaperMonoLoop).
-    runtimeMemorySetCollectionGrowth(3145728)
-    runtimeMemorySetLimit(5242880)
+    memorySetCollectionGrowth(3145728)
+    memorySetLimit(5242880)
     val control = paperMonoOpen()
     if ((control|0) == 0) return
     onePaperMonoClear()
@@ -169,7 +169,7 @@ trusted fun onePaperMonoRunThin(theme: Theme, icons: OneIconSource, config: OneT
     state.onBand = { paperMonoGestureSample() }
     var shown = false
     var lastPoll = 0
-    var collected = runtimeMemoryLiveBytes()
+    var collected = memoryLiveBytes()
     while (true) {
         paperMonoGestureSample()
         val gesture = paperMonoGestureTake()
@@ -199,11 +199,11 @@ trusted fun onePaperMonoRunThin(theme: Theme, icons: OneIconSource, config: OneT
             shown = true
         }
         if (gesture == paperMonoGestureNone) {
-            val live = runtimeMemoryLiveBytes()
+            val live = memoryLiveBytes()
             if (live < collected) collected = live
             if (live > collected + 262144 && paperMonoGestureCell(paperMonoGestureDown) == 0) {
-                runtimeMemoryCollect()
-                collected = runtimeMemoryLiveBytes()
+                memoryCollect()
+                collected = memoryLiveBytes()
             }
             onePaperMonoPause(2)
         }

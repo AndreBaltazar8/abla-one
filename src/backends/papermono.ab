@@ -1,7 +1,7 @@
 import "../../../abla-embedded/src/esp32/sdk/raw_buffer.ab"
 import "epaper.ab"
 import "abla/io"
-import "abla/runtime/memory"
+import "abla/memory"
 import "../../../abla-embedded/src/esp32/abla_host_esp_idf.ab"
 import "../../../abla-embedded/src/m5stack/papermono_board.ab"
 import "../../../abla-embedded/src/m5stack/papermono_gestures.ab"
@@ -87,9 +87,9 @@ fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var po
     // Memory is cleaned up while idle (below). The runtime's own collection is a safety net
     // for work that outruns that: its threshold only moves when it runs itself, so one set
     // near the idle level would go off in the middle of a tap.
-    runtimeMemorySetCollectionGrowth(3145728)
+    memorySetCollectionGrowth(3145728)
     // Below the 6 MiB region, and it keeps reclaiming free memory in step.
-    runtimeMemorySetLimit(5242880)
+    memorySetLimit(5242880)
     val control = paperMonoOpen()
     if ((control|0) == 0) return
     onePaperMonoClear()
@@ -102,7 +102,7 @@ fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var po
     var started = onePaperMonoMilliseconds()
     onePaperMonoShow(session, state, oneEpaperRender(app, theme, state, icons))
     println("papermono: first frame in ${onePaperMonoMilliseconds() - started} ms")
-    var collected = runtimeMemoryLiveBytes()
+    var collected = memoryLiveBytes()
     while (true) {
         paperMonoGestureSample()
         val gesture = paperMonoGestureTake()
@@ -134,11 +134,11 @@ fun onePaperMonoLoop(var app: OneApp, theme: Theme, icons: OneIconSource, var po
         // Cleaning up memory takes 100-200 ms: do it while nothing is waiting and no finger
         // is down, so a tap does not pay for it.
         if (gesture == paperMonoGestureNone) {
-            val live = runtimeMemoryLiveBytes()
+            val live = memoryLiveBytes()
             if (live < collected) collected = live
             if (live > collected + 262144 && paperMonoGestureCell(paperMonoGestureDown) == 0) {
-                runtimeMemoryCollect()
-                collected = runtimeMemoryLiveBytes()
+                memoryCollect()
+                collected = memoryLiveBytes()
             }
             onePaperMonoPause(2)
         }
