@@ -11,6 +11,7 @@ import "../../src/core/node.ab"
 import "../../src/core/style.ab"
 import "../../src/kit/kit.ab"
 import "../../src/backends/web_recovery.ab"
+import "../../src/backends/web_live.ab"
 import "abla/http"
 
 class CheckpointApp(var label: string, var draft: string, var hits: int = 0) : OneApp {
@@ -105,11 +106,11 @@ fun main: int {
     expect(oneRecoveryPickerBegin("node-b", 41, "files") && oneRecoveryPickerBegin("node-b", 42, "profile") && oneRecoveryPickerBegin("node-b", 43, "emoji"), "four pending pickers can coexist")
     expect(!oneRecoveryPickerBegin("node-b", 44, "files"), "a fifth picker is refused before exposing another browser dialog")
     expect(oneRecoveryPickerBegin("node-b", 40, "files") && bState.pickers.keys().size == 4, "registering an existing picker does not consume capacity twice")
-    val original=httpRequest("GET","/one/live?s=synthetic","",[HttpHeader("X-One-Recovery-Claim","attacker"),HttpHeader("Cookie","test=1")])
+    val original=httpRequest("GET","/one/live","",[HttpHeader("Sec-WebSocket-Protocol","one-live, one-session.synthetic"),HttpHeader("X-One-Recovery-Claim","attacker"),HttpHeader("Cookie","test=1")])
     val firstClaim=oneRecoveryAttachRequest(original)
     val secondClaim=oneRecoveryAttachRequest(original)
     expect(firstClaim.header("x-one-recovery-claim").size==32 && oneRecoveryIdentifier(firstClaim.header("x-one-recovery-claim")) && firstClaim.header("x-one-recovery-claim")!=secondClaim.header("x-one-recovery-claim"),"every accepted socket gets a fresh server-generated attach identity")
-    expect(firstClaim.headers.size==2 && firstClaim.header("cookie")=="test=1","an app-supplied attach header is stripped while the actual browser identity is retained")
+    expect(firstClaim.headers.size==3 && firstClaim.header("cookie")=="test=1" && oneLiveRequestSession(firstClaim)=="synthetic","an app-supplied attach header is stripped while the actual browser identity is retained")
     oneRecoverySessions.remove("node-a")
     oneRecoverySessions.remove("node-b")
     testsPassed()

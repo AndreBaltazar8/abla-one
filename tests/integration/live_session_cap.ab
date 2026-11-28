@@ -34,7 +34,7 @@ fun main: int {
     val live=server.sessions[0].id
     // The first session gets a socket, as its page's host would open it.
     var socket=tcpConnectIpv4("127.0.0.1",server.listener.localPort(),1000)
-    socket.writeResult("GET /one/live?s=$live HTTP/1.1\r\nHost: local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+    socket.writeResult("GET /one/live HTTP/1.1\r\nHost: local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: one-live, one-session.$live\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
     socket.setNonblocking()
     var reply=""
     val deadline=monotonicMilliseconds()+2000

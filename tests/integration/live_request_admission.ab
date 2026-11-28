@@ -53,7 +53,7 @@ fun main: int {
         val reply=admissionExchange(server,"$method $path HTTP/1.1\r\nHost: local\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
         expect(reply.contains("403 Forbidden") && reply.contains("blocked"),"refused before built-in/ordinary routing: $path")
     }
-    val ws=admissionExchange(server,"GET /one/live?s=unknown HTTP/1.1\r\nHost: local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+    val ws=admissionExchange(server,"GET /one/live HTTP/1.1\r\nHost: local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: one-live, one-session.unknown\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
     expect(ws.contains("403 Forbidden") && !ws.contains("101 Switching"),"refused before WebSocket upgrade or unknown-session handling")
     val head=admissionExchange(server,"HEAD /ordinary HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
     expect(head.contains("403 Forbidden") && !head.contains("blocked"),"HEAD refusal omits response body")

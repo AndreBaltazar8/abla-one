@@ -62,7 +62,7 @@ fun main: int {
     expectEqual(innerHeaders[0],"","bootstrap cannot supply a private context header")
     val id=pageIds[0]
     var socket=tcpConnectIpv4("127.0.0.1",server.listener.localPort(),1000)
-    socket.writeResult("GET /one/live?s=$id HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nCookie: socket-cookie\r\n\r\n")
+    socket.writeResult("GET /one/live HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: one-live, one-session.$id\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nCookie: socket-cookie\r\n\r\n")
     socket.setNonblocking()
     var upgraded=false
     val deadline=monotonicMilliseconds()+2000

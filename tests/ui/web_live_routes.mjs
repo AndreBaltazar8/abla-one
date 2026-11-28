@@ -140,7 +140,7 @@ try {
     await other.goto(base + '/icons/nav_home.svg');
     await other.context().addCookies([{name: 'gallery_signed_out', value: '1', url: base}]);
     const refused = await other.evaluate((s) => new Promise((done) => {
-      const socket = new WebSocket(`ws://${location.host}/one/live?s=${s}`);
+      const socket = new WebSocket(`ws://${location.host}/one/live`, ['one-live', `one-session.${s}`]);
       socket.onclose = (e) => done(e.code);
       setTimeout(() => done(0), 3000);
     }), session);

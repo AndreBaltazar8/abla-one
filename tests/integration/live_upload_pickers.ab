@@ -21,7 +21,7 @@ fun uploadHandler(request: HttpRequest): HttpResponse = httpText("handler")
 fun uploadPage(request: HttpRequest): bool = request.path=="/"
 
 fun post(session: string,query: string,body: string,last: bool = false): HttpRequest =
-    httpParseRequest("POST /one/upload?s=$session&$query HTTP/1.1\r\nHost: local\r\nContent-Length: ${body.size}\r\n${if (last) "X-One-Last: 1\r\nX-One-Name: a.txt\r\n" else ""}\r\n$body")
+    httpParseRequest("POST /one/upload?$query HTTP/1.1\r\nHost: local\r\nX-One-Session: $session\r\nContent-Length: ${body.size}\r\n${if (last) "X-One-Last: 1\r\nX-One-Name: a.txt\r\n" else ""}\r\n$body")
 
 fun completions(session: string): int = oneLiveQueueList[oneLiveQueueIndex(session)].completions.size
 

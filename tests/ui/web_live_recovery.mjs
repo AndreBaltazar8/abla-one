@@ -184,7 +184,7 @@ try {
   await wait(()=>disabledConnections>0,'recovery socket reaches a node whose feature is disabled');
   await pause(250);
   check(navigations===1 && await page.getByRole('textbox').inputValue()==='ação 📝 249','a node with recovery disabled cannot downgrade a private session or erase its local draft');
-  const unavailableCookie=await fetch(`http://127.0.0.1:${nodes.get('off').port}/one/cookies?s=${boot.s}`,{method:'POST',headers:{'X-One-Proof':boot.proof}});
+  const unavailableCookie=await fetch(`http://127.0.0.1:${nodes.get('off').port}/one/cookies`,{method:'POST',headers:{'X-One-Session':boot.s,'X-One-Proof':boot.proof}});
   check(unavailableCookie.status===503,'a disabled node cannot report successful private cookie delivery through its legacy handler');
   socketNode='a';
   await wait(() => row().epoch >= 3 && page.evaluate(() => !document.documentElement.hasAttribute('data-one-offline')), 'node A recovers dead node B');
@@ -279,9 +279,9 @@ try {
   check(business.count === 1 && Object.keys(business.seen).length === 1, 'death after business commit before checkpoint replays one opaque operation key');
   check(navigations === 2 && await page.getByRole('textbox').inputValue() === 'outage burst 599', 'business replay preserves route, view and draft without page reload');
 
-  const foreign = await fetch(`${base}/one/cookies?s=${boot.s}`, {method: 'POST', headers: {'X-Test-User': 'bob', 'X-One-Proof': boot.proof}});
+  const foreign = await fetch(`${base}/one/cookies`, {method: 'POST', headers: {'X-One-Session': boot.s, 'X-Test-User': 'bob', 'X-One-Proof': boot.proof}});
   check(foreign.status === 403, 'foreign account cannot read cookie or recovery storage with another tab capability');
-  const tampered = await fetch(`${base}/one/cookies?s=${boot.s}`, {method: 'POST', headers: {'X-Test-User': 'alice', 'X-One-Proof': '0'.repeat(64)}});
+  const tampered = await fetch(`${base}/one/cookies`, {method: 'POST', headers: {'X-One-Session': boot.s, 'X-Test-User': 'alice', 'X-One-Proof': '0'.repeat(64)}});
   check(tampered.status === 403, 'tampered tab capability is refused');
 
   const rawContext = await browser.newContext();
@@ -298,7 +298,7 @@ try {
   fs.writeFileSync(path.join(directory, 'attach-conflict'), '1');
   await rawPage.evaluate(boot => new Promise(resolve => {
     window.rawFrames = [];
-    window.rawSocket = new WebSocket(`${location.origin.replace('http', 'ws')}/one/live?s=${boot.s}`);
+    window.rawSocket = new WebSocket(`${location.origin.replace('http', 'ws')}/one/live`, ['one-live', `one-session.${boot.s}`]);
     rawSocket.onmessage = message => rawFrames.push(JSON.parse(message.data));
     rawSocket.onopen = () => { rawSocket.send(JSON.stringify({t: 'hello', proof: boot.proof, r: boot.r, w: 1280})); resolve(); };
   }), rawBoot);
@@ -320,7 +320,7 @@ try {
   assert.match(endingOwner,/^[a-f0-9]{32}$/);
   fs.writeFileSync(path.join(directory, `end-session-${endingOwner}`), rawBoot.s);
   await wait(() => JSON.parse(fs.readFileSync(rawPath, 'utf8')).revoked, 'asynchronous end commits a durable tombstone');
-  const ended = await fetch(`${base}/one/cookies?s=${rawBoot.s}`, {method: 'POST', headers: {'X-Test-User': 'alice', 'X-One-Proof': rawBoot.proof}});
+  const ended = await fetch(`${base}/one/cookies`, {method: 'POST', headers: {'X-One-Session': rawBoot.s, 'X-Test-User': 'alice', 'X-One-Proof': rawBoot.proof}});
   check(ended.status === 403, 'an ended session cannot recover cookies using its old tab proof');
   await rawContext.close();
   console.log(`PASS recovery: ${proofs} checks`);
