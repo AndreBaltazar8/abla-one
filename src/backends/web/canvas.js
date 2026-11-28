@@ -239,8 +239,9 @@
   // --- connection -------------------------------------------------------------------
   const connect = () => {
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = new URL(`one/live?s=${encodeURIComponent(boot.s)}`, base);
-    socket = new WebSocket(`${scheme}//${url.host}${url.pathname}${url.search}`);
+    // The session id travels as a subprotocol, not in the URL: a browser cannot set a header on a WebSocket.
+    const url = new URL('one/live', base);
+    socket = new WebSocket(`${scheme}//${url.host}${url.pathname}${url.search}`, ['one-live', `one-session.${boot.s}`]);
     socket.onopen = () => {
       retry = 0;
       socket.send(JSON.stringify({t: 'hello', r: revision, w: innerWidth, h: innerHeight, e: entry.e}));
@@ -259,7 +260,7 @@
         revision = message.r;
       } else if (message.t === 'back') goBack(message.to);
       else if (message.t === 'forward') history.forward();
-      else if (message.t === 'cookies') fetch(`one/cookies?s=${encodeURIComponent(boot.s)}`, {method: 'POST', credentials: 'same-origin'});
+      else if (message.t === 'cookies') fetch('one/cookies', {method: 'POST', credentials: 'same-origin', headers: {'X-One-Session': boot.s}});
     };
     socket.onclose = (e) => {
       if (e.code === 1008) return location.reload();

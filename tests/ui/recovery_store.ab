@@ -227,7 +227,7 @@ class ProofUpload(val request: HttpRequest, val ticket: int)
 val proofUploads: array<ProofUpload> = []
 fun proofUpload(request: HttpRequest, ticket: int): bool { proofUploads.append(ProofUpload(request, ticket)); true }
 fun proofUploadResponse(request: HttpRequest): HttpResponse {
-    val id = request.queryParameter("s")
+    val id = oneLiveRequestSession(request)
     if (!oneRecoveryIdentifier(id)) return httpText("Denied", 403)
     val lock = proofDirectory().child("store.lock").fileLock()
     if (!lock.tryHold()) { proofRelease(lock); return httpText("Unavailable", 503) }

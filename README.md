@@ -63,6 +63,16 @@ ends the session that has gone longest without a socket. A session with an open
 socket is never ended for room, and a new page is always served. A session with
 no page for 30 minutes ends as before.
 
+A session id works like a password for its session, so the page keeps it out of
+URLs, which proxies and access logs record. `/one/upload` and `/one/cookies`
+carry it in an `X-One-Session` header. `/one/live` carries it as a WebSocket
+subprotocol, `one-session.<id>`, beside `one-live`, which the server answers,
+because a browser cannot set a header on a WebSocket. For one release the server
+still reads the `?s=` query that earlier host scripts send. A recovery store's
+`upload` reads the session with `oneLiveRequestSession(request)` rather than
+from the query. A proxy in front of the server must pass `X-One-Session` and
+`Sec-WebSocket-Protocol` through.
+
 A full live stylesheet belongs to the current owner's atomic CSS table. Hello
 and restored-owner patches carry `cssReset: true` and the complete `css` string,
 including responsive rules. The host replaces `#one-css` before morphing the

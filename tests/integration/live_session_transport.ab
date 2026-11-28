@@ -1,0 +1,95 @@
+import "abla/http"
+import "abla/net"
+import "abla/test"
+import "abla/text"
+import "abla/process/time"
+import "../../src/one_kit.ab"
+import "../../src/backends/web_live.ab"
+import "../../src/backends/web_session.ab"
+import "../../src/core/ui.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
+import "../../src/kit/theme.ab"
+
+// A session id is a credential: the page sends it outside the URL (X-One-Session on /one/upload and /one/cookies, a subprotocol on
+// /one/live), and the server still reads a ?s= query from pages of the previous release.
+class TransportProbe : OneApp {
+    fun render(var ui: Ui): Node = text("transport",style())
+    fun receive(kind: string,payload: string): void { return }
+}
+fun transportFactory(request: HttpRequest,id: string): OneApp = TransportProbe()
+fun transportHandler(request: HttpRequest): HttpResponse = httpText("handler")
+fun transportPage(request: HttpRequest): bool = request.path=="/"
+
+val upgradeHeaders = "Host: local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+
+// The server's answer to one /one/live upgrade.
+fun upgrade(var server: OneLiveServer,target: string,extra: string): string {
+    var socket=tcpConnectIpv4("127.0.0.1",server.listener.localPort(),1000)
+    socket.writeResult("GET $target HTTP/1.1\r\n$upgradeHeaders$extra\r\n")
+    socket.setNonblocking()
+    var reply=""
+    val deadline=monotonicMilliseconds()+2000
+    while(monotonicMilliseconds()<deadline && !reply.contains("\r\n\r\n")){
+        server.step()
+        val chunk=socket.readResult(65536)
+        if(chunk.hasData())reply=reply+chunk.bytes
+    }
+    // A few more steps, so a close frame or the attach lands.
+    for(i in 0 until 5){
+        server.step()
+        val chunk=socket.readResult(65536)
+        if(chunk.hasData())reply=reply+chunk.bytes
+    }
+    socket.close()
+    reply
+}
+
+fun connected(server: OneLiveServer,id: string): bool {
+    for(session in server.sessions) if(session.id==id) return session.connected
+    false
+}
+
+fun upload(headers: string,query: string): HttpRequest =
+    httpParseRequest("POST /one/upload?$query HTTP/1.1\r\nHost: local\r\n${headers}Content-Length: 0\r\n\r\n")
+
+fun main: int {
+    var server=oneLiveServer(Ipv4SocketAddress("127.0.0.1",0),transportHandler,transportPage,transportFactory,oneDefaultTheme(),OneLiveOptions("Transport","en","#fff","/i","src/backends/web/host.js",""))
+    expect(server.listening(),"owned listener")
+
+    // Where the id is read from: the header first, then a one-session. subprotocol, then (for old pages) ?s=.
+    expectEqual(oneLiveRequestSession(httpParseRequest("GET /one/cookies?s=old HTTP/1.1\r\nX-One-Session: new\r\n\r\n")),"new","the header wins over a query")
+    expectEqual(oneLiveRequestSession(httpParseRequest("GET /one/live HTTP/1.1\r\nSec-WebSocket-Protocol: one-live, one-session.abc\r\n\r\n")),"abc","the subprotocol names the session")
+    expectEqual(oneLiveRequestSession(httpParseRequest("GET /one/live?s=old HTTP/1.1\r\n\r\n")),"old","an old page's query still names it")
+    expectEqual(oneLiveRequestSession(httpParseRequest("GET /one/live HTTP/1.1\r\n\r\n")),"","nothing names no session")
+
+    // The page's subprotocols: the session attaches and the 101 chooses one-live.
+    server.page(httpGet("/"))
+    val first=server.sessions[server.sessions.size-1].id
+    val modern=upgrade(server,"/one/live","Sec-WebSocket-Protocol: one-live, one-session.$first\r\n")
+    expect(modern.contains("101 Switching"),"the socket opens")
+    expect(modern.contains("Sec-WebSocket-Protocol: one-live\r\n"),"the 101 chooses the page's subprotocol")
+    expect(connected(server,first),"the session named by the subprotocol is attached")
+
+    // An old page: ?s= and no subprotocols. It still attaches, and the 101 chooses none (the page offered none).
+    server.page(httpGet("/"))
+    val second=server.sessions[server.sessions.size-1].id
+    val legacy=upgrade(server,"/one/live?s=$second","")
+    expect(legacy.contains("101 Switching"),"an old page's socket opens")
+    expect(!legacy.contains("Sec-WebSocket-Protocol"),"no subprotocol is chosen when none was offered")
+    expect(connected(server,second),"the session named by the query is attached")
+
+    // A subprotocol naming no session attaches nothing.
+    server.page(httpGet("/"))
+    val third=server.sessions[server.sessions.size-1].id
+    upgrade(server,"/one/live","Sec-WebSocket-Protocol: one-live, one-session.${"0".repeat(32)}\r\n")
+    expect(!connected(server,third),"a wrong id attaches no session")
+
+    // /one/upload finds the session by its header (409: no such picker, rather than 404: no such session), and by ?s= from an old page.
+    expectEqual(server.upload(upload("X-One-Session: $first\r\n","id=7&kind=cancel")).status,409,"the header names the session")
+    expectEqual(server.upload(upload("","s=$first&id=7&kind=cancel")).status,409,"an old page's query names it")
+    expectEqual(server.upload(upload("","id=7&kind=cancel")).status,404,"no id, no session")
+    val picker=oneLiveServices(first).pickImage("profile")
+    expectEqual(server.upload(upload("X-One-Session: $first\r\n","id=$picker&kind=cancel")).status,204,"a picker is answered through the header")
+    testsPassed()
+}

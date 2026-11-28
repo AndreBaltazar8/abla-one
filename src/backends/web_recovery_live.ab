@@ -192,7 +192,7 @@ fun OneLiveServer.recoveryOpen(request: HttpRequest, id: string, proof: string, 
 
 fun OneLiveServer.recoveryCookies(request: HttpRequest): HttpResponse {
     if (request.method != "POST") return httpText("Method not allowed", 405)
-    val id = request.queryParameter("s")
+    val id = oneLiveRequestSession(request)
     val proof = request.header("x-one-proof")
     if (!oneRecoveryIdentifier(id) || !oneRecoveryIdentifier(proof)) return httpText("Session unavailable", 403)
     val loaded = recovery.inspect(request, id, proof)

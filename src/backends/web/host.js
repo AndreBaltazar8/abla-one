@@ -677,8 +677,9 @@
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), Math.min(120000, deadline - Date.now()));
         try {
-          const response = await fetch(`one/upload?s=${encodeURIComponent(boot.s)}&${query}`, {method: 'POST', body,
-            headers: {...headers, ...(boot.proof ? {'X-One-Proof': boot.proof, 'X-One-Upload': nonce} : {})},
+          // The session id goes in a header, never the URL, which proxies and access logs keep.
+          const response = await fetch(`one/upload?${query}`, {method: 'POST', body,
+            headers: {...headers, 'X-One-Session': boot.s, ...(boot.proof ? {'X-One-Proof': boot.proof, 'X-One-Upload': nonce} : {})},
             credentials: 'same-origin', redirect: 'error', signal: controller.signal});
           if (!boot.proof || ![502, 503, 504].includes(response.status) || attempt >= 15) {
             // The opaque handle is part of delivery too: losing the response
@@ -809,7 +810,7 @@
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), Math.min(10000, Math.max(1,deadline-Date.now())));
         try {
-          const response = await fetch(`one/cookies?s=${encodeURIComponent(boot.s)}${receipt ? '&receipt=1' : ''}`, {method: 'POST', credentials: 'same-origin', headers: boot.proof ? {'X-One-Proof': boot.proof} : {}, redirect: 'error', signal: controller.signal});
+          const response = await fetch(`one/cookies${receipt ? '?receipt=1' : ''}`, {method: 'POST', credentials: 'same-origin', headers: {'X-One-Session': boot.s, ...(boot.proof ? {'X-One-Proof': boot.proof} : {})}, redirect: 'error', signal: controller.signal});
           if(!boot.proof || ![502,503,504].includes(response.status) || attempt>=7 || Date.now()>=deadline)return response;
           await response.body?.cancel();
         } catch(error) { if(!boot.proof || attempt>=7 || Date.now()>=deadline)throw error; }
@@ -1005,8 +1006,9 @@
   const connect = () => {
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Relative to the page, so the app also works under a path prefix.
-    const url = new URL(`one/live?s=${encodeURIComponent(boot.s)}${boot.proof ? "&recovery=1" : ""}`, base);
-    socket = new WebSocket(`${scheme}//${url.host}${url.pathname}${url.search}`);
+    // The session id travels as a subprotocol, not in the URL: a browser cannot set a header on a WebSocket.
+    const url = new URL(`one/live${boot.proof ? "?recovery=1" : ""}`, base);
+    socket = new WebSocket(`${scheme}//${url.host}${url.pathname}${url.search}`, ['one-live', `one-session.${boot.s}`]);
     socket.onopen = () => {
       handshaking = true;
       // Only hello crosses the recovery boundary. No old control can run on

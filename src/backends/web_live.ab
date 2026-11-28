@@ -235,6 +235,36 @@ fun oneLiveScriptString(value: string): string {
 
 fun oneLiveSessionId(): string = hexEncode(secureRandomBytes(16).bytes)
 
+// The WebSocket subprotocol the page offers on /one/live, beside oneLiveSessionProtocolPrefix + its session id; the server answers it.
+val oneLiveProtocol = "one-live"
+val oneLiveSessionProtocolPrefix = "one-session."
+
+// The session a request names. A session id is a credential, so the page sends it outside the URL, which proxies and access logs
+// record: in X-One-Session for /one/upload and /one/cookies, and as a WebSocket subprotocol for /one/live (a browser cannot set a
+// header on a WebSocket). A ?s= query, which pages before this release send, is still read for one release.
+fun oneLiveRequestSession(request: HttpRequest): string {
+    val header = request.header("x-one-session")
+    if (header != "") return header
+    for (token in request.header("sec-websocket-protocol").split(",")) {
+        val trimmed = token.trim()
+        if (trimmed.startsWith(oneLiveSessionProtocolPrefix)) return trimmed.slice(oneLiveSessionProtocolPrefix.size, trimmed.size)
+    }
+    request.queryParameter("s")
+}
+
+// The 101 for /one/live, choosing the page's subprotocol when it offered one (a browser fails a handshake that offers subprotocols
+// and gets none back).
+fun oneLiveUpgradeResponse(request: HttpRequest): HttpResponse {
+    val response = webSocketUpgradeResponse(request)
+    var offered = false
+    for (token in request.header("sec-websocket-protocol").split(",")) if (token.trim() == oneLiveProtocol) offered = true
+    if (response.status != 101 || !offered) return response
+    val headers: array<HttpHeader> = []
+    for (header in response.headers) headers.append(header)
+    headers.append(HttpHeader("Sec-WebSocket-Protocol", oneLiveProtocol))
+    HttpResponse(101, headers, response.body)
+}
+
 // Native shared-store jobs use fresh IDs; keep OS entropy out of the Wasm session codec.
 fun oneRecoveryRawReadId(): int {
     // Fresh per attempt (including a new owner epoch). A consumed job cannot
@@ -541,9 +571,9 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
         }
     }
     if (request.path == "/one/live" && webSocketIsUpgradeRequest(request)) {
-        val id = request.queryParameter("s")
+        val id = oneLiveRequestSession(request)
         if(!recovery.enabled && request.queryParameter("recovery")=="1") {
-            queue(slot,webSocketUpgradeResponse(request).render())
+            queue(slot,oneLiveUpgradeResponse(request).render())
             queue(slot,webSocketEncodeFrame(webSocketClosePayload(1013,"recovery unavailable"),8))
             slots[slot].closing=true
             return
@@ -555,7 +585,7 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
             slots[slot].recoveryStarted = oneLiveNow()
             slots[slot].upgraded = true
             slots[slot].session = id
-            queue(slot, webSocketUpgradeResponse(request).render())
+            queue(slot, oneLiveUpgradeResponse(request).render())
             frames(slot)
             return
         }
@@ -563,7 +593,7 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
         val session = if (findSession(id) >= 0 && !sessions[findSession(id)].connected) findSession(id) else resumable(request, id)
         if (session < 0) {
             // The server restarted, the session expired or its credentials are gone: the page reloads.
-            queue(slot, webSocketUpgradeResponse(request).render())
+            queue(slot, oneLiveUpgradeResponse(request).render())
             queue(slot, webSocketEncodeFrame(webSocketClosePayload(1008, "unknown session"), 8))
             slots[slot].closing = true
             return
@@ -580,7 +610,7 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
         sessions[session].routeAnswer = sessions[session].routeFrontier
         slots[slot].upgraded = true
         slots[slot].session = id
-        queue(slot, webSocketUpgradeResponse(request).render())
+        queue(slot, oneLiveUpgradeResponse(request).render())
         frames(slot)
         return
     }
@@ -601,7 +631,7 @@ fun OneLiveServer.httpWithPeer(slot: int, peer: SocketPeerAddress?): void {
     }
     val defers = this.defers
     if (!oneLiveReserved(request.path) && defers(request, this.ticket(slot))) return
-    if (request.path == "/one/upload" && request.method == "POST" && recoveryRequired(request.queryParameter("s"))) {
+    if (request.path == "/one/upload" && request.method == "POST" && recoveryRequired(oneLiveRequestSession(request))) {
         val start = recovery.upload
         if (start(request, this.ticket(slot))) return
         queue(slot, httpText("Storage unavailable", 503).render())
@@ -639,7 +669,7 @@ val oneLivePickedImageLimit = 65536
 val oneLiveFileBytesLimit = 67108864
 
 fun OneLiveServer.upload(request: HttpRequest): HttpResponse {
-    val index = findSession(request.queryParameter("s"))
+    val index = findSession(oneLiveRequestSession(request))
     if (index < 0) return httpText("unknown session", 404)
     val id = oneParseInt(request.queryParameter("id"), 0)
     val kind = request.queryParameter("kind")
@@ -684,8 +714,8 @@ fun OneLiveServer.upload(request: HttpRequest): HttpResponse {
 // The cookies for a session's stored values, fetched by the page after the
 // session reports a change (`{"t":"cookies"}`).
 fun OneLiveServer.cookies(request: HttpRequest): HttpResponse {
-    if (recoveryRequired(request.queryParameter("s"))) return recoveryCookies(request)
-    val index = findSession(request.queryParameter("s"))
+    if (recoveryRequired(oneLiveRequestSession(request))) return recoveryCookies(request)
+    val index = findSession(oneLiveRequestSession(request))
     val headers: array<HttpHeader> = [HttpHeader("Cache-Control", "no-store")]
     if (index >= 0) for (line in sessionCookies(request, index)) headers.append(HttpHeader("Set-Cookie", line))
     HttpResponse(204, headers, "")
