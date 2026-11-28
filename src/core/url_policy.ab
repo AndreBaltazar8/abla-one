@@ -1,0 +1,43 @@
+import "abla/text"
+
+// Which link targets and style values the web backends write. An app's string can come from its users (a profile's website, a
+// chosen colour), so these checks hold for every value, not just ones that look hostile.
+
+// What a link whose URL would run script or carry a document becomes: it opens nothing.
+val oneUnsafeUrl = "about:invalid#one-unsafe-url"
+
+// A link target as the web backends write it: one whose scheme is javascript:, vbscript: or data: becomes oneUnsafeUrl. The scheme
+// is read as a browser reads it, in any case and with whitespace and control characters dropped (a browser drops leading ones and
+// tabs and newlines anywhere), so "JaVa\tScript:" is refused too. Other URLs, relative ones included, are kept as given.
+fun oneSafeUrl(url: string): string {
+    var scheme = ""
+    var i = 0
+    while (i < url.size && scheme.size < 16) {
+        val b = url[i]
+        if (b == 58) {
+            if (scheme == "javascript" || scheme == "vbscript" || scheme == "data") return oneUnsafeUrl
+            return url
+        }
+        // A character that cannot be in a scheme ends it: the URL is relative.
+        if (b == 47 || b == 63 || b == 35) return url
+        if (b > 32 && b != 127) {
+            scheme = "$scheme${url.slice(i, i + 1).lowercase()}"
+        }
+        i = i + 1
+    }
+    url
+}
+
+// A style value the web backends can write into a stylesheet: one with `<` (which could end the <style> element), `{`, `}` or `;`
+// (which could end the declaration or its rule and start others) or a line break is left out, with its declaration.
+fun oneSafeStyleValue(value: string): bool {
+    for (b in value) if (b == 60 || b == 123 || b == 125 || b == 59 || b == 10 || b == 13 || b == 12) return false
+    true
+}
+
+// An icon name as the web document writes it inside url('...') in a style attribute: one with a quote, a parenthesis, a backslash or
+// anything oneSafeStyleValue refuses could end the url() and add declarations, so it names no icon.
+fun oneSafeIconName(name: string): string {
+    for (b in name) if (b == 39 || b == 34 || b == 40 || b == 41 || b == 92) return ""
+    if (oneSafeStyleValue(name)) name else ""
+}

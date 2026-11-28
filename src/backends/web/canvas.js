@@ -181,6 +181,8 @@
     if (!hit) { if (editor) editor.blur(); return; }
     if (hit[0] === 'link') {
       if (hit[8].startsWith('#')) return;
+      // The server already writes such a target as about:invalid; a frame from an older server is held to the same rule here.
+      if (['javascript:', 'vbscript:', 'data:'].includes(new URL(hit[8], base).protocol)) return;
       // An external link opens in a new tab, as the document page's target=_blank does; this page stays.
       if (hit[9] === 'true') { open(new URL(hit[8], base).href, '_blank', 'noopener'); return; }
       followed = true; setTimeout(() => { followed = false; }, 1000); location.href = new URL(hit[8], base).href;

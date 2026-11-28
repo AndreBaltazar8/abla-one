@@ -1,0 +1,48 @@
+import "abla/test"
+import "abla/text"
+import "../../src/one.ab"
+import "../../src/backends/web_document.ab"
+import "../../src/core/node.ab"
+import "../../src/core/style.ab"
+import "../../src/core/url_policy.ab"
+import "../../src/layout/layout.ab"
+import "../../src/layout/paint.ab"
+import "../../src/kit/theme.ab"
+
+// An app's strings can come from its users. A link whose URL would run script (javascript:, vbscript:) or carry a document (data:)
+// opens nothing, in the document, its rich text and the canvas's frames; a style value or icon name that could end its declaration,
+// its rule or the <style> element is left out.
+fun main: int {
+    for (hostile in ["javascript:alert(1)", "JaVaScRiPt:alert(1)", " java\tscript:alert(1)", "\u0001javascript:alert(1)", "vbscript:x", "data:text/html,<script>x</script>", "DATA:,x"]) {
+        expectEqual(oneSafeUrl(hostile), oneUnsafeUrl, "refused: $hostile")
+    }
+    for (fine in ["https://example.com/a?b=javascript:1", "/route", "#top", "mailto:a@b.c", "page?x=data:1", "./javascript:1", "tel:+1"]) {
+        expectEqual(oneSafeUrl(fine), fine, "kept: $fine")
+    }
+
+    val runs = "[{\"kind\":\"link\",\"text\":\"t\",\"src\":\"javascript:alert(2)\"},{\"kind\":\"link\",\"text\":\"u\",\"src\":\"https://ok.example/\"}]"
+    val root = column(style(), [
+        link("javascript:alert(document.cookie)", style(), [text("site", style())]),
+        link("https://example.com/", style(), [text("fine", style())]),
+        rich(runs, style()),
+        text("styled", style().set("background", "red}</style><script>alert(3)</script><style>").set("color", "#123456")),
+        text("padded", style().set("paddingTop", "1;outline-offset:77px")),
+        text("sides", style().set("padding", "1;outline-offset:66px").set("paddingLeft", "2")),
+        icon("x');background:url(//evil", "", style())
+    ])
+    val page = oneWebDocument("t", "en", root, oneDefaultTheme(), "/i", "#fff")
+    expect(!page.contains("javascript:"), "no javascript: URL is written")
+    expectEqual(page.split("about:invalid#one-unsafe-url").size - 1, 2, "the link and the rich-text link open nothing")
+    expect(page.contains("href=\"https://example.com/\"") && page.contains("href=\"https://ok.example/\""), "other links are kept")
+    expect(!page.contains("<script>alert(3)"), "a style value cannot end the <style> element")
+    expect(page.contains("color:#123456"), "a plain style value is kept")
+    expect(!page.contains("77px"), "a value with ; adds no declaration")
+    expect(!page.contains("66px") && page.contains("padding-left:2px"), "a padding side read from an unsafe shorthand is left out, a safe one kept")
+    expect(!page.contains("evil"), "an icon name cannot end its url()")
+
+    // The canvas's frame carries the link's target in its hit region.
+    val frame = oneFrameJson(onePaintFrame(oneLayout(root, oneDefaultTheme(), "web", 400, 800, Map()), 400, 800))
+    expect(!frame.contains("javascript:"), "the frame carries no javascript: target")
+    expect(frame.contains(oneUnsafeUrl) && frame.contains("https://example.com/"), "the frame's links: refused and kept")
+    testsPassed()
+}

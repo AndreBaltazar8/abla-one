@@ -4,6 +4,7 @@ import "../one.ab"
 import "../core/node.ab"
 import "../core/theme.ab"
 import "../core/routes.ab"
+import "../core/url_policy.ab"
 
 // The `web-document` target, server-side rendering (M1). Each resolved
 // declaration becomes one atomic class (`.o12{gap:8px}`), deduplicated across
@@ -222,9 +223,9 @@ fun oneWebNodeFresh(node: Node, outer: Theme, var css: OneCss, iconBase: string,
     val tag = if (node.attr("tag") == "p" && node.kind != "text" && node.kind != "rich" && !oneWebPhrasing(node)) "" else oneWebTag(node.attr("tag"))
     when (node.kind) {
         "text" -> "<${if (tag != "") tag else "span"} $common$selected>${oneHtmlEscape(node.attr("text"))}</${if (tag != "") tag else "span"}>"
-        "link" -> "<a $common href=\"${oneHtmlEscape(node.attr("href"))}\"${if (node.attr("onPress") != "") " data-one-press=\"${node.attr("onPress")}\"" else ""}${if (node.attr("route") == "true") " data-one-route" else ""}$selected${if (node.attr("external") == "true") " target=\"_blank\" rel=\"noopener\"" else ""}>$inner</a>"
+        "link" -> "<a $common href=\"${oneHtmlEscape(oneSafeUrl(node.attr("href")))}\"${if (node.attr("onPress") != "") " data-one-press=\"${node.attr("onPress")}\"" else ""}${if (node.attr("route") == "true") " data-one-route" else ""}$selected${if (node.attr("external") == "true") " target=\"_blank\" rel=\"noopener\"" else ""}>$inner</a>"
         "rich" -> "<span $common>${oneWebRuns(node.attr("runs"))}</span>"
-        "icon" -> "<span $common role=\"img\" aria-label=\"${oneHtmlEscape(node.attr("label"))}\" style=\"--i:url('${oneHtmlEscape(iconBase)}/${oneHtmlEscape(node.attr("name"))}.svg')\"></span>"
+        "icon" -> "<span $common role=\"img\" aria-label=\"${oneHtmlEscape(node.attr("label"))}\" style=\"--i:url('${oneHtmlEscape(iconBase)}/${oneHtmlEscape(oneSafeIconName(node.attr("name")))}.svg')\"></span>"
         "image" -> "<img $common src=\"${oneHtmlEscape(oneWebImageSource(node, iconBase))}\" alt=\"${oneHtmlEscape(node.attr("label"))}\">"
         "bitmap" -> oneWebBitmap(node, common)
         "popover" -> "<div $common$selected>${oneWebPopover(node, theme, css, iconBase, own)}</div>"
@@ -333,7 +334,7 @@ fun oneWebRuns(runs: string): string {
         val kind = run.getString("kind")
         val value = oneHtmlEscape(run.getString("text"))
         out = if (kind == "mention") "$out<strong class=\"one-mention\">$value</strong>"
-            else if (kind == "link") "$out<a href=\"${oneHtmlEscape(run.getString("src"))}\">$value</a>"
+            else if (kind == "link") "$out<a href=\"${oneHtmlEscape(oneSafeUrl(run.getString("src")))}\">$value</a>"
             else if (kind == "emoji" && run.getString("src") != "") "$out<img class=\"one-emoji\" src=\"${oneHtmlEscape(run.getString("src"))}\" alt=\"$value\" width=\"20\" height=\"20\">"
             else "$out$value"
     }
@@ -353,6 +354,9 @@ fun oneWebDeclarations(node: Node, r: Resolved, state: string, parentKind: strin
             if (!name.startsWith(p)) continue
             prop = name.slice(p.size, name.size)
         }
+        // A value that could end its declaration, its rule or the <style> element is left out (oneSafeStyleValue), as is a property name
+        // that could. Padding and borders read other keys below; those values are checked there.
+        if (!oneSafeStyleValue(prop) || !oneSafeStyleValue(r.get(name))) continue
         // Shorthands and longhands would race in atomic CSS, so padding is
         // always written as four sides and borders carry their colour.
         if (prop == "padding" || prop.startsWith("padding")) {
@@ -362,7 +366,7 @@ fun oneWebDeclarations(node: Node, r: Resolved, state: string, parentKind: strin
                     val own = r.get("${p}padding$side")
                     val all = r.get("${p}padding")
                     val value = if (own != "") own else all
-                    if (value != "") out.append("padding-${oneLower(side)}:${value}px")
+                    if (value != "" && oneSafeStyleValue(value)) out.append("padding-${oneLower(side)}:${value}px")
                 }
             }
             continue
@@ -373,7 +377,8 @@ fun oneWebDeclarations(node: Node, r: Resolved, state: string, parentKind: strin
             continue
         }
         val v = r.get(name)
-        val color = if (r.get("${p}borderColor") != "") r.get("${p}borderColor") else if (r.get("borderColor") != "") r.get("borderColor") else "currentColor"
+        val named = if (r.get("${p}borderColor") != "") r.get("${p}borderColor") else r.get("borderColor")
+        val color = if (named != "" && oneSafeStyleValue(named)) named else "currentColor"
         val decl = if (prop == "border" || prop == "borderTop" || prop == "borderBottom" || prop == "borderLeft" || prop == "borderRight")
             "${if (prop == "border") "border" else if (prop == "borderTop") "border-top" else if (prop == "borderBottom") "border-bottom" else if (prop == "borderLeft") "border-left" else "border-right"}:${v}px solid $color"
             else if (prop == "align" && node.kind == "stack") "place-items:${oneFlexValue(v)}"
